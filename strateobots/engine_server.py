@@ -236,6 +236,7 @@ class SimulationNotFound(web.HTTPError):
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
+    parser.add_argument('--static-dir', required=True)
     parser.add_argument('--port', '-P', default=9999, type=int)
     parser.add_argument('--max-queue', '-Q', default=10, type=int)
     parser.add_argument('--expire-time', '-E', default=7200, type=int)
@@ -248,10 +249,12 @@ def main(argv=None):
                         expire_time=args.expire_time,
                         delay=args.delay)
     initargs = dict(serverstate=state)
+    fileserver_args = dict(path=args.static_dir, default_filename='index.html')
     app = web.Application([
-        ('/simulation', EnqueueSimulationHandler, initargs),
-        ('/simulation/([0-9a-f]+)', SimulationStatusHandler, initargs),
-        ('/simulation/([0-9a-f]+)/data', SimulationDataHandler, initargs),
+        ('/api/v1/simulation', EnqueueSimulationHandler, initargs),
+        ('/api/v1/simulation/([0-9a-f]+)', SimulationStatusHandler, initargs),
+        ('/api/v1/simulation/([0-9a-f]+)/data', SimulationDataHandler, initargs),
+        ('/(.*)', web.StaticFileHandler, fileserver_args)
     ])
     app.listen(args.port)
     ioloop.IOLoop.instance().start()
