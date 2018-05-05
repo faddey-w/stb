@@ -1,9 +1,13 @@
 import argparse
 import json
+import logging
 import random
 import textwrap
 from tornado import web, gen, ioloop
 from .engine import StbEngine
+
+
+log = logging.getLogger(__name__)
 
 
 class schema:
@@ -71,6 +75,7 @@ class ServerState:
 
     def add_request(self, **params) -> 'str':
         sim_id, simul = self._make_simulation(**params)
+        log.info('ENQUEUE simulation params=%s -> %r', params, sim_id)
         if self._currently_runs:
             if len(self._request_queue) >= self.max_queue:
                 raise RequestQueueIsFull()
@@ -104,6 +109,7 @@ class ServerState:
     @gen.coroutine
     def _run_simulation(self, sim_id):
         # this is CPU-intensive, so yield between each tick
+        log.info('RUN simulation %r', sim_id)
         self._currently_runs = True
         simul = self._simulations[sim_id]
         while not simul.engine.is_finished and not simul.cancelled:
@@ -119,6 +125,7 @@ class ServerState:
     @gen.coroutine
     def _run_expiration(self, sim_id):
         yield gen.sleep(self.expire_time)
+        log.info('EXPIRE simulation %r', sim_id)
         self._simulations.pop(sim_id)
 
 
@@ -233,7 +240,9 @@ def main(argv=None):
     parser.add_argument('--max-queue', '-Q', default=10, type=int)
     parser.add_argument('--expire-time', '-E', default=7200, type=int)
     parser.add_argument('--delay', '-D', default=5, type=int)
+    parser.add_argument('--log', '-L', default='info')
     args = parser.parse_args(argv)
+    logging.basicConfig(level=args.log.upper())
 
     state = ServerState(max_queue=args.max_queue,
                         expire_time=args.expire_time,
