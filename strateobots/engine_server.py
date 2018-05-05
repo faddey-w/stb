@@ -242,6 +242,7 @@ def main(argv=None):
     parser.add_argument('--expire-time', '-E', default=7200, type=int)
     parser.add_argument('--delay', '-D', default=5, type=int)
     parser.add_argument('--log', '-L', default='info')
+    parser.add_argument('--debug', action='store_true')
     args = parser.parse_args(argv)
     logging.basicConfig(level=args.log.upper())
 
@@ -255,7 +256,7 @@ def main(argv=None):
         ('/api/v1/simulation/([0-9a-f]+)', SimulationStatusHandler, initargs),
         ('/api/v1/simulation/([0-9a-f]+)/data', SimulationDataHandler, initargs),
         ('/(.*)', web.StaticFileHandler, fileserver_args)
-    ])
+    ], debug=args.debug)
     app.listen(args.port)
     ioloop.IOLoop.instance().start()
 
