@@ -13,15 +13,15 @@ log = logging.getLogger(__name__)
 class schema:
 
     @staticmethod
-    def tank(tank):
+    def bot(bot):
         return {
-            'type': tank.type.code,
-            'x': tank.x,
-            'y': tank.y,
-            'orientation': tank.orientation,
-            'tower_orientation': tank.tower_orientation,
-            'hp': tank.hp,
-            'load': tank.load,
+            'type': bot.type.code,
+            'x': bot.x,
+            'y': bot.y,
+            'orientation': bot.orientation,
+            'tower_orientation': bot.tower_orientation,
+            'hp': bot.hp,
+            'load': bot.load,
         }
 
     @staticmethod
@@ -48,9 +48,9 @@ class SimulationState:
         self.ticks_data.append(self._render_state())
 
     def _render_state(self):
-        tanks_data = [
-            schema.tank(tank)
-            for tank in self.engine.tanks
+        bots_data = [
+            schema.bot(bot)
+            for bot in self.engine.bots
         ]
         bullets_data = [
             schema.bullet(bullet)
@@ -60,7 +60,7 @@ class SimulationState:
             schema.bullet(ray)
             for ray in self.engine.rays
         ]
-        return dict(tanks=tanks_data, bullets=bullets_data, rays=rays_data)
+        return dict(bots=bots_data, bullets=bullets_data, rays=rays_data)
 
 
 class ServerState:
@@ -171,8 +171,8 @@ class EnqueueSimulationHandler(_BaseHandler):
          - width: int - width of simulation field
          - height: int - height of simulation field
         """
-        w = int(self.get_query_argument('width'))
-        h = int(self.get_query_argument('height'))
+        w = int(self.get_body_argument('width'))
+        h = int(self.get_body_argument('height'))
         sim_id = self.state.add_request(width=w, height=h)
         self.api_respond({'id': sim_id}, http_code=201)
 

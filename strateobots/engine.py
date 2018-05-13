@@ -8,7 +8,7 @@ class StbEngine:
     def __init__(self, world_width, world_height):
         self.world_width = world_width
         self.world_height = world_height
-        self.tanks = {}
+        self.bots = {}
         self.rays = []
         self.bullets = []
         self.nticks = 0
@@ -16,29 +16,29 @@ class StbEngine:
 
         import random
         for team in [0xFF0000, 0x00FF00, 0x0000FF]:
-            for ttype in TankType.__members__.values():
+            for ttype in BotType.__members__.values():
                 for i in range(3):
-                    tank = TankModel(
-                        id=len(self.tanks),
+                    bot = BotModel(
+                        id=len(self.bots),
                         type=ttype,
                         team=team,
                         x=0, y=0,
                         orientation=0,
                     )
-                    tank.hp = random.random() * tank.type.max_hp
-                    tank.load = random.random()
-                    self.tanks[tank.id] = tank
-                    if ttype == TankType.Sniper:
+                    bot.hp = random.random() * bot.type.max_hp
+                    bot.load = random.random()
+                    self.bots[bot.id] = bot
+                    if ttype == BotType.Sniper:
                         self.rays.append(BulletModel(
-                            type=TankType.Sniper,
-                            origin_id=tank.id,
+                            type=BotType.Sniper,
+                            origin_id=bot.id,
                             x=0, y=0, orientation=0,
                             range=3000
                         ))
         for i in range(75):
             self.bullets.append(BulletModel(
                 origin_id=None,
-                type=TankType.Heavy if i % 2 == 0 else TankType.Raider,
+                type=BotType.Heavy if i % 2 == 0 else BotType.Raider,
                 orientation=0,
                 x=random.random()*world_width,
                 y=random.random()*world_height,
@@ -46,21 +46,21 @@ class StbEngine:
             ))
 
     def tick(self):
-        ntanks = len(self.tanks)
+        nbots = len(self.bots)
         global_time = self.nticks / self.ticks_per_sec
         radius = 0.3 * min(self.world_width, self.world_height)
-        for i, tank in enumerate(self.tanks.values()):
-            time = global_time + i * 2 * pi / ntanks
-            tank.x = radius * cos(time)
-            tank.y = radius * sin(time)
-            tank.orientation = time
-            tank.tower_orientation = 2.5 * time
+        for i, bot in enumerate(self.bots.values()):
+            time = global_time + i * 2 * pi / nbots
+            bot.x = radius * cos(time)
+            bot.y = radius * sin(time)
+            bot.orientation = time
+            bot.tower_orientation = 2.5 * time
         for ray in self.rays:
-            tank = self.tanks[ray.origin_id]
-            angle = tank.orientation + tank.tower_orientation
-            tower_shift = vec_rotate(0, -12, tank.orientation)
+            bot = self.bots[ray.origin_id]
+            angle = bot.orientation + bot.tower_orientation
+            tower_shift = vec_rotate(0, -12, bot.orientation)
             ray_start_shift = vec_rotate(53, 0, angle)
-            x, y = vec_sum((tank.x, tank.y), tower_shift, ray_start_shift)
+            x, y = vec_sum((bot.x, bot.y), tower_shift, ray_start_shift)
             ray.x = x
             ray.y = y
             ray.orientation = angle
@@ -75,8 +75,8 @@ class StbEngine:
         return self.nticks >= 3000
 
 
-TankTypeProperties = collections.namedtuple(
-    'TankTypeProperties',
+BotTypeProperties = collections.namedtuple(
+    'BotTypeProperties',
     [
         'code',
         'max_hp',
@@ -84,7 +84,7 @@ TankTypeProperties = collections.namedtuple(
         'move_ahead_speed',  # points / sec
         'move_back_speed',  # points / sec
         'rot_speed',  # radian / sec
-        'tower_rot_speed',  # radian / sec
+        'gun_rot_speed',  # radian / sec
         'shots_ray',  # boolean; all rays beam during 1 sec
         'shot_range',
         'damage',  # per-shot or per-second if ray
@@ -92,47 +92,47 @@ TankTypeProperties = collections.namedtuple(
 )
 
 
-class TankType(enum.Enum):
+class BotType(enum.Enum):
 
-    Heavy = TankTypeProperties(
+    Heavy = BotTypeProperties(
         code=1,
         max_hp=1000,
         cd_period=5,
         move_ahead_speed=70,
         move_back_speed=60,
         rot_speed=pi / 3,
-        tower_rot_speed=2 * pi / 3,
+        gun_rot_speed=2 * pi / 3,
         shots_ray=False,
         shot_range=250,
         damage=120,
     )
-    Raider = TankTypeProperties(
+    Raider = BotTypeProperties(
         code=2,
         max_hp=400,
         cd_period=1,
         move_ahead_speed=160,
         move_back_speed=30,
         rot_speed=2 * pi / 3,
-        tower_rot_speed=2 * pi,
+        gun_rot_speed=2 * pi,
         shots_ray=False,
         shot_range=200,
         damage=45,
     )
-    Sniper = TankTypeProperties(
+    Sniper = BotTypeProperties(
         code=3,
         max_hp=250,
         cd_period=10,
         move_ahead_speed=80,
         move_back_speed=40,
         rot_speed=pi / 6,
-        tower_rot_speed=pi / 3,
+        gun_rot_speed=pi / 3,
         shots_ray=True,
         shot_range=400,
         damage=350,
     )
 
 
-class TankModel:
+class BotModel:
 
     __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y',
                  'orientation', 'tower_orientation',
@@ -142,7 +142,7 @@ class TankModel:
     def __init__(self, id, team, type, x, y, orientation):
         self.id = id
         self.team = team
-        self.type = type  # type: TankTypeProperties
+        self.type = type  # type: BotTypeProperties
         self.hp = type.max_hp
         self.load = 1.0
         self.x = x
