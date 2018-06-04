@@ -10,7 +10,7 @@ class StbEngine:
         self.world_width = world_width
         self.world_height = world_height
         self._bots = {}
-        self._rays = []
+        self._rays = {}
         self._bullets = []
 
         self._controls = {}
@@ -27,7 +27,7 @@ class StbEngine:
         return self._bots.values()
 
     def iter_rays(self):
-        return self._rays
+        return self._rays.values()
 
     def iter_bullets(self):
         return self._bullets
@@ -78,24 +78,25 @@ class StbEngine:
         trig(b1, 0, move=1, rotate=1, tower_rotate=-1)
 
         # heavy tank duel
-        b1 = mkbot(BotType.Heavy, red, 3, 3, east)
+        b1 = mkbot(BotType.Heavy, red, 5, 3, east)
         b2 = mkbot(BotType.Heavy, blue, 7, 3, south, right)
         trig(b1, 0, fire=True)
         trig(b2, 0, fire=True)
 
         # laser mass kill
-        mkbot(BotType.Raider, blue, 2.0, 4.0, west, hp=0.3)
-        mkbot(BotType.Raider, blue, 2.5, 4.5, west, hp=0.3)
-        mkbot(BotType.Raider, blue, 3.0, 5.0, west, hp=0.3)
-        mkbot(BotType.Raider, blue, 2.0, 4.5, west, hp=0.3)
-        mkbot(BotType.Raider, blue, 2.0, 5.0, west, hp=0.3)
-        mkbot(BotType.Raider, blue, 2.5, 5.0, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 3.5, 4.0, west, hp=0.1)
+        mkbot(BotType.Raider, blue, 4.0, 4.5, west, hp=0.1)
+        mkbot(BotType.Raider, blue, 4.5, 5.0, west, hp=0.1)
+        mkbot(BotType.Raider, blue, 3.5, 4.5, west, hp=0.1)
+        mkbot(BotType.Raider, blue, 3.5, 5.0, west, hp=0.1)
+        mkbot(BotType.Raider, blue, 4.0, 5.0, west, hp=0.1)
 
         b1 = mkbot(BotType.Sniper, red, 1, 4, east)
-        trig(b1, 0, fire=True, tower_rotate=1)
         when = atan(1/2) / BotType.Sniper.gun_rot_speed
-        trig(b1, when, tower_rotate=0)
-        trig(b1, when+0.1, fire=False)
+        trig(b1, 0, fire=True, tower_rotate=1)
+        trig(b1, 1*when, tower_rotate=-1)
+        trig(b1, 2*when, tower_rotate=0)
+        trig(b1, 2*when+0.1, fire=False)
 
         # raider firing
         mkbot(BotType.Sniper, red, 2, 7, north)
@@ -107,30 +108,143 @@ class StbEngine:
         mkbot(BotType.Heavy, red, 7, 6, east)
         trig(b1, 0.0, move=1, fire=True)
 
+        self._triggers.sort()
+
     def tick(self):
-        nbots = len(self._bots)
-        global_time = self.nticks / self.ticks_per_sec
-        radius = 0.3 * min(self.world_width, self.world_height)
-        speed_factor = 1/4
-        for i, bot in enumerate(self._bots.values()):
-            time = speed_factor * global_time + i * 2 * pi / nbots
-            bot.x = self.world_width / 2 + radius * cos(time)
-            bot.y = self.world_height / 2 + radius * sin(time)
-            bot.orientation = time
-            bot.tower_orientation = 2.5 * time
-        for ray in self._rays:
-            bot = self._bots[ray.origin_id]
-            angle = bot.orientation + bot.tower_orientation
-            tower_shift = vec_rotate(0, -12, bot.orientation)
-            ray_start_shift = vec_rotate(53, 0, angle)
-            x, y = vec_sum((bot.x, bot.y), tower_shift, ray_start_shift)
-            ray.x = x
-            ray.y = y
-            ray.orientation = angle
+
+        next_bullets = []
+        next_rays = {}
+        tps = float(self.ticks_per_sec)
+        bullet_speed = 1000 / tps
+        ray_charge_per_tick = 1 / tps
+        bot_radius = 25
+
+        # process control triggers
+        next_triggers = []
+        for trig in self._triggers:
+            tick, b_id, attr, val = trig
+            if tick <= self.nticks:
+                setattr(self._controls[b_id], attr, val)
+            else:
+                next_triggers.append(trig)
+        self._triggers = next_triggers
+
+        # move bullets
         for bullet in self._bullets:
-            bullet.y += 1000 / self.ticks_per_sec
-            if bullet.y > self.world_height:
-                bullet.y -= self.world_height
+            bullet.x += bullet_speed * bullet.cos
+            bullet.y += bullet_speed * bullet.sin
+            bullet.remaining_range -= bullet_speed
+            if 0 <= bullet.x <= self.world_width \
+                    and 0 <= bullet.y <= self.world_height \
+                    and bullet.remaining_range > 0:
+                next_bullets.append(bullet)
+
+        # move bots
+        for b_id, bot in self._bots.items():
+            ctl = self._controls[bot.id]  # type: BotControl
+            typ = bot.type  # type: BotTypeProperties
+            ori_change = ctl.rotate * typ.rot_speed / tps
+            move_ori = bot.orientation + ori_change / 2
+            _sin = sin(move_ori)
+            _cos = cos(move_ori)
+            if ctl.move == 1:
+                speed = typ.move_ahead_speed
+            elif ctl.move == -1:
+                speed = typ.move_back_speed
+            else:
+                speed = 0
+            speed /= tps
+            bot.x += _cos * speed
+            bot.y += _sin * speed
+            bot.orientation += ori_change
+
+            bot.tower_orientation += ctl.tower_rotate * typ.gun_rot_speed / tps
+
+            if ctl.fire and not typ.shots_ray and bot.shot_ready:
+                bullet = BulletModel(
+                    typ, b_id, bot.orientation + bot.tower_orientation,
+                    bot.x, bot.y, typ.shot_range
+                )
+                next_bullets.append(bullet)
+                bot.load = 0
+            elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick:
+                if bot.id not in self._rays:
+                    bullet = BulletModel(
+                        typ, b_id, bot.orientation + bot.tower_orientation,
+                        bot.x, bot.y, typ.shot_range
+                    )
+                    self._rays[bot.id] = bullet
+            else:
+                if bot.load < 1:
+                    bot.load += 1 / (typ.cd_period * tps)
+
+        # update rays
+        for ray in self._rays.values():
+            bot = self._bots.get(ray.origin_id)
+            if bot is None or bot.load < 0 or not self._controls[bot.id].fire:
+                continue
+            bot.load -= ray_charge_per_tick
+            next_rays[bot.id] = ray
+            position_ray(bot, ray)
+
+        # make bullet damage
+        next_bullets_after_damage = []
+        for bullet in next_bullets:
+            for bot in self._bots.values():
+                if bullet.origin_id == bot.id:
+                    continue
+                d = dist_points(bullet.x, bullet.y, bot.x, bot.y)
+                if d > bot_radius:
+                    continue
+                h = dist_line(bot.x, bot.y, bullet.cos, bullet.sin, bullet.x, bullet.y)
+                dx = bullet.x - bot.x
+                dy = bullet.y - bot.y
+                bsin = sin(bot.orientation)
+                bcos = cos(bot.orientation)
+
+                hit_factor = half_chord_len(bot_radius, h) / bot_radius
+                armor_factor = vec_dot(dx, dy, bcos, bsin) / vec_len(dx, dy)
+
+                damage = bullet.type.damage * hit_factor / (2 + armor_factor)
+                bot.hp -= damage
+                break
+            else:
+                next_bullets_after_damage.append(bullet)
+        next_bullets = next_bullets_after_damage
+
+        # make ray damage
+        for ray in next_rays.values():
+            base_dmg = ray.type.damage / tps
+            damaged = []
+            for bot in self._bots.values():
+                if ray.origin_id == bot.id:
+                    continue
+                d = dist_line(bot.x, bot.y, ray.cos, ray.sin, ray.x, ray.y)
+                if d > bot_radius:
+                    continue
+                dx = bot.x - ray.x
+                dy = bot.y - ray.y
+                t = sqrt(dx*dx + dy*dy - d*d)
+                if vec_dot(ray.cos, ray.sin, dx, dy) < 0:
+                    t = -t
+                if not (0 <= t <= ray.range):
+                    continue
+
+                hit_factor = half_chord_len(bot_radius, d) / bot_radius
+                damaged.append((t, base_dmg * hit_factor, bot))
+            damaged.sort(key=lambda item: item[0])
+            decay_factor = 1.0
+            for _, dmg, bot in damaged:
+                bot.hp -= dmg * decay_factor
+                decay_factor /= 2
+
+        # make collisions damage, fix coordinates
+
+        # remove killed bots
+        self._bots = {bot.id: bot for bot in self._bots.values() if bot.hp > 0}
+
+        self._bullets = next_bullets
+        self._rays = next_rays
         self.nticks += 1
 
     @property
@@ -230,7 +344,9 @@ class BotModel:
 
 class BulletModel:
 
-    __slots__ = ['type', 'origin_id', 'orientation', 'x', 'y', 'range', '_cos', '_sin']
+    __slots__ = [
+        'type', 'origin_id', 'orientation', 'x', 'y',
+        'range', 'remaining_range', 'cos', 'sin']
 
     def __init__(self, type, origin_id, orientation, x, y, range):
         self.origin_id = origin_id
@@ -239,8 +355,9 @@ class BulletModel:
         self.x = x
         self.y = y
         self.range = range
-        self._cos = cos(orientation)
-        self._sin = sin(orientation)
+        self.remaining_range = range
+        self.cos = cos(orientation)
+        self.sin = sin(orientation)
 
 
 def vec_rotate(x, y, angle):
@@ -259,6 +376,27 @@ def vec_sum(vec, *vecs):
     return rx, ry
 
 
+def vec_dot(x1, y1, x2, y2):
+    return x1*x2 + y1*y2
+
+
+def half_chord_len(radius, distance):
+    return sqrt(radius*radius - distance*distance)
+
+
+def dist_line(point_x, point_y, line_cos, line_sin, line_x, line_y):
+    q = line_sin * (point_x - line_x) - line_cos * (point_y - line_y)
+    return abs(q)
+
+
+def dist_points(x1, y1, x2, y2):
+    return sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2))
+
+
+def vec_len(x, y):
+    return sqrt(x*x + y*y)
+
+
 class BotControl:
 
     __slots__ = ['move', 'rotate', 'tower_rotate', 'fire']
@@ -270,22 +408,13 @@ class BotControl:
         self.fire = fire
 
 
-def make_ray(bot, ray=None):
+def position_ray(bot, ray):
     angle = bot.orientation + bot.tower_orientation
-    tower_shift = vec_rotate(0, -12, bot.orientation)
+    tower_shift = vec_rotate(-12, 0, bot.orientation)
     ray_start_shift = vec_rotate(53, 0, angle)
     x, y = vec_sum((bot.x, bot.y), tower_shift, ray_start_shift)
-    if ray is None:
-        ray = BulletModel(
-            type=BotType.Sniper,
-            origin_id=bot.id,
-            orientation=angle,
-            x=x,
-            y=y,
-            range=3000
-        )
-    else:
-        ray.orientation = angle
-        ray.x = x
-        ray.y = y
-    return ray
+    ray.orientation = angle
+    ray.x = x
+    ray.y = y
+    ray.cos = cos(angle)
+    ray.sin = sin(angle)
