@@ -1,5 +1,6 @@
 import enum
-from math import pi, sin, cos, sqrt
+import random
+from math import pi, sin, cos, sqrt, atan
 import collections
 
 
@@ -8,55 +9,117 @@ class StbEngine:
     def __init__(self, world_width, world_height):
         self.world_width = world_width
         self.world_height = world_height
-        self.bots = {}
-        self.rays = []
-        self.bullets = []
-        self.nticks = 0
+        self._bots = {}
+        self._rays = []
+        self._bullets = []
+
+        self._controls = {}
+        self._triggers = []
+
+        self._n_bots = {}
+
+        self.nticks = 1
         self.ticks_per_sec = 50
 
-        import random
-        for team in [0xFF0000, 0x00FF00, 0x0000FF]:
-            for ttype in BotType.__members__.values():
-                for i in range(3):
-                    bot = BotModel(
-                        id=len(self.bots),
-                        type=ttype,
-                        team=team,
-                        x=0, y=0,
-                        orientation=0,
-                    )
-                    bot.hp = random.random() * bot.type.max_hp
-                    bot.load = random.random()
-                    self.bots[bot.id] = bot
-                    if ttype == BotType.Sniper:
-                        self.rays.append(BulletModel(
-                            type=BotType.Sniper,
-                            origin_id=bot.id,
-                            x=0, y=0, orientation=0,
-                            range=3000
-                        ))
-        for i in range(75):
-            self.bullets.append(BulletModel(
-                origin_id=None,
-                type=BotType.Heavy if i % 2 == 0 else BotType.Raider,
-                orientation=0,
-                x=random.random()*world_width,
-                y=random.random()*world_height,
-                range=3000,
-            ))
+        self._initialize()
+
+    def iter_bots(self):
+        return self._bots.values()
+
+    def iter_rays(self):
+        return self._rays
+
+    def iter_bullets(self):
+        return self._bullets
+
+    def _initialize(self):
+        red, blue = 0xFF0000, 0x0000FF
+        self._n_bots.update({red: 0, blue: 0})
+        ahead, left, back, right = 0, pi/2, pi, -pi/2
+        east, north, west, south = 0, pi/2, pi, -pi/2
+
+        def mkbot(bottype, team, x, y, orientation, tower_orientation=ahead, hp=1.0):
+            x *= self.world_width / 10
+            y *= self.world_height / 10
+            bot = BotModel(
+                type=bottype,
+                id=len(self._bots),
+                orientation=orientation,
+                team=team,
+                x=x, y=y,
+            )
+            bot.tower_orientation = tower_orientation
+            bot.hp *= hp
+            self._bots[bot.id] = bot
+            self._controls[bot.id] = BotControl()
+            self._n_bots[team] += 1
+            return bot
+
+        def trig(bot, sec, **attrs):
+            tick = int(sec * self.ticks_per_sec)
+            self._triggers.extend(
+                (tick, bot.id, attr, val)
+                for attr, val in attrs.items()
+            )
+
+        # head-on collisions
+        b1 = mkbot(BotType.Raider, red, 1, 1, east)
+        b2 = mkbot(BotType.Raider, blue, 5, 1, west, hp=0.2)
+        trig(b1, 0, move=1)
+        trig(b2, 0, move=1)
+
+        # lateral collisions
+        b1 = mkbot(BotType.Raider, blue, 1, 2, east, hp=0.5)
+        mkbot(BotType.Heavy, red, 5, 2, north)
+        trig(b1, 0, move=1)
+
+        # move by circle and rotate tower
+        b1 = mkbot(BotType.Sniper, red, 7, 1, east)
+        trig(b1, 0, move=1, rotate=1, tower_rotate=-1)
+
+        # heavy tank duel
+        b1 = mkbot(BotType.Heavy, red, 3, 3, east)
+        b2 = mkbot(BotType.Heavy, blue, 7, 3, south, right)
+        trig(b1, 0, fire=True)
+        trig(b2, 0, fire=True)
+
+        # laser mass kill
+        mkbot(BotType.Raider, blue, 2.0, 4.0, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 2.5, 4.5, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 3.0, 5.0, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 2.0, 4.5, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 2.0, 5.0, west, hp=0.3)
+        mkbot(BotType.Raider, blue, 2.5, 5.0, west, hp=0.3)
+
+        b1 = mkbot(BotType.Sniper, red, 1, 4, east)
+        trig(b1, 0, fire=True, tower_rotate=1)
+        when = atan(1/2) / BotType.Sniper.gun_rot_speed
+        trig(b1, when, tower_rotate=0)
+        trig(b1, when+0.1, fire=False)
+
+        # raider firing
+        mkbot(BotType.Sniper, red, 2, 7, north)
+        mkbot(BotType.Sniper, red, 3, 7, north)
+        mkbot(BotType.Sniper, red, 4, 7, north)
+        mkbot(BotType.Sniper, red, 5, 7, north)
+        mkbot(BotType.Sniper, red, 6, 7, north)
+        b1 = mkbot(BotType.Raider, blue, 1, 6, east, (ahead+left)/2, hp=0.1)
+        mkbot(BotType.Heavy, red, 7, 6, east)
+        trig(b1, 0.0, move=1, fire=True)
 
     def tick(self):
-        nbots = len(self.bots)
+        nbots = len(self._bots)
         global_time = self.nticks / self.ticks_per_sec
         radius = 0.3 * min(self.world_width, self.world_height)
-        for i, bot in enumerate(self.bots.values()):
-            time = global_time + i * 2 * pi / nbots
-            bot.x = radius * cos(time)
-            bot.y = radius * sin(time)
+        speed_factor = 1/4
+        for i, bot in enumerate(self._bots.values()):
+            time = speed_factor * global_time + i * 2 * pi / nbots
+            bot.x = self.world_width / 2 + radius * cos(time)
+            bot.y = self.world_height / 2 + radius * sin(time)
             bot.orientation = time
             bot.tower_orientation = 2.5 * time
-        for ray in self.rays:
-            bot = self.bots[ray.origin_id]
+        for ray in self._rays:
+            bot = self._bots[ray.origin_id]
             angle = bot.orientation + bot.tower_orientation
             tower_shift = vec_rotate(0, -12, bot.orientation)
             ray_start_shift = vec_rotate(53, 0, angle)
@@ -64,7 +127,7 @@ class StbEngine:
             ray.x = x
             ray.y = y
             ray.orientation = angle
-        for bullet in self.bullets:
+        for bullet in self._bullets:
             bullet.y += 1000 / self.ticks_per_sec
             if bullet.y > self.world_height:
                 bullet.y -= self.world_height
@@ -72,7 +135,8 @@ class StbEngine:
 
     @property
     def is_finished(self):
-        return self.nticks >= 3000
+        return sum(1 for n in self._n_bots.values() if n > 0) <= 1 \
+               or self.nticks > 5000
 
 
 BotTypeProperties = collections.namedtuple(
@@ -92,7 +156,7 @@ BotTypeProperties = collections.namedtuple(
 )
 
 
-class BotType(enum.Enum):
+class BotType(BotTypeProperties, enum.Enum):
 
     Heavy = BotTypeProperties(
         code=1,
@@ -193,3 +257,35 @@ def vec_sum(vec, *vecs):
         rx += x
         ry += y
     return rx, ry
+
+
+class BotControl:
+
+    __slots__ = ['move', 'rotate', 'tower_rotate', 'fire']
+
+    def __init__(self, move=0, rotate=0, tower_rotate=0, fire=False):
+        self.move = move
+        self.rotate = rotate
+        self.tower_rotate = tower_rotate
+        self.fire = fire
+
+
+def make_ray(bot, ray=None):
+    angle = bot.orientation + bot.tower_orientation
+    tower_shift = vec_rotate(0, -12, bot.orientation)
+    ray_start_shift = vec_rotate(53, 0, angle)
+    x, y = vec_sum((bot.x, bot.y), tower_shift, ray_start_shift)
+    if ray is None:
+        ray = BulletModel(
+            type=BotType.Sniper,
+            origin_id=bot.id,
+            orientation=angle,
+            x=x,
+            y=y,
+            range=3000
+        )
+    else:
+        ray.orientation = angle
+        ray.x = x
+        ray.y = y
+    return ray

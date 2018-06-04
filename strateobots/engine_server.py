@@ -1,13 +1,13 @@
 import argparse
 import json
-import logging
+import logging.config
 import random
 import textwrap
 from tornado import web, gen, ioloop
-from .engine import StbEngine
+from strateobots.engine import StbEngine
 
 
-log = logging.getLogger(__name__)
+log = logging.getLogger('strateobots.engine_server')
 
 
 class schema:
@@ -18,9 +18,10 @@ class schema:
             'type': bot.type.code,
             'x': bot.x,
             'y': bot.y,
+            'team': bot.team,
             'orientation': bot.orientation,
             'tower_orientation': bot.tower_orientation,
-            'hp': bot.hp,
+            'hp': bot.hp_ratio,
             'load': bot.load,
         }
 
@@ -31,6 +32,7 @@ class schema:
             'x': bullet.x,
             'y': bullet.y,
             'orientation': bullet.orientation,
+            'range': bullet.range,
         }
 
 
@@ -50,15 +52,15 @@ class SimulationState:
     def _render_state(self):
         bots_data = [
             schema.bot(bot)
-            for bot in self.engine.bots
+            for bot in self.engine.iter_bots()
         ]
         bullets_data = [
             schema.bullet(bullet)
-            for bullet in self.engine.bullets
+            for bullet in self.engine.iter_bullets()
         ]
         rays_data = [
             schema.bullet(ray)
-            for ray in self.engine.rays
+            for ray in self.engine.iter_rays()
         ]
         return dict(bots=bots_data, bullets=bullets_data, rays=rays_data)
 
@@ -81,7 +83,7 @@ class ServerState:
                 raise RequestQueueIsFull()
             self._request_queue.append(sim_id)
         else:
-            self._run_simulation(sim_id, simul)
+            self._run_simulation(sim_id)
         return sim_id
 
     def get_simulation(self, sim_id: 'str') -> 'SimulationState':
@@ -101,7 +103,7 @@ class ServerState:
     def _make_simulation(self, **params):
         engine = StbEngine(**params)
         simul = SimulationState(engine)
-        sim_id = hex(hash('{}_{}'.format(random.random(), self._next_id)))[2:]
+        sim_id = hex(abs(hash('{}_{}'.format(random.random(), self._next_id))))[2:]
         self._next_id += 1
         self._simulations[sim_id] = simul
         return sim_id, simul
@@ -115,6 +117,7 @@ class ServerState:
         while not simul.engine.is_finished and not simul.cancelled:
             yield
             simul.process_tick()
+            log.debug('TICK %r', sim_id)
         self._run_expiration(sim_id)
         yield gen.sleep(self.delay)
         if self._request_queue:
@@ -173,7 +176,7 @@ class EnqueueSimulationHandler(_BaseHandler):
         """
         w = int(self.get_body_argument('width'))
         h = int(self.get_body_argument('height'))
-        sim_id = self.state.add_request(width=w, height=h)
+        sim_id = self.state.add_request(world_width=w, world_height=h)
         self.api_respond({'id': sim_id}, http_code=201)
 
 
@@ -183,11 +186,12 @@ class SimulationStatusHandler(_BaseHandler):
         """
         Shows current status of specified simulation
         """
+        log.debug('looking for simulation %r', sim_id)
         simul = self.state.get_simulation(sim_id)
         nticks = len(simul.ticks_data)
         self.api_respond({
             'id': sim_id,
-            'started': nticks > 0,
+            'started': nticks > 1,
             'ticks_generated': nticks,
             'finished': simul.engine.is_finished,
             'cancelled': simul.cancelled,
@@ -241,10 +245,36 @@ def main(argv=None):
     parser.add_argument('--max-queue', '-Q', default=10, type=int)
     parser.add_argument('--expire-time', '-E', default=7200, type=int)
     parser.add_argument('--delay', '-D', default=5, type=int)
-    parser.add_argument('--log', '-L', default='info')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args(argv)
-    logging.basicConfig(level=args.log.upper())
+    logging.config.dictConfig({
+        'version': 1,
+        'disable_existing_loggers': False,
+        'handlers': {
+            'stderr': {
+                'level': 'DEBUG',
+                'class': 'logging.StreamHandler',
+                'formatter': 'default',
+            }
+        },
+        'filters': {},
+        'formatters': {
+            'default': {
+                'format': '%(levelname)s:%(name)s:%(message)s',
+            }
+        },
+        'loggers': {
+            '': {
+                'handlers': ['stderr'],
+                'level': 'INFO' if args.debug else 'WARNING',
+            },
+            'strateobots': {
+                'handlers': ['stderr'],
+                'level': 'DEBUG' if args.debug else 'INFO',
+                'propagate': False,
+            }
+        }
+    })
 
     state = ServerState(max_queue=args.max_queue,
                         expire_time=args.expire_time,
@@ -258,6 +288,7 @@ def main(argv=None):
         ('/(.*)', web.StaticFileHandler, fileserver_args)
     ], debug=args.debug)
     app.listen(args.port)
+    log.info('listening at 0.0.0.0:%s', args.port)
     ioloop.IOLoop.instance().start()
 
 
