@@ -4,6 +4,9 @@ from math import pi, sin, cos, sqrt, atan
 import collections
 
 
+EPS = 0.000001
+
+
 class StbEngine:
 
     def __init__(self, world_width, world_height):
@@ -69,13 +72,13 @@ class StbEngine:
         trig(b2, 0, move=1)
 
         # lateral collisions
-        b1 = mkbot(BotType.Raider, blue, 1, 2, east, hp=0.5)
+        b1 = mkbot(BotType.Raider, blue, 1, 2, east, hp=0.25)
         mkbot(BotType.Heavy, red, 5, 2, north)
         trig(b1, 0, move=1)
 
         # move by circle and rotate tower
         b1 = mkbot(BotType.Sniper, red, 7, 1, east)
-        trig(b1, 0, move=1, rotate=1, tower_rotate=-1)
+        trig(b1, 0, move=1, rotate=1, tower_rotate=-1, fire=True)
 
         # heavy tank duel
         b1 = mkbot(BotType.Heavy, red, 5, 3, east)
@@ -108,6 +111,12 @@ class StbEngine:
         mkbot(BotType.Heavy, red, 7, 6, east)
         trig(b1, 0.0, move=1, fire=True)
 
+        # drifting
+        b1 = mkbot(BotType.Raider, red, 5, 8, west)
+        b1.vx = b1.type.max_ahead_speed / 2
+        b1.vy = b1.type.max_ahead_speed / 2
+        trig(b1, 0, move=1)
+
         self._triggers.sort()
 
     def tick(self):
@@ -118,6 +127,8 @@ class StbEngine:
         bullet_speed = 1000 / tps
         ray_charge_per_tick = 1 / tps
         bot_radius = 25
+        friction_factor = 50
+        collision_factor = 0.0002
 
         # process control triggers
         next_triggers = []
@@ -144,19 +155,87 @@ class StbEngine:
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
             ori_change = ctl.rotate * typ.rot_speed / tps
-            move_ori = bot.orientation + ori_change / 2
-            _sin = sin(move_ori)
-            _cos = cos(move_ori)
-            if ctl.move == 1:
-                speed = typ.move_ahead_speed
-            elif ctl.move == -1:
-                speed = typ.move_back_speed
+
+            a_angle = bot.orientation + ori_change / 2
+            a_sin = sin(a_angle)
+            a_cos = cos(a_angle)
+
+            v = vec_len(bot.vx, bot.vy)
+            v_cos = bot.vx / v if v else a_cos
+            v_sin = bot.vy / v if v else a_sin
+
+            # acceleration
+            f_cos = f_sin = None
+            if ctl.move != 0:
+                # if we move in positive direction to acceleration
+                # then engine accelerates in needed direction
+                # and friction reduces other part of velocity vector
+                a_cos *= ctl.move
+                a_sin *= ctl.move
+                if vec_dot(a_cos, a_sin, v_cos, v_sin) > 0:
+                    av = bot.vx * a_cos + bot.vy * a_sin
+                    fvx = bot.vx - av * a_cos
+                    fvy = bot.vy - av * a_sin
+                    acc = typ.acc / tps
+                    bot.vx -= fvx
+                    bot.vy -= fvy
+                else:
+                    max_speed = typ.max_ahead_speed if ctl.move == 1 else typ.max_back_speed
+                    fvx = bot.vx - max_speed * a_cos
+                    fvy = bot.vy - max_speed * a_sin
+                    fv = vec_len(fvx, fvy) or 1
+                    f_cos = fvx / fv
+                    f_sin = fvy / fv
+                    fvx = bot.vx
+                    fvy = bot.vy
+                    acc = 0
+                    bot.vx = bot.vy = 0
             else:
-                speed = 0
-            speed /= tps
-            bot.x += _cos * speed
-            bot.y += _sin * speed
+                acc = 0
+                fvx = bot.vx
+                fvy = bot.vy
+                bot.vx = bot.vy = 0
+
+            # friction
+            fv = vec_len(fvx, fvy) or 1
+            f_cos = f_cos if f_cos is not None else fvx / fv
+            f_sin = f_sin if f_sin is not None else fvy / fv
+            fax = friction_factor * f_cos / tps
+            fay = friction_factor * f_sin / tps
+            if abs(fvx) <= abs(fax):
+                fvx = 0
+            else:
+                fvx -= fax
+            if abs(fvy) <= abs(fay):
+                fvy = 0
+            else:
+                fvy -= fay
+
+            # apply acceleration and friction
+            bot.vx += a_cos * acc + fvx
+            bot.vy += a_sin * acc + fvy
+
+            # maximum speed
+            v = sqrt(bot.vx*bot.vx + bot.vy*bot.vy)
+            if ctl.move == 1:
+                v_coeff = max(1, v / typ.max_ahead_speed)
+            else:
+                v_coeff = max(1, v / typ.max_back_speed)
+            bot.vx /= v_coeff
+            bot.vy /= v_coeff
+
+            # change position and orientation
+            bot.x += bot.vx / tps
+            bot.y += bot.vy / tps
             bot.orientation += ori_change
+            if bot.x < bot_radius:
+                bot.x = bot_radius
+            elif bot.x > self.world_width-bot_radius:
+                bot.x = self.world_width-bot_radius
+            if bot.y < bot_radius:
+                bot.y = bot_radius
+            elif bot.y > self.world_height-bot_radius:
+                bot.y = self.world_height-bot_radius
 
             bot.tower_orientation += ctl.tower_rotate * typ.gun_rot_speed / tps
 
@@ -239,6 +318,56 @@ class StbEngine:
                 decay_factor /= 2
 
         # make collisions damage, fix coordinates
+        all_bots = list(self._bots.values())
+        for i1, b1 in enumerate(all_bots):
+            m1 = b1.type.mass
+            for i2 in range(i1+1, len(all_bots)):
+                b2 = all_bots[i2]
+                d = dist_points(b1.x, b1.y, b2.x, b2.y)
+                if d >= 2*bot_radius:
+                    continue
+                d = max(d, EPS)
+
+                m2 = b2.type.mass
+
+                v1x, v1y = b1.vx, b1.vy
+                v2x, v2y = b2.vx, b2.vy
+                e1b = vec_len2(v1x, v1y)
+                e2b = vec_len2(v2x, v2y)
+
+                c_cos = (b2.x-b1.x) / d
+                c_sin = (b2.y-b1.y) / d
+
+                v1r = v1x*c_cos + v1y*c_sin
+                v1t = -v1x*c_sin + v1y*c_cos
+
+                v2r = v2x*c_cos + v2y*c_sin
+                v2t = -v2x*c_sin + v2y*c_cos
+
+                vr = (v1r*m1 + v2r*m2) / (m1 + m2)
+
+                b1.vx = vr * c_cos - v1t * c_sin
+                b1.vy = vr * c_sin + v1t * c_cos
+                b2.vx = vr * c_cos - v2t * c_sin
+                b2.vy = vr * c_sin + v2t * c_cos
+
+                mx = (b1.x + b2.x) / 2
+                my = (b1.y + b2.y) / 2
+                b1.x = mx - (bot_radius + EPS) * c_cos
+                b1.y = my - (bot_radius + EPS) * c_sin
+                b2.x = mx + (bot_radius + EPS) * c_cos
+                b2.y = my + (bot_radius + EPS) * c_sin
+
+                # make damage
+                e1a = vec_len2(b1.vx, b1.vy)
+                e2a = vec_len2(b2.vx, b2.vy)
+
+                h = max(0, m1 * (e1b - e1a) + m2 * (e2b - e2a))
+                cf1 = 2 - vec_dot(cos(b1.orientation), sin(b1.orientation), c_cos, c_sin)
+                cf2 = 2 + vec_dot(cos(b2.orientation), sin(b2.orientation), c_cos, c_sin)
+
+                b1.hp -= collision_factor * cf1 * h * m2 / (m1+m2)
+                b2.hp -= collision_factor * cf2 * h * m1 / (m1+m2)
 
         # remove killed bots
         self._bots = {bot.id: bot for bot in self._bots.values() if bot.hp > 0}
@@ -250,7 +379,7 @@ class StbEngine:
     @property
     def is_finished(self):
         return sum(1 for n in self._n_bots.values() if n > 0) <= 1 \
-               or self.nticks > 5000
+               or self.nticks >= 5000
 
 
 BotTypeProperties = collections.namedtuple(
@@ -258,9 +387,11 @@ BotTypeProperties = collections.namedtuple(
     [
         'code',
         'max_hp',
+        'mass',
         'cd_period',  # sec
-        'move_ahead_speed',  # points / sec
-        'move_back_speed',  # points / sec
+        'acc',
+        'max_ahead_speed',  # points / sec
+        'max_back_speed',  # points / sec
         'rot_speed',  # radian / sec
         'gun_rot_speed',  # radian / sec
         'shots_ray',  # boolean; all rays beam during 1 sec
@@ -275,9 +406,11 @@ class BotType(BotTypeProperties, enum.Enum):
     Heavy = BotTypeProperties(
         code=1,
         max_hp=1000,
+        mass=100,
         cd_period=5,
-        move_ahead_speed=70,
-        move_back_speed=60,
+        acc=17,
+        max_ahead_speed=70,
+        max_back_speed=60,
         rot_speed=pi / 3,
         gun_rot_speed=2 * pi / 3,
         shots_ray=False,
@@ -287,9 +420,11 @@ class BotType(BotTypeProperties, enum.Enum):
     Raider = BotTypeProperties(
         code=2,
         max_hp=400,
+        mass=50,
         cd_period=1,
-        move_ahead_speed=160,
-        move_back_speed=30,
+        acc=50,
+        max_ahead_speed=160,
+        max_back_speed=30,
         rot_speed=2 * pi / 3,
         gun_rot_speed=2 * pi,
         shots_ray=False,
@@ -299,21 +434,23 @@ class BotType(BotTypeProperties, enum.Enum):
     Sniper = BotTypeProperties(
         code=3,
         max_hp=250,
+        mass=80,
         cd_period=10,
-        move_ahead_speed=80,
-        move_back_speed=40,
+        acc=15,
+        max_ahead_speed=80,
+        max_back_speed=40,
         rot_speed=pi / 6,
         gun_rot_speed=pi / 3,
         shots_ray=True,
         shot_range=400,
-        damage=350,
+        damage=500,
     )
 
 
 class BotModel:
 
-    __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y',
-                 'orientation', 'tower_orientation',
+    __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y', 'vx', 'vy',
+                 'rot_speed', 'orientation', 'tower_orientation',
                  'move_ahead', 'move_back', 'shoot',
                  'rotation', 'tower_rotation']
 
@@ -325,6 +462,9 @@ class BotModel:
         self.load = 1.0
         self.x = x
         self.y = y
+        self.vx = 0
+        self.vy = 0
+        self.rot_speed = 0
         self.orientation = orientation
         self.tower_orientation = 0.0
         self.move_ahead = False
@@ -395,6 +535,10 @@ def dist_points(x1, y1, x2, y2):
 
 def vec_len(x, y):
     return sqrt(x*x + y*y)
+
+
+def vec_len2(x, y):
+    return x*x + y*y
 
 
 class BotControl:
