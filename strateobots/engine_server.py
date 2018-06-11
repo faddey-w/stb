@@ -35,6 +35,15 @@ class schema:
             'range': bullet.range,
         }
 
+    @staticmethod
+    def explosion(explosion):
+        return {
+            'x': explosion.x,
+            'y': explosion.y,
+            't': explosion.t_ratio,
+            's': explosion.size,
+        }
+
 
 class SimulationState:
     def __init__(self, engine):
@@ -62,7 +71,16 @@ class SimulationState:
             schema.bullet(ray)
             for ray in self.engine.iter_rays()
         ]
-        return dict(bots=bots_data, bullets=bullets_data, rays=rays_data)
+        explosions_data = [
+            schema.explosion(expl)
+            for expl in self.engine.iter_explosions()
+        ]
+        return dict(
+            bots=bots_data,
+            bullets=bullets_data,
+            rays=rays_data,
+            explosions=explosions_data,
+        )
 
 
 class ServerState:

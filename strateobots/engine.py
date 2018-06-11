@@ -15,6 +15,7 @@ class StbEngine:
         self._bots = {}
         self._rays = {}
         self._bullets = []
+        self._explosions = []
 
         self._controls = {}
         self._triggers = []
@@ -35,9 +36,12 @@ class StbEngine:
     def iter_bullets(self):
         return self._bullets
 
+    def iter_explosions(self):
+        return self._explosions
+
     def _initialize(self):
-        red, blue = 0xFF0000, 0x0000FF
-        self._n_bots.update({red: 0, blue: 0})
+        team1, team2 = 0x00DD00, 0x0000FF
+        self._n_bots.update({team1: 0, team2: 0})
         ahead, left, back, right = 0, pi/2, pi, -pi/2
         east, north, west, south = 0, pi/2, pi, -pi/2
 
@@ -66,35 +70,35 @@ class StbEngine:
             )
 
         # head-on collisions
-        b1 = mkbot(BotType.Raider, red, 1, 1, east)
-        b2 = mkbot(BotType.Raider, blue, 5, 1, west, hp=0.2)
+        b1 = mkbot(BotType.Raider, team1, 1, 1, east)
+        b2 = mkbot(BotType.Raider, team2, 5, 1, west, hp=0.2)
         trig(b1, 0, move=1)
         trig(b2, 0, move=1)
 
         # lateral collisions
-        b1 = mkbot(BotType.Raider, blue, 1, 2, east, hp=0.25)
-        mkbot(BotType.Heavy, red, 5, 2, north)
+        b1 = mkbot(BotType.Raider, team2, 1, 2, east, hp=0.25)
+        mkbot(BotType.Heavy, team1, 5, 2, north)
         trig(b1, 0, move=1)
 
         # move by circle and rotate tower
-        b1 = mkbot(BotType.Sniper, red, 7, 1, east)
+        b1 = mkbot(BotType.Sniper, team1, 7, 1, east)
         trig(b1, 0, move=1, rotate=1, tower_rotate=-1, fire=True)
 
         # heavy tank duel
-        b1 = mkbot(BotType.Heavy, red, 5, 3, east)
-        b2 = mkbot(BotType.Heavy, blue, 7, 3, south, right)
+        b1 = mkbot(BotType.Heavy, team1, 5, 3, east)
+        b2 = mkbot(BotType.Heavy, team2, 7, 3, south, right)
         trig(b1, 0, fire=True)
         trig(b2, 0, fire=True)
 
         # laser mass kill
-        mkbot(BotType.Raider, blue, 3.5, 4.0, west, hp=0.1)
-        mkbot(BotType.Raider, blue, 4.0, 4.5, west, hp=0.1)
-        mkbot(BotType.Raider, blue, 4.5, 5.0, west, hp=0.1)
-        mkbot(BotType.Raider, blue, 3.5, 4.5, west, hp=0.1)
-        mkbot(BotType.Raider, blue, 3.5, 5.0, west, hp=0.1)
-        mkbot(BotType.Raider, blue, 4.0, 5.0, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 3.5, 4.0, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 4.0, 4.5, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 4.5, 5.0, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 3.5, 4.5, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 3.5, 5.0, west, hp=0.1)
+        mkbot(BotType.Raider, team2, 4.0, 5.0, west, hp=0.1)
 
-        b1 = mkbot(BotType.Sniper, red, 1, 4, east)
+        b1 = mkbot(BotType.Sniper, team1, 1, 4, east)
         when = atan(1/2) / BotType.Sniper.gun_rot_speed
         trig(b1, 0, fire=True, tower_rotate=1)
         trig(b1, 1*when, tower_rotate=-1)
@@ -102,17 +106,21 @@ class StbEngine:
         trig(b1, 2*when+0.1, fire=False)
 
         # raider firing
-        mkbot(BotType.Sniper, red, 2, 7, north)
-        mkbot(BotType.Sniper, red, 3, 7, north)
-        mkbot(BotType.Sniper, red, 4, 7, north)
-        mkbot(BotType.Sniper, red, 5, 7, north)
-        mkbot(BotType.Sniper, red, 6, 7, north)
-        b1 = mkbot(BotType.Raider, blue, 1, 6, east, (ahead+left)/2, hp=0.1)
-        mkbot(BotType.Heavy, red, 7, 6, east)
+        mkbot(BotType.Sniper, team1, 2, 7, north)
+        mkbot(BotType.Sniper, team1, 3, 7, north)
+        mkbot(BotType.Sniper, team1, 4, 7, north)
+        mkbot(BotType.Sniper, team1, 5, 7, north)
+        mkbot(BotType.Sniper, team1, 6, 7, north)
+        b1 = mkbot(BotType.Raider, team2, 1.0, 6, east, (ahead+left)/2, hp=0.1)
         trig(b1, 0.0, move=1, fire=True)
+        b1 = mkbot(BotType.Raider, team2, 1.5, 6, east, (ahead+left)/2, hp=0.1)
+        trig(b1, 0.0, move=1, fire=True)
+        b1 = mkbot(BotType.Raider, team2, 2.0, 6, east, (ahead+left)/2, hp=0.1)
+        trig(b1, 0.0, move=1, fire=True)
+        mkbot(BotType.Heavy, team1, 7, 6, east)
 
         # drifting
-        b1 = mkbot(BotType.Raider, red, 5, 8, west)
+        b1 = mkbot(BotType.Raider, team1, 5, 8, west)
         b1.vx = b1.type.max_ahead_speed / 2
         b1.vy = b1.type.max_ahead_speed / 2
         trig(b1, 0, move=1)
@@ -239,9 +247,14 @@ class StbEngine:
 
             bot.tower_orientation += ctl.tower_rotate * typ.gun_rot_speed / tps
 
+        # firing
+        for b_id, bot in self._bots.items():
+            ctl = self._controls[bot.id]  # type: BotControl
+            typ = bot.type  # type: BotTypeProperties
             if ctl.fire and not typ.shots_ray and bot.shot_ready:
+                angle = random.gauss(bot.orientation + bot.tower_orientation, typ.fire_scatter)
                 bullet = BulletModel(
-                    typ, b_id, bot.orientation + bot.tower_orientation,
+                    typ, b_id, angle,
                     bot.x, bot.y, typ.shot_range
                 )
                 next_bullets.append(bullet)
@@ -286,6 +299,8 @@ class StbEngine:
 
                 damage = bullet.type.damage * hit_factor / (2 + armor_factor)
                 bot.hp -= damage
+                self._explosions.append(
+                    ExplosionModel(bullet.x, bullet.y, 0.75 * tps, 0.5*bot_radius))
                 break
             else:
                 next_bullets_after_damage.append(bullet)
@@ -311,6 +326,15 @@ class StbEngine:
 
                 hit_factor = half_chord_len(bot_radius, d) / bot_radius
                 damaged.append((t, base_dmg * hit_factor, bot))
+
+                dt = sqrt(bot_radius * bot_radius - d * d)
+                for t_i in range(int(t-dt), int(t+dt+1), 2):
+                    self._explosions.append(ExplosionModel(
+                        x=ray.x + t_i * ray.cos,
+                        y=ray.y + t_i * ray.sin,
+                        size=8,
+                        duration=2,
+                    ))
             damaged.sort(key=lambda item: item[0])
             decay_factor = 1.0
             for _, dmg, bot in damaged:
@@ -370,7 +394,19 @@ class StbEngine:
                 b2.hp -= collision_factor * cf2 * h * m1 / (m1+m2)
 
         # remove killed bots
-        self._bots = {bot.id: bot for bot in self._bots.values() if bot.hp > 0}
+        next_bots = {}
+        for bot in self._bots.values():
+            if bot.hp > 0:
+                next_bots[bot.id] = bot
+            else:
+                self._explosions.append(
+                    ExplosionModel(bot.x, bot.y, tps, 2*bot_radius))
+        self._bots = next_bots
+
+        # update explosions
+        for expl in self._explosions:
+            expl.t += 1
+        self._explosions = [e for e in self._explosions if not e.is_ended]
 
         self._bullets = next_bullets
         self._rays = next_rays
@@ -396,6 +432,7 @@ BotTypeProperties = collections.namedtuple(
         'gun_rot_speed',  # radian / sec
         'shots_ray',  # boolean; all rays beam during 1 sec
         'shot_range',
+        'fire_scatter',  # sigma of bullet direction distribution
         'damage',  # per-shot or per-second if ray
     ]
 )
@@ -415,6 +452,7 @@ class BotType(BotTypeProperties, enum.Enum):
         gun_rot_speed=2 * pi / 3,
         shots_ray=False,
         shot_range=250,
+        fire_scatter=2 * pi / 180,
         damage=120,
     )
     Raider = BotTypeProperties(
@@ -429,6 +467,7 @@ class BotType(BotTypeProperties, enum.Enum):
         gun_rot_speed=2 * pi,
         shots_ray=False,
         shot_range=200,
+        fire_scatter=4 * pi / 180,
         damage=45,
     )
     Sniper = BotTypeProperties(
@@ -443,6 +482,7 @@ class BotType(BotTypeProperties, enum.Enum):
         gun_rot_speed=pi / 3,
         shots_ray=True,
         shot_range=400,
+        fire_scatter=0,
         damage=500,
     )
 
@@ -498,6 +538,26 @@ class BulletModel:
         self.remaining_range = range
         self.cos = cos(orientation)
         self.sin = sin(orientation)
+
+
+class ExplosionModel:
+
+    __slots__ = ['x', 'y', 'duration', 'size', 't']
+
+    def __init__(self, x, y, duration, size):
+        self.x = x
+        self.y = y
+        self.duration = duration
+        self.size = size
+        self.t = 0
+
+    @property
+    def t_ratio(self):
+        return self.t / self.duration
+
+    @property
+    def is_ended(self):
+        return self.t >= self.duration
 
 
 def vec_rotate(x, y, angle):
