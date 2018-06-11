@@ -1,5 +1,7 @@
 import enum
 import random
+import sys
+import importlib
 from math import pi, sin, cos, sqrt, atan
 import collections
 
@@ -12,20 +14,30 @@ class StbEngine:
     def __init__(self, world_width, world_height):
         self.world_width = world_width
         self.world_height = world_height
+        self.teams = 0x00DD00, 0x0000FF
         self._bots = {}
         self._rays = {}
         self._bullets = []
         self._explosions = []
 
         self._controls = {}
-        self._triggers = []
 
-        self._n_bots = {}
+        team1, team2 = self.teams
+        self._n_bots = {team1: 0, team2: 0}
 
         self.nticks = 1
         self.ticks_per_sec = 50
 
-        self._initialize()
+        for key in list(sys.modules.keys()):
+            if key.startswith('strateobots.ai'):
+                sys.modules.pop(key)
+        from strateobots import ai
+        ai_module = importlib.import_module(
+            'strateobots.ai.'+ai.default_ai_name)
+        self.ai1 = ai_module.AI(team1, self)
+        self.ai2 = ai_module.AI(team2, self)
+        self.ai1.initialize()
+        self.ai2.initialize()
 
     def iter_bots(self):
         return self._bots.values()
@@ -39,93 +51,23 @@ class StbEngine:
     def iter_explosions(self):
         return self._explosions
 
-    def _initialize(self):
-        team1, team2 = 0x00DD00, 0x0000FF
-        self._n_bots.update({team1: 0, team2: 0})
-        ahead, left, back, right = 0, pi/2, pi, -pi/2
-        east, north, west, south = 0, pi/2, pi, -pi/2
+    def get_control(self, bot):
+        return self._controls[bot.id]
 
-        def mkbot(bottype, team, x, y, orientation, tower_orientation=ahead, hp=1.0):
-            x *= self.world_width / 10
-            y *= self.world_height / 10
-            bot = BotModel(
-                type=bottype,
-                id=len(self._bots),
-                orientation=orientation,
-                team=team,
-                x=x, y=y,
-            )
-            bot.tower_orientation = tower_orientation
-            bot.hp *= hp
-            self._bots[bot.id] = bot
-            self._controls[bot.id] = BotControl()
-            self._n_bots[team] += 1
-            return bot
-
-        def trig(bot, sec, **attrs):
-            tick = int(sec * self.ticks_per_sec)
-            self._triggers.extend(
-                (tick, bot.id, attr, val)
-                for attr, val in attrs.items()
-            )
-
-        # head-on collisions
-        b1 = mkbot(BotType.Raider, team1, 1, 1, east)
-        b2 = mkbot(BotType.Raider, team2, 5, 1, west, hp=0.2)
-        trig(b1, 0, move=1)
-        trig(b2, 0, move=1)
-
-        # lateral collisions
-        b1 = mkbot(BotType.Raider, team2, 1, 2, east, hp=0.25)
-        mkbot(BotType.Heavy, team1, 5, 2, north)
-        trig(b1, 0, move=1)
-
-        # move by circle and rotate tower
-        b1 = mkbot(BotType.Sniper, team1, 7, 1, east)
-        trig(b1, 0, move=1, rotate=1, tower_rotate=-1, fire=True)
-
-        # heavy tank duel
-        b1 = mkbot(BotType.Heavy, team1, 5, 3, east)
-        b2 = mkbot(BotType.Heavy, team2, 7, 3, south, right)
-        trig(b1, 0, fire=True)
-        trig(b2, 0, fire=True)
-
-        # laser mass kill
-        mkbot(BotType.Raider, team2, 3.5, 4.0, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 4.0, 4.5, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 4.5, 5.0, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 3.5, 4.5, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 3.5, 5.0, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 4.0, 5.0, west, hp=0.1)
-
-        b1 = mkbot(BotType.Sniper, team1, 1, 4, east)
-        when = atan(1/2) / BotType.Sniper.gun_rot_speed
-        trig(b1, 0, fire=True, tower_rotate=1)
-        trig(b1, 1*when, tower_rotate=-1)
-        trig(b1, 2*when, tower_rotate=0)
-        trig(b1, 2*when+0.1, fire=False)
-
-        # raider firing
-        mkbot(BotType.Sniper, team1, 2, 7, north)
-        mkbot(BotType.Sniper, team1, 3, 7, north)
-        mkbot(BotType.Sniper, team1, 4, 7, north)
-        mkbot(BotType.Sniper, team1, 5, 7, north)
-        mkbot(BotType.Sniper, team1, 6, 7, north)
-        b1 = mkbot(BotType.Raider, team2, 1.0, 6, east, (ahead+left)/2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
-        b1 = mkbot(BotType.Raider, team2, 1.5, 6, east, (ahead+left)/2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
-        b1 = mkbot(BotType.Raider, team2, 2.0, 6, east, (ahead+left)/2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
-        mkbot(BotType.Heavy, team1, 7, 6, east)
-
-        # drifting
-        b1 = mkbot(BotType.Raider, team1, 5, 8, west)
-        b1.vx = b1.type.max_ahead_speed / 2
-        b1.vy = b1.type.max_ahead_speed / 2
-        trig(b1, 0, move=1)
-
-        self._triggers.sort()
+    def add_bot(self, bottype, team, x, y, orientation, tower_orientation, hp):
+        bot = BotModel(
+            type=bottype,
+            id=len(self._bots),
+            orientation=orientation,
+            team=team,
+            x=x, y=y,
+        )
+        bot.tower_orientation = tower_orientation
+        bot.hp = hp
+        self._bots[bot.id] = bot
+        self._controls[bot.id] = BotControl()
+        self._n_bots[team] += 1
+        return bot
 
     def tick(self):
 
@@ -138,15 +80,9 @@ class StbEngine:
         friction_factor = 50
         collision_factor = 0.0002
 
-        # process control triggers
-        next_triggers = []
-        for trig in self._triggers:
-            tick, b_id, attr, val = trig
-            if tick <= self.nticks:
-                setattr(self._controls[b_id], attr, val)
-            else:
-                next_triggers.append(trig)
-        self._triggers = next_triggers
+        # process AI
+        self.ai1.tick()
+        self.ai2.tick()
 
         # move bullets
         for bullet in self._bullets:
