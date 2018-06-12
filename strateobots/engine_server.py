@@ -23,6 +23,7 @@ class schema:
             'tower_orientation': bot.tower_orientation,
             'hp': bot.hp_ratio,
             'load': bot.load,
+            'has_shield': bot.has_shield,
         }
 
     @staticmethod
