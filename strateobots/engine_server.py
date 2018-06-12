@@ -1,8 +1,10 @@
 import argparse
+import importlib
 import json
 import logging.config
 import random
 import textwrap
+import sys
 from tornado import web, gen, ioloop
 from strateobots.engine import StbEngine
 
@@ -44,6 +46,18 @@ class schema:
             't': explosion.t_ratio,
             's': explosion.size,
         }
+
+
+def get_ai_module():
+    from strateobots import ai
+    ai = importlib.reload(ai)
+    log.info('LOADING AI: %s', ai.default_ai_name)
+    ai_fullname = 'strateobots.ai.' + ai.default_ai_name
+    if ai_fullname in sys.modules:
+        ai_module = importlib.reload(sys.modules[ai_fullname])
+    else:
+        ai_module = importlib.import_module(ai_fullname)
+    return ai_module
 
 
 class SimulationState:
@@ -120,7 +134,8 @@ class ServerState:
         return self._currently_runs
 
     def _make_simulation(self, **params):
-        engine = StbEngine(**params)
+        ai_cls = get_ai_module().AI
+        engine = StbEngine(ai1_cls=ai_cls, ai2_cls=ai_cls, **params)
         simul = SimulationState(engine)
         sim_id = hex(abs(hash('{}_{}'.format(random.random(), self._next_id))))[2:]
         self._next_id += 1

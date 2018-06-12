@@ -1,10 +1,8 @@
 import enum
 import random
-import sys
-import importlib
 import logging
 import collections
-from math import pi, sin, cos, sqrt, atan
+from math import pi, sin, cos, sqrt
 
 
 EPS = 0.000001
@@ -19,7 +17,7 @@ log = logging.getLogger(__name__)
 
 class StbEngine:
 
-    def __init__(self, world_width, world_height):
+    def __init__(self, world_width, world_height, ai1_cls, ai2_cls):
         self.world_width = world_width
         self.world_height = world_height
         self.teams = 0x00DD00, 0x0000FF
@@ -38,9 +36,8 @@ class StbEngine:
         self._win_reached_at = None
         self.ticks_per_sec = 50
 
-        ai_module = get_ai_module()
-        self.ai1 = ai_module.AI(team1, self)
-        self.ai2 = ai_module.AI(team2, self)
+        self.ai1 = ai1_cls(team1, self)
+        self.ai2 = ai2_cls(team2, self)
         self.ai1.initialize()
         self.ai2.initialize()
 
@@ -616,15 +613,3 @@ def position_ray(bot, ray):
     ray.y = y
     ray.cos = cos(angle)
     ray.sin = sin(angle)
-
-
-def get_ai_module():
-    from strateobots import ai
-    ai = importlib.reload(ai)
-    log.info('LOADING AI: %s', ai.default_ai_name)
-    ai_fullname = 'strateobots.ai.' + ai.default_ai_name
-    if ai_fullname in sys.modules:
-        ai_module = importlib.reload(sys.modules[ai_fullname])
-    else:
-        ai_module = importlib.import_module(ai_fullname)
-    return ai_module

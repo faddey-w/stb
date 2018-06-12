@@ -36,7 +36,7 @@ class SimpleDuelAI(BaseAI):
                 ctl = self.engine.get_control(b)
             else:
                 enemy = b
-        if enemy is None:
+        if enemy is None and ctl is not None:
             ctl.fire = False
             ctl.move = 0
             ctl.rotate = 0
@@ -110,7 +110,7 @@ class SniperVsRaider(SimpleDuelAI):
         # slowly move ahead is target is too far to shoot
         # move back if target is within fire range to keep distance
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
-        if dist > bot.type.shot_range:
+        if dist > 0.9 * bot.type.shot_range:
             v = vec_len(bot.vx, bot.vy)
             if v > max_ahead_v:
                 ctl.move = 0
@@ -130,11 +130,7 @@ class SniperVsRaider(SimpleDuelAI):
         # ctl.tower_rotate = navigate_gun(bot, enemy)
 
         # decide if we should fire
-        fire = should_fire(bot, enemy, dist)
-        # if fire and self._fire_start is None:
-        #     self._fire_start = self.engine.nticks + 1.5 * self.engine.ticks_per_sec
-        # ctl.fire = fire and self.engine.nticks > self._fire_start
-        ctl.fire = fire
+        ctl.fire = should_fire(bot, enemy, dist)
 
 
 def to_angle(dx, dy, dist):
