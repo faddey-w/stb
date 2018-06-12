@@ -110,7 +110,7 @@ class StbEngine:
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
             bot.rot_speed = (bot.rot_speed + ctl.rotate * typ.rot_speed) / 2
-            ori_change = bot.rot_speed / tps
+            ori_change = little_noise(bot.rot_speed) / tps
 
             a_angle = bot.orientation + ori_change / 2
             a_sin = sin(a_angle)
@@ -194,14 +194,15 @@ class StbEngine:
                 bot.y = self.world_height-bot_radius
 
             bot.tower_rot_speed = (bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / 2
-            bot.tower_orientation += bot.tower_rot_speed / tps
+            bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
         # firing
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
-            if ctl.shield and bot.load >= SHIELD_LOAD_REQUIRED:
+            if ctl.shield and bot.load >= SHIELD_LOAD_REQUIRED and not bot.has_shield:
                 bot.shield_remaining = SHIELD_DURATION_SEC * tps
+                bot.load -= SHIELD_LOAD_REQUIRED
             if bot.has_shield:
                 bot.shield_remaining -= 1
             else:
@@ -585,6 +586,12 @@ def quantize(x, q):
     if r >= q/2:
         r -= q
     return x - r
+
+
+def little_noise(x):
+    if abs(x) < EPS:
+        return x
+    return random.gauss(x, x/10)
 
 
 class BotControl:
