@@ -1,6 +1,6 @@
 from strateobots.engine import BotType, dist_points, vec_len, dist_line, BOT_RADIUS, vec_dot
 from math import pi, acos, sqrt, asin, copysign, cos, sin
-from ._base import BaseAI
+from ._base import DuelAI
 
 
 def AI(team, engine):
@@ -10,7 +10,7 @@ def AI(team, engine):
         return SniperVsRaider(team, engine)
 
 
-class SimpleDuelAI(BaseAI):
+class SimpleDuelAI(DuelAI):
 
     def _initialize(self, bottype, dx):
         if self.team == self.engine.teams[0]:
@@ -27,21 +27,6 @@ class SimpleDuelAI(BaseAI):
             orientation=a,
             tower_orientation=0
         )
-
-    def _get_bots(self):
-        our = enemy = ctl = None
-        for b in self.engine.iter_bots():
-            if b.team == self.team:
-                our = b
-                ctl = self.engine.get_control(b)
-            else:
-                enemy = b
-        if enemy is None and ctl is not None:
-            ctl.fire = False
-            ctl.move = 0
-            ctl.rotate = 0
-            ctl.tower_rotate = 0
-        return our, enemy, ctl
 
 
 class RaiderVsSniper(SimpleDuelAI):
