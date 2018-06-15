@@ -43,7 +43,7 @@ class RaiderVsSniper(SimpleDuelAI):
 
         orbit_k = 1 / 3
         orbit = orbit_k * bot.type.shot_range
-        max_speed = sqrt(125 * orbit)
+        max_speed = sqrt(500 * orbit)
 
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
         enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
@@ -115,7 +115,7 @@ class SniperVsRaider(SimpleDuelAI):
         # ctl.tower_rotate = navigate_gun(bot, enemy)
 
         # decide if we should fire
-        ctl.fire = should_fire(bot, enemy, dist)
+        ctl.fire = should_fire(bot, enemy, dist) and not enemy.has_shield
 
 
 def to_angle(dx, dy, dist):

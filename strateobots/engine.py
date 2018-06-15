@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 class StbEngine:
 
-    def __init__(self, world_width, world_height, ai1_cls, ai2_cls):
+    def __init__(self, world_width, world_height, ai1_cls, ai2_cls, max_ticks=10000):
         self.world_width = world_width
         self.world_height = world_height
         self.teams = 0x00DD00, 0x0000FF
@@ -33,6 +33,7 @@ class StbEngine:
 
         self.error = False
         self.nticks = 1
+        self.max_ticks = max_ticks
         self._win_reached_at = None
         self.ticks_per_sec = 50
 
@@ -80,7 +81,7 @@ class StbEngine:
         bullet_speed = 1000 / tps
         ray_charge_per_tick = 1 / tps
         bot_radius = BOT_RADIUS
-        friction_factor = 50
+        friction_factor = 175
         collision_factor = 0.0002
 
         # process AI
@@ -380,10 +381,10 @@ class StbEngine:
             win_reached = sum(1 for n in self._n_bots.values() if n > 0) <= 1
             if win_reached:
                 self._win_reached_at = self.nticks
-            return self.nticks >= 10000 or self.error
+            return self.nticks >= self.max_ticks or self.error
         else:
             return self.nticks >= self._win_reached_at + self.ticks_per_sec \
-                   or self.nticks >= 10000 or self.error
+                   or self.nticks >= self.max_ticks or self.error
 
 
 BotTypeProperties = collections.namedtuple(
@@ -414,9 +415,9 @@ class BotType(BotTypeProperties, enum.Enum):
         mass=100,
         cd_period=5,
         acc=17,
-        max_ahead_speed=70,
-        max_back_speed=60,
-        rot_speed=pi / 3,
+        max_ahead_speed=55,
+        max_back_speed=50,
+        rot_speed=pi / 4,
         gun_rot_speed=2 * pi / 3,
         shots_ray=False,
         shot_range=250,
@@ -446,8 +447,8 @@ class BotType(BotTypeProperties, enum.Enum):
         acc=15,
         max_ahead_speed=80,
         max_back_speed=40,
-        rot_speed=pi / 12,
-        gun_rot_speed=pi / 12,
+        rot_speed=pi / 8,
+        gun_rot_speed=pi / 6,
         shots_ray=True,
         shot_range=400,
         fire_scatter=0,
