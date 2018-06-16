@@ -99,16 +99,18 @@ class SimulationState:
 
 
 class ServerState:
-    def __init__(self, max_queue, expire_time, delay):
+    def __init__(self, max_queue, expire_time, delay, extra_params):
         self.max_queue = max_queue
         self.delay = delay
         self.expire_time = expire_time
+        self.extra_params = extra_params
         self._request_queue = []
         self._next_id = 1
         self._simulations = {}
         self._currently_runs = False
 
     def add_request(self, **params) -> 'str':
+        params.update(self.extra_params)
         sim_id, simul = self._make_simulation(**params)
         log.info('ENQUEUE simulation params=%s -> %r', params, sim_id)
         if self._currently_runs:
@@ -277,6 +279,7 @@ def main(argv=None):
     parser.add_argument('--static-dir', required=True)
     parser.add_argument('--port', '-P', default=9999, type=int)
     parser.add_argument('--max-queue', '-Q', default=10, type=int)
+    parser.add_argument('--max-ticks', '-T', default=2000, type=int)
     parser.add_argument('--expire-time', '-E', default=7200, type=int)
     parser.add_argument('--delay', '-D', default=5, type=int)
     parser.add_argument('--debug', action='store_true')
@@ -312,7 +315,10 @@ def main(argv=None):
 
     state = ServerState(max_queue=args.max_queue,
                         expire_time=args.expire_time,
-                        delay=args.delay)
+                        delay=args.delay,
+                        extra_params={
+                            'max_ticks': args.max_ticks
+                        })
     initargs = dict(serverstate=state)
     fileserver_args = dict(path=args.static_dir, default_filename='index.html')
     app = web.Application([

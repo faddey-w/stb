@@ -19,7 +19,7 @@ class SimpleDuelAI(DuelAI):
         else:
             x = self.engine.world_width * (1 - dx)
             a = pi
-        self.engine.add_bot(
+        self.bot = self.engine.add_bot(
             bottype=bottype,
             team=self.team,
             x=x,
@@ -31,8 +31,10 @@ class SimpleDuelAI(DuelAI):
 
 class RaiderVsSniper(SimpleDuelAI):
 
+    bot_type = BotType.Raider
+
     def initialize(self):
-        self._initialize(BotType.Raider, 0.05)
+        self._initialize(self.bot_type, 0.05)
         self.was_attack = False
         self.orbit_k = 2
 

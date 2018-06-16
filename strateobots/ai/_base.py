@@ -17,7 +17,7 @@ class BaseAI:
 
     def x_to_team_field(self, x0to1):
         idx = self.engine.teams.index(self.team)
-        return self.engine.world_width * (x0to1 + idx) / 2
+        return self.engine.world_width * (0.2 + x0to1 * 0.8 + idx) / 2
 
     def train(self):
         pass

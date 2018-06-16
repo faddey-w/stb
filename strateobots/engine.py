@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 
 class StbEngine:
 
-    def __init__(self, world_width, world_height, ai1_cls, ai2_cls, max_ticks=10000):
+    def __init__(self, world_width, world_height, ai1_cls, ai2_cls, max_ticks=1000):
         self.world_width = world_width
         self.world_height = world_height
         self.teams = 0x00DD00, 0x0000FF
