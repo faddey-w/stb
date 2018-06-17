@@ -88,6 +88,8 @@ class StbEngine:
         try:
             self.ai1.tick()
             self.ai2.tick()
+        except KeyboardInterrupt:
+            raise
         except:
             log.exception('ERROR while processing AI')
             self.error = True
@@ -602,6 +604,11 @@ class BotControl:
         self.tower_rotate = tower_rotate
         self.fire = fire
         self.shield = shield
+
+    def __repr__(self):
+        return 'BotControl(move={}, rotate={}, tower_rotate={}, fire={}, shield={})'.format(
+            self.move, self.rotate, self.tower_rotate, self.fire, self.shield
+        )
 
 
 def position_ray(bot, ray):
