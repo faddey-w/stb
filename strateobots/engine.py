@@ -83,6 +83,7 @@ class StbEngine:
         bot_radius = BOT_RADIUS
         friction_factor = 175
         collision_factor = 0.0002
+        rotation_smoothness = 5
 
         # process AI
         try:
@@ -109,7 +110,7 @@ class StbEngine:
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
-            bot.rot_speed = (bot.rot_speed + ctl.rotate * typ.rot_speed) / 2
+            bot.rot_speed = (rotation_smoothness * bot.rot_speed + ctl.rotate * typ.rot_speed) / (rotation_smoothness + 1)
             ori_change = little_noise(bot.rot_speed) / tps
 
             a_angle = bot.orientation + ori_change / 2
@@ -193,7 +194,7 @@ class StbEngine:
             elif bot.y > self.world_height-bot_radius:
                 bot.y = self.world_height-bot_radius
 
-            bot.tower_rot_speed = (bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / 2
+            bot.tower_rot_speed = (rotation_smoothness * bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / (1 + rotation_smoothness)
             bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
         # firing
