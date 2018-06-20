@@ -253,7 +253,7 @@ class StbEngine:
                 bcos = cos(bot.orientation)
 
                 hit_factor = half_chord_len(bot_radius, h) / bot_radius
-                armor_factor = vec_dot(dx, dy, bcos, bsin) / vec_len(dx, dy)
+                armor_factor = vec_dot(dx, dy, bcos, bsin) / (vec_len(dx, dy) + EPS)
 
                 damage = bullet.type.damage * hit_factor / (2 + armor_factor)
                 if bot.has_shield:
