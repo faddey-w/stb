@@ -315,7 +315,15 @@ class ReinforcementLearning:
         self.y = self.train_reward_ph + (1 - reward_decay) * self.train_selector.max_q
         self.loss_vector = (self.y - self.train_qfunc.quality) ** 2
         self.loss = tf.reduce_mean(self.loss_vector)
-        self.train_step = self.optimizer.minimize(self.loss, var_list=model.var_list)
+
+        regularization_losses = [
+            tf.reduce_mean(tf.square(v))
+            for v in model.var_list
+        ]
+        self.regularization_loss = tf.add_n(regularization_losses)
+        self.total_loss = self.loss + 0.05 * self.regularization_loss
+
+        self.train_step = self.optimizer.minimize(self.total_loss, var_list=model.var_list)
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
@@ -436,7 +444,7 @@ class ReinforcementLearning:
                     self.train_action_ph: action_sample,
                     self.train_reward_ph: reward_sample,
                 })
-                self.add_train_stats(stats, train_stats)
+                self.add_train_stats(stats, reward_sample, train_stats)
 
             # report on games
             if iteration % 11 == 1 and games:
@@ -472,10 +480,11 @@ class ReinforcementLearning:
             self.train_qfunc.quality,
         ]
 
-    def add_train_stats(self, stat_store, stat_values):
+    def add_train_stats(self, stat_store, reward_sample, stat_values):
         loss, y, t_q = stat_values
         stat_store['y'] += np.sum(y) / np.size(y)
         stat_store['t_q'] += np.sum(t_q) / np.size(t_q)
+        stat_store['reward_sample'] += np.sum(reward_sample) / np.size(reward_sample)
         stat_store['n_train'] += 1
 
     def report_on_game(self, engine, averages, stats):
@@ -496,7 +505,7 @@ class ReinforcementLearning:
             'dc={:5.1f} de={:5.1f}   '
             'b1=({:5.1f},{:5.1f})   b2=({:5.1f}, {:5.1f})    '
             'r={:5.3f}    Q={:5.3f}    '
-            'y={:5.3f}    Q\'={:5.3f}'.format(
+            'r\'={:5.3f}    y={:5.3f}    Q\'={:5.3f}'.format(
                 d_center,
                 d_enemy,
                 engine.ai1.bot.x,
@@ -505,6 +514,7 @@ class ReinforcementLearning:
                 engine.ai2.bot.y,
                 stats['reward'] / max(1, stats['n_emu']),
                 stats['emu_max_q'] / max(1, stats['n_emu']),
+                stats['reward_sample'] / max(1, stats['n_train']),
                 stats['y'] / max(1, stats['n_train']),
                 stats['t_q'] / max(1, stats['n_train']),
             ))
