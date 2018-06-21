@@ -10,6 +10,7 @@ BOT_RADIUS = 25
 SHIELD_DAMAGE_FACTOR = 1/5
 SHIELD_DURATION_SEC = 0.75
 SHIELD_LOAD_REQUIRED = 0.5
+RAY_MIN_LOAD_REQUIRED = 0.33
 
 
 log = logging.getLogger(__name__)
@@ -218,16 +219,22 @@ class StbEngine:
                     )
                     next_bullets.append(bullet)
                     bot.load = 0
-                elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick:
+                    bot.is_firing = True
+                elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick and bot.is_firing:
+                    # ray should already be in rays dict
+                    pass
+                elif ctl.fire and typ.shots_ray and bot.load > RAY_MIN_LOAD_REQUIRED:
                     if bot.id not in self._rays:
                         bullet = BulletModel(
                             typ, b_id, bot.orientation + bot.tower_orientation,
                             bot.x, bot.y, typ.shot_range
                         )
                         self._rays[bot.id] = bullet
+                    bot.is_firing = True
                 else:
                     if bot.load < 1:
                         bot.load += 1 / (typ.cd_period * tps)
+                    bot.is_firing = False
 
         # update rays
         for ray in self._rays.values():
@@ -463,8 +470,8 @@ class BotModel:
 
     __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y', 'vx', 'vy',
                  'rot_speed', 'orientation', 'tower_orientation',
-                 'move_ahead', 'move_back', 'shoot',
-                 'shield_remaining', 'rotation', 'tower_rot_speed']
+                 'is_firing',
+                 'shield_remaining', 'tower_rot_speed']
 
     def __init__(self, id, team, type, x, y, orientation):
         self.id = id
@@ -480,11 +487,8 @@ class BotModel:
         self.tower_rot_speed = 0
         self.orientation = orientation
         self.tower_orientation = 0.0
-        self.move_ahead = False
-        self.move_back = False
-        self.rotation = 0
         self.shield_remaining = 0
-        self.shoot = False
+        self.is_firing = False
 
     @property
     def hp_ratio(self):
