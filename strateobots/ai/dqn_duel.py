@@ -1,5 +1,8 @@
+import argparse
 import itertools
 import functools
+import traceback
+import collections
 import random
 import numpy as np
 import tensorflow as tf
@@ -9,7 +12,7 @@ import logging
 from math import pi, sin, cos
 from strateobots.engine import BotType, StbEngine, dist_points, BotControl
 from ._base import DuelAI
-from .simple_duel import RaiderVsSniper
+from .simple_duel import RaiderVsSniper, SniperVsRaider
 
 
 tf.reset_default_graph()
@@ -22,6 +25,8 @@ class BaseDQNDualAI(DuelAI):
         x = random.random()
         if teamize_x:
             x = self.x_to_team_field(x)
+        else:
+            x *= self.engine.world_width
         return self.engine.add_bot(
             bottype=random_bot_type(),
             team=self.team,
@@ -33,15 +38,13 @@ class BaseDQNDualAI(DuelAI):
 
 
 def AI(team, engine):
-    if team == engine.teams[0] or True:
+    if team == engine.teams[0]:
         if RunAI.Shared.instance is None:
             RunAI.Shared.instance = RunAI.Shared()
         return RunAI(team, engine, RunAI.Shared.instance)
     else:
-        return PassiveAI(team, engine)
-        ai = RaiderVsSniper(team, engine)
-        ai.bot_type = random_bot_type()
-        return ai
+        # return PassiveAI(team, engine)
+        return TrainerAI(team, engine)
 
 
 class RunAI(BaseDQNDualAI):
@@ -50,10 +53,10 @@ class RunAI(BaseDQNDualAI):
         instance = None
 
         def __init__(self):
-            self.state_ph = tf.placeholder(tf.float32, [1, state_vector_len])
+            self.state_ph = tf.placeholder(tf.float32, [1, aug_state_vector_len])
             self.model = QualityFunction.Model()
             self.model.load_vars()
-            self.selector = SelectAction(self.model, self.state_ph)
+            self.selector = SelectAction(self.model, self.state_ph, -1)
 
     def __init__(self, team, engine, ai_shared):
         super(RunAI, self).__init__(team, engine)
@@ -89,6 +92,29 @@ class TrainableAI(BaseDQNDualAI):
         decode_action(self.action, ctl)
 
 
+class TrainerRaiderAI(RaiderVsSniper):
+
+    def initialize(self):
+        self.bot_type = random_bot_type()
+        super(TrainerRaiderAI, self).initialize()
+
+
+class TrainerSniperAI(SniperVsRaider):
+
+    def initialize(self):
+        self.bot_type = random_bot_type()
+        super(TrainerSniperAI, self).initialize()
+
+
+def TrainerAI(team, engine):
+    if random.random() > 0.5:
+        log.info('initializing short-range-attack trainer')
+        return TrainerRaiderAI(team, engine)
+    else:
+        log.info('initializing distant-attack trainer')
+        return TrainerSniperAI(team, engine)
+
+
 class PassiveAI(BaseDQNDualAI):
 
     def initialize(self):
@@ -114,7 +140,7 @@ class QualityFunction:
             self.__class__._cnt += 1
             self.name = 'Q{}'.format(self._cnt)
             with tf.variable_scope(self.name):
-                d_in = state_vector_len + action_vector_len
+                d_in = aug_state_vector_len + action_vector_len
                 self.transforms = []
                 self.weights = []
                 self.biases = []
@@ -133,7 +159,11 @@ class QualityFunction:
                 self.var_list.append(self.qw)
 
             self.initializer = tf.variables_initializer(self.var_list)
-            self.saver = tf.train.Saver(self.var_list)
+            self.saver = tf.train.Saver(
+                self.var_list,
+                pad_step_number=True,
+                save_relative_paths=True,
+            )
             self.step_counter = 0
 
         def init_vars(self, session=None):
@@ -159,10 +189,13 @@ class QualityFunction:
                      self.name, ckpt.model_checkpoint_path, self.step_counter)
             self.saver.restore(session, ckpt.model_checkpoint_path)
 
+        def augment_state(self, vector):
+            return augment_state_vector(vector)
+
     def __init__(self, model, state, action):
         """
         :param model: QualityFunction.Model
-        :param state: [..., state_vector_len]
+        :param state: [..., aug_state_vector_len]
         :param action: [..., action_vector_len]
         ellipsis shapes should be the same
         """
@@ -182,26 +215,30 @@ class QualityFunction:
             transformed = tf.matmul(syncshape(tr), vector)
             nobias = tf.matmul(syncshape(w), vector)
             noact = tf.add(nobias, syncshape(b))
-            if w is self.model.weights[-1]:  # if is last level
-                resid = tf.sigmoid(noact)
-            else:
-                resid = tf.nn.relu(noact)
             d = transformed.shape.as_list()[-1]
             dhalf = d // 2
-            out1 = transformed[..., :dhalf] + resid[..., :dhalf]
-            out2 = transformed[..., dhalf:] * resid[..., dhalf:]
+            act1 = tf.nn.relu(noact[..., :dhalf])
+            act2 = tf.sigmoid(noact[..., dhalf:])
+            out1 = transformed[..., :dhalf] + act1
+            out2 = transformed[..., dhalf:] * act2
             out = tf.concat([out1, out2], -1)
             self.levels.append(dict(
                 transf=transformed,
                 nobias=nobias,
                 noact=noact,
+                act1=act1,
+                act2=act2,
                 out=out,
-                resid=resid,
             ))
             vector = out
 
         quality = tf.matmul(syncshape(model.qw), vector)
-        self.quality = tf.squeeze(quality, [-2, -1])
+        finite_assert = tf.Assert(
+            tf.reduce_all(tf.is_finite(quality)),
+            [tf.reduce_all(tf.is_finite(v)) for v in model.var_list],
+        )
+        with tf.control_dependencies([finite_assert]):
+            self.quality = tf.squeeze(quality, [-2, -1])
 
     def call(self, state, action, session=None):
         session = session or get_session()
@@ -251,7 +288,7 @@ class SelectAction:
 class ReinforcementLearning:
 
     def __init__(self, model, batch_size=10, n_games=10, memory_cap=200,
-                 reward_decay=0.03, self_play=True):
+                 reward_decay=0.03, self_play=True, select_random_prob_decrease=0.05):
         self.memory_cap = memory_cap
         self.replay_memory = None
 
@@ -261,33 +298,31 @@ class ReinforcementLearning:
         self.self_play = self_play
 
         emu_items = 2 if self_play else 1
-        self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, state_vector_len])
-        self.emu_selector = SelectAction(self.model, self.emu_state_ph)
+        self.select_random_prob_decrease = select_random_prob_decrease
+        self.select_random_prob_ph = tf.placeholder(tf.float32, [])
+        self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, aug_state_vector_len])
+        self.emu_selector = SelectAction(self.model, self.emu_state_ph, self.select_random_prob_ph)
 
-        self.train_state_ph = tf.placeholder(tf.float32, [batch_size, state_vector_len])
-        self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, state_vector_len])
+        self.train_state_ph = tf.placeholder(tf.float32, [batch_size, aug_state_vector_len])
+        self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, aug_state_vector_len])
         self.train_action_ph = tf.placeholder(tf.float32, [batch_size, action_vector_len])
         self.train_reward_ph = tf.placeholder(tf.float32, [batch_size])
-        self.optimizer = tf.train.GradientDescentOptimizer(0.01)
-        self.train_selector = SelectAction(self.model, self.train_next_state_ph)
+        self.train_selector = SelectAction(self.model, self.train_next_state_ph, -1)
         self.train_qfunc = QualityFunction(self.model, self.train_state_ph, self.train_action_ph)
+
+        self.optimizer = tf.train.AdamOptimizer()
 
         self.y = self.train_reward_ph + (1 - reward_decay) * self.train_selector.max_q
         self.loss_vector = (self.y - self.train_qfunc.quality) ** 2
-        self.loss = tf.reduce_max(self.loss_vector)
+        self.loss = tf.reduce_mean(self.loss_vector)
         self.train_step = self.optimizer.minimize(self.loss, var_list=model.var_list)
 
+        self.init_op = tf.variables_initializer(self.optimizer.variables())
+
     def run(self, frameskip=0, max_ticks=1000, world_size=300):
-        ctl = BotControl()
-
-        def trainer_ai(team, engine):
-            ai = RaiderVsSniper(team, engine)
-            ai.bot_type = random_bot_type()
-            return ai
-
         sess = get_session()
         # ai2_cls = TrainableAI if self.self_play else PassiveAI
-        ai2_cls = TrainableAI if self.self_play else trainer_ai
+        ai2_cls = TrainableAI if self.self_play else TrainerAI
         games = {
             i: StbEngine(
                 world_size, world_size,
@@ -296,15 +331,17 @@ class ReinforcementLearning:
             for i in range(self.n_games)
         }
         memcap = self.memory_cap
-        if self.replay_memory is None:
-            replay_state = np.empty((memcap, 2, 2, state_vector_len), np.float32)
-            replay_action = np.empty((memcap, action_vector_len), np.float32)
-            replay_reward = np.empty((memcap,), np.float32)
-            replay_indices = set()
-            self.replay_memory = replay_state, replay_action, replay_reward, replay_indices
-        else:
-            replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
+        self.init_replay_memory()
+        replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
+        replay_state_aug = np.empty((*replay_state.shape[:-1], aug_state_vector_len))
+        for i in replay_indices:
+            for j, k in [(0, 0), (0, 1), (1, 0), (1, 1)]:
+                s_aug = self.model.augment_state(replay_state[i, j, k])
+                replay_state_aug[i, j, k] = s_aug
         replay_idx = {i: i for i in range(self.n_games)}
+        last_replay_idx = {}
+
+        stats = collections.defaultdict(float)
 
         iteration = 0
         while games:
@@ -313,15 +350,31 @@ class ReinforcementLearning:
             # do step of games
             for g, engine in games.items():
                 idx = replay_idx[g]
-                replay_state[idx, 0, 0] = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
-                replay_state[idx, 0, 1] = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
+                replay_state[idx, 0, 0] = s1 = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
+                replay_state[idx, 0, 1] = s2 = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
+                replay_state_aug[idx, 0, 0] = self.model.augment_state(s1)
+                replay_state_aug[idx, 0, 1] = self.model.augment_state(s2)
+
+                select_random_prob = max(
+                    0.1,
+                    1 - self.select_random_prob_decrease * self.model.step_counter
+                )
+                emu_stats_t = self.get_emu_stats()
                 if self.self_play:
-                    actions = sess.run(self.emu_selector.action, {
-                        self.emu_state_ph: replay_state[idx, 0],
+                    actions, emu_stats = sess.run([
+                        self.emu_selector.action,
+                        emu_stats_t
+                    ], {
+                        self.emu_state_ph: replay_state_aug[idx, 0],
+                        self.select_random_prob_ph: select_random_prob,
                     })
                 else:
-                    actions = sess.run(self.emu_selector.action, {
-                        self.emu_state_ph: replay_state[idx, 0, :1],
+                    actions, emu_stats = sess.run([
+                        self.emu_selector.action,
+                        emu_stats_t
+                    ], {
+                        self.emu_state_ph: replay_state_aug[idx, 0, :1],
+                        self.select_random_prob_ph: select_random_prob,
                     })
                 replay_action[idx] = actions[0]
 
@@ -331,23 +384,16 @@ class ReinforcementLearning:
                 for _ in range(1 + frameskip):
                     engine.tick()
 
-                score_after = engine.ai1.bot.hp_ratio - engine.ai2.bot.hp_ratio
-                # decode_action(actions[0], ctl)
-                # activity_penalty = ctl.fire + (ctl.move != 0) + (ctl.rotate != 0) + (ctl.tower_rotate != 0)
-                # reward = score_after - score_before  # - 0.025 * activity_penalty
-                reward = score_after
-                reward -= 0.1 * dist_points(
-                    engine.ai1.bot.x,
-                    engine.ai1.bot.y,
-                    engine.world_width / 2,
-                    engine.world_height / 2,
-                    # engine.ai2.bot.x,
-                    # engine.ai2.bot.y,
-                ) / world_size
+                reward = engine.ai1.bot.hp_ratio - engine.ai2.bot.hp_ratio
+                reward *= 10  # make reward scale larger to stabilize learning
                 replay_reward[idx] = reward
 
-                replay_state[idx, 1, 0] = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
-                replay_state[idx, 1, 1] = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
+                self.add_emu_stats(stats, emu_stats, reward)
+
+                replay_state[idx, 1, 0] = s1 = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
+                replay_state[idx, 1, 1] = s2 = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
+                replay_state_aug[idx, 1, 0] = self.model.augment_state(s1)
+                replay_state_aug[idx, 1, 1] = self.model.augment_state(s2)
                 replay_indices.add(idx)
 
                 if engine.is_finished:
@@ -361,8 +407,6 @@ class ReinforcementLearning:
                         next_idx += 1
                     next_idx %= memcap
                 else:
-                    # if engine.nticks > 5000:
-                    #     return replay_state, replay_action, replay_reward
                     for _ in range(memcap):
                         next_idx += 1
                         next_idx %= memcap
@@ -371,72 +415,199 @@ class ReinforcementLearning:
                     else:
                         next_idx = idx
 
+                last_replay_idx[g] = replay_idx[g]
                 replay_idx[g] = next_idx
 
             # do GD step
             if len(replay_indices) >= self.batch_size:
                 replay_sample = tuple(random.sample(
                     replay_indices - set(replay_idx.values()),
-                    self.batch_size-len(replay_idx),
-                )) + tuple(replay_idx.values())
-                bots_sample = replay_state[replay_sample, ]
+                    self.batch_size-len(last_replay_idx),
+                )) + tuple(last_replay_idx.values())
+                bots_sample = replay_state_aug[replay_sample, ]
                 action_sample = replay_action[replay_sample, ]
                 reward_sample = replay_reward[replay_sample, ]
-                sess.run(self.train_step, {
+                _, train_stats = sess.run([
+                    self.train_step,
+                    self.get_train_stats()
+                ], {
                     self.train_state_ph: bots_sample[:, 0, 0],
                     self.train_next_state_ph: bots_sample[:, 1, 0],
                     self.train_action_ph: action_sample,
                     self.train_reward_ph: reward_sample,
                 })
+                self.add_train_stats(stats, train_stats)
 
             # report on games
-            if iteration % 7 == 1 and games:
-                dist_sum = 0
+            if iteration % 11 == 1 and games:
+                averages = collections.defaultdict(float)
                 for g, engine in games.items():
-                    d = dist_points(
-                        engine.ai1.bot.x,
-                        engine.ai1.bot.y,
-                        engine.ai2.bot.x,
-                        engine.ai2.bot.y,
-                    )
-                    dist_sum += d
-                    print('#{}: {}/{} t={} vs={:.2f}/{:.2f} d={:.2f}'.format(
+                    print('#{}: {}/{} t={} hp={:.2f}/{:.2f} {}'.format(
                         g,
                         engine.ai1.bot.type.name[:1],
                         engine.ai2.bot.type.name[:1],
                         engine.nticks,
                         engine.ai1.bot.hp_ratio,
                         engine.ai2.bot.hp_ratio,
-                        d
+                        self.report_on_game(engine, averages, stats)
                     ))
-                print('avg dist = {:.3f}'.format(dist_sum / len(games)))
-                print()
+                if self.n_games > 1:
+                    for key, val in averages.items():
+                        print('{} = {:.3f}'.format(key, val / len(games)))
+                    print()
 
-            # report on memory
-            # if iteration % 100 == 1 and len()
+    def get_emu_stats(self):
+        return self.emu_selector.max_q
+
+    def add_emu_stats(self, stat_store, stat_values, reward):
+        max_q = stat_values
+        stat_store['reward'] += reward
+        stat_store['emu_max_q'] += np.sum(max_q) / np.size(max_q)
+        stat_store['n_emu'] += 1
+
+    def get_train_stats(self):
+        return [
+            self.loss,
+            self.y,
+            self.train_qfunc.quality,
+        ]
+
+    def add_train_stats(self, stat_store, stat_values):
+        loss, y, t_q = stat_values
+        stat_store['y'] += np.sum(y) / np.size(y)
+        stat_store['t_q'] += np.sum(t_q) / np.size(t_q)
+        stat_store['n_train'] += 1
+
+    def report_on_game(self, engine, averages, stats):
+        d_center = dist_points(
+            engine.ai1.bot.x,
+            engine.ai1.bot.y,
+            engine.world_width / 2,
+            engine.world_height / 2,
+        )
+        d_enemy = dist_points(
+            engine.ai1.bot.x,
+            engine.ai1.bot.y,
+            engine.ai2.bot.x,
+            engine.ai2.bot.y,
+        )
+        averages['dist_sum'] += d_center
+        report = (
+            'dc={:5.1f} de={:5.1f}   '
+            'b1=({:5.1f},{:5.1f})   b2=({:5.1f}, {:5.1f})    '
+            'r={:5.3f}    Q={:5.3f}    '
+            'y={:5.3f}    Q\'={:5.3f}'.format(
+                d_center,
+                d_enemy,
+                engine.ai1.bot.x,
+                engine.ai1.bot.y,
+                engine.ai2.bot.x,
+                engine.ai2.bot.y,
+                stats['reward'] / max(1, stats['n_emu']),
+                stats['emu_max_q'] / max(1, stats['n_emu']),
+                stats['y'] / max(1, stats['n_train']),
+                stats['t_q'] / max(1, stats['n_train']),
+            ))
+        stats.clear()
+        return report
+
+    def init_replay_memory(self):
+        if self.replay_memory is None:
+            memcap = self.memory_cap
+            replay_state = np.empty((memcap, 2, 2, state_vector_len), np.float32)
+            replay_action = np.empty((memcap, action_vector_len), np.float32)
+            replay_reward = np.empty((memcap,), np.float32)
+            replay_indices = set()
+            self.replay_memory = replay_state, replay_action, replay_reward, replay_indices
+
+    def save_replay_memory(self, directory):
+        if self.replay_memory is None:
+            return
+        replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
+        idx = tuple(replay_indices)
+        np.save(os.path.join(directory, 'state.npy'), replay_state[idx, ])
+        np.save(os.path.join(directory, 'action.npy'), replay_action[idx, ])
+        np.save(os.path.join(directory, 'reward.npy'), replay_reward[idx, ])
+
+    def load_replay_memory(self, directory):
+        try:
+            state = np.load(os.path.join(directory, 'state.npy'))
+            action = np.load(os.path.join(directory, 'action.npy'))
+            reward = np.load(os.path.join(directory, 'reward.npy'))
+        except:
+            traceback.print_exc()
+            return
+        else:
+            if not (state.shape[0] == action.shape[0] == reward.shape[0]):
+                raise AssertionError('saved replay memory is inconsistent')
+            data_size = min(self.memory_cap, state.shape[0])
+            self.init_replay_memory()
+            self.replay_memory[0][:data_size] = state[:data_size]
+            self.replay_memory[1][:data_size] = action[:data_size]
+            self.replay_memory[2][:data_size] = reward[:data_size]
+            self.replay_memory[3].clear()
+            self.replay_memory[3].update(range(data_size))
 
 
 def make_state_vector(bot, enemy, engine):
-    return bot2vec(bot, engine) + bot2vec(enemy, engine)
+    b = bot2vec(bot, engine)
+    e = bot2vec(enemy, engine)
+    return b + e
+
+
+def augment_state_vector(vector):
+    sz = len(vector)
+    b = bot_vector(*vector[:sz//2])
+    e = bot_vector(*vector[sz//2:])
+    aug = tuple(
+        getattr(b1, elem1) * getattr(b2, elem2)
+        for elem1 in _aug_elements
+        for elem2 in _aug_elements
+        if (elem1, elem2) not in _no_aug
+        for b1, b2 in itertools.product([b, e], [b, e])
+    )
+    return np.concatenate([vector, aug])
+
+_aug_elements = ['x', 'y', 'vx', 'vy', 'o_cos', 'o_sin', 'g_cos', 'g_sin']
+_no_aug = [
+    ('x', 'vx'),
+    ('x', 'vy'),
+    ('y', 'vx'),
+    ('y', 'vy'),
+    ('o_cos', 'g_cos'),
+    ('o_cos', 'g_sin'),
+    ('o_sin', 'g_cos'),
+    ('o_sin', 'g_sin'),
+]
+_no_aug += [tup[::-1] for tup in _no_aug]
+
+
+bot_vector = collections.namedtuple('bot_vector', [
+    'type1', 'type2', 'type3', 'hp', 'load', 'shield',
+    'x', 'y', 'vx', 'vy', 'o_cos', 'o_sin', 'g_cos', 'g_sin',
+    # 'ori', 'gun_ori',
+])
 
 
 def bot2vec(bot, engine):
-    return [
+    return bot_vector(
         int(bot.type == BotType.Raider),
         int(bot.type == BotType.Heavy),
         int(bot.type == BotType.Sniper),
         bot.hp_ratio,
         bot.load,
-        bot.x / engine.world_width,
-        bot.y / engine.world_height,
-        bot.vx / bot.type.max_ahead_speed,
-        bot.vy / bot.type.max_ahead_speed,
+        max(0, bot.shield_remaining / engine.ticks_per_sec),
+        bot.x,
+        bot.y,
+        bot.vx,
+        bot.vy,
         cos(bot.orientation),
         sin(bot.orientation),
         cos(bot.orientation + bot.tower_orientation),
         sin(bot.orientation + bot.tower_orientation),
-        bot.shield_remaining,
-    ]
+        # bot.orientation % (2*pi),
+        # bot.tower_orientation % (2*pi),
+    )
 
 
 def action2vec(ctl):
@@ -493,8 +664,10 @@ def add_batch_shape(x, batch_shape):
 
 def __get_state_vector_len():
     engine = StbEngine(1, 1, PassiveAI, PassiveAI)
-    return len(make_state_vector(engine.ai1.bot, engine.ai1.bot, engine))
-state_vector_len = __get_state_vector_len()
+    st = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
+    st_aug = augment_state_vector(st)
+    return len(st), len(st_aug)
+state_vector_len, aug_state_vector_len = __get_state_vector_len()
 action_vector_len = len(action2vec(BotControl()))
 
 
@@ -510,13 +683,22 @@ def get_session():
     return sess
 
 
-DEFAULT_QFUNC_MODEL = (20, 15, 10)
+DEFAULT_QFUNC_MODEL = (15, 10, 5)
 
 
 def main():
+    this_dir = os.path.dirname(__file__)
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument('action', choices=['train', 'play'], default='train')
+    parser.add_argument('--no-save', action='store_false', dest='save')
+    parser.add_argument('--replay-dir', default=os.path.join(this_dir, '_replay_memory'))
+    opts = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO)
 
     model = QualityFunction.Model()
+    sess = get_session()
     try:
         model.load_vars()
     except:
@@ -524,28 +706,35 @@ def main():
     rl = ReinforcementLearning(
         model,
         batch_size=80,
-        n_games=10,
-        memory_cap=10000,
-        reward_decay=0.02,
-        self_play=True,
+        n_games=1,
+        memory_cap=50000,
+        reward_decay=0.95,
+        select_random_prob_decrease=0.01,
+        self_play=False,
     )
+    sess.run(rl.init_op)
+    rl.load_replay_memory(opts.replay_dir)
 
-    try:
-        while True:
-            rl.run(
-                frameskip=22,
-                max_ticks=10000,
-                world_size=1000,
-            )
-            # break
-            model.save_vars()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        pass
-        model.save_vars()
-
-    # import code; code.interact(local=dict(globals(), **locals()))
+    if opts.action == 'play':
+        import code
+        code.interact(local=dict(globals(), **locals()))
+    if opts.action == 'train':
+        try:
+            while True:
+                rl.run(
+                    frameskip=2,
+                    max_ticks=8000,
+                    world_size=1000,
+                )
+                if opts.save:
+                    model.save_vars()
+                    rl.save_replay_memory(opts.replay_dir)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if opts.save:
+                model.save_vars()
+                rl.save_replay_memory(opts.replay_dir)
 
 
 if __name__ == '__main__':

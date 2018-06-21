@@ -53,6 +53,9 @@ def get_ai_module():
     ai = importlib.reload(ai)
     log.info('LOADING AI: %s', ai.default_ai_name)
     ai_fullname = 'strateobots.ai.' + ai.default_ai_name
+    for modname, mod in sys.modules.items():
+        if modname.startswith('strateobots.ai.lib.'):
+            importlib.reload(mod)
     if ai_fullname in sys.modules:
         ai_module = importlib.reload(sys.modules[ai_fullname])
     else:

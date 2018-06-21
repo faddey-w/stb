@@ -47,7 +47,7 @@ def short_range_attack(bot, enemy, ctl):
 def distance_attack(bot, enemy, ctl):
     if None in (bot, enemy):
         return
-    max_ahead_v = 5
+    max_ahead_v = 15
 
     # slowly move ahead is target is too far to shoot
     # move back if target is within fire range to keep distance
