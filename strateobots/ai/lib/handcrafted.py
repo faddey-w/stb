@@ -47,7 +47,7 @@ def short_range_attack(bot, enemy, ctl):
 def distance_attack(bot, enemy, ctl):
     if None in (bot, enemy):
         return
-    max_ahead_v = 15
+    max_ahead_v = 100
 
     # slowly move ahead is target is too far to shoot
     # move back if target is within fire range to keep distance
@@ -63,7 +63,8 @@ def distance_attack(bot, enemy, ctl):
 
     # try to keep target in front
     enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
-    ctl.rotate = ctl.tower_rotate = navigate_shortest(bot, enemy_angle)
+    ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+    ctl.tower_rotate = navigate_shortest(bot, enemy_angle)
     # ori_angle = norm_angle(bot.orientation)
     # if norm_angle(enemy_angle - ori_angle) > 0:
     #     ctl.rotate = +1
@@ -105,9 +106,12 @@ def should_fire(bot, enemy, dist):
     return (dist < bot.type.shot_range) and (fireline_dist < BOT_RADIUS) and dot > 0
 
 
-def navigate_shortest(bot, enemy_angle):
-    gun_angle = bot.orientation + bot.tower_orientation
-    need_to_rotate = norm_angle(enemy_angle - gun_angle)
+def navigate_shortest(bot, enemy_angle, with_gun=True):
+    if with_gun:
+        angle = bot.orientation + bot.tower_orientation
+    else:
+        angle = bot.orientation
+    need_to_rotate = norm_angle(enemy_angle - angle)
     return +1 if need_to_rotate > 0 else -1
 
 

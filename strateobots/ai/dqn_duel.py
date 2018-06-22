@@ -69,9 +69,9 @@ class RunAI(BaseDQNDualAI):
         bot, enemy, ctl = self._get_bots()
         if None in (bot, enemy):
             return
-        action = self.shared.selector.call({
-            self.shared.state_ph: [make_state_vector(bot, enemy, self.engine)],
-        })
+        st = make_state_vector(bot, enemy, self.engine)
+        st_aug = augment_state_vector(st)
+        action = self.shared.selector.call({self.shared.state_ph: [st_aug]})
         decode_action(action[0], ctl)
 
 
@@ -97,6 +97,7 @@ class TrainerRaiderAI(RaiderVsSniper):
     def initialize(self):
         self.bot_type = random_bot_type()
         super(TrainerRaiderAI, self).initialize()
+        _randomize_position(self.bot, self.engine)
 
 
 class TrainerSniperAI(SniperVsRaider):
@@ -104,6 +105,7 @@ class TrainerSniperAI(SniperVsRaider):
     def initialize(self):
         self.bot_type = random_bot_type()
         super(TrainerSniperAI, self).initialize()
+        _randomize_position(self.bot, self.engine)
 
 
 def TrainerAI(team, engine):
@@ -113,6 +115,13 @@ def TrainerAI(team, engine):
     else:
         log.info('initializing distant-attack trainer')
         return TrainerSniperAI(team, engine)
+
+
+def _randomize_position(bot, engine):
+    bot.x = random.random() * engine.world_width
+    bot.y = random.random() * engine.world_height
+    bot.orientation = random.random() * 2 * pi
+    bot.tower_orientation = random.random() * 2 * pi
 
 
 class PassiveAI(BaseDQNDualAI):
@@ -321,7 +330,7 @@ class ReinforcementLearning:
             for v in model.var_list
         ]
         self.regularization_loss = tf.add_n(regularization_losses)
-        self.total_loss = self.loss + 0.05 * self.regularization_loss
+        self.total_loss = self.loss + 0.001 * self.regularization_loss
 
         self.train_step = self.optimizer.minimize(self.total_loss, var_list=model.var_list)
 
@@ -574,7 +583,7 @@ def augment_state_vector(vector):
         for elem1 in _aug_elements
         for elem2 in _aug_elements
         if (elem1, elem2) not in _no_aug
-        for b1, b2 in itertools.product([b, e], [b, e])
+        for b1, b2 in [[b, e], [b, b], [e, e]]
     )
     return np.concatenate([vector, aug])
 
@@ -593,7 +602,7 @@ _no_aug += [tup[::-1] for tup in _no_aug]
 
 
 bot_vector = collections.namedtuple('bot_vector', [
-    'type1', 'type2', 'type3', 'hp', 'load', 'shield',
+    'type1', 'type2', 'type3', 'hp', 'load', 'shield', 'is_firing',
     'x', 'y', 'vx', 'vy', 'o_cos', 'o_sin', 'g_cos', 'g_sin',
     # 'ori', 'gun_ori',
 ])
@@ -607,6 +616,7 @@ def bot2vec(bot, engine):
         bot.hp_ratio,
         bot.load,
         max(0, bot.shield_remaining / engine.ticks_per_sec),
+        bot.is_firing,
         bot.x,
         bot.y,
         bot.vx,
@@ -622,9 +632,15 @@ def bot2vec(bot, engine):
 
 def action2vec(ctl):
     return [
-        ctl.move,
-        ctl.rotate,
-        ctl.tower_rotate,
+        ctl.move == +1,
+        ctl.move == 0,
+        ctl.move == -1,
+        ctl.rotate == +1,
+        ctl.rotate == 0,
+        ctl.rotate == -1,
+        ctl.tower_rotate == +1,
+        ctl.tower_rotate == 0,
+        ctl.tower_rotate == -1,
         int(ctl.fire),
         int(ctl.shield),
     ]
@@ -638,13 +654,12 @@ def decode_action(vec, ctl):
     ctl.shield = vec[4] > 0.5
 
 
-all_actions = np.array(list(itertools.product(*[
-    [-1, 0, +1],
-    [-1, 0, +1],
-    [-1, 0, +1],
-    [0, 1],
-    [0, 1]
-])))
+def __generate_all_actions():
+    opts = [[-1, 0, +1], [-1, 0, +1], [-1, 0, +1], [0, 1], [0, 1]]
+    for mv, rt, trt, fr, sh in itertools.product(*opts):
+        ctl = BotControl(mv, rt, trt, fr, sh)
+        yield action2vec(ctl)
+all_actions = np.array(list(__generate_all_actions()))
 
 
 def random_bot_type():
@@ -679,6 +694,7 @@ def __get_state_vector_len():
     return len(st), len(st_aug)
 state_vector_len, aug_state_vector_len = __get_state_vector_len()
 action_vector_len = len(action2vec(BotControl()))
+print('vector lengths:', (state_vector_len, aug_state_vector_len, action_vector_len))
 
 
 _global_session_ref = None
@@ -693,7 +709,7 @@ def get_session():
     return sess
 
 
-DEFAULT_QFUNC_MODEL = (15, 10, 5)
+DEFAULT_QFUNC_MODEL = (25, 15, 10)
 
 
 def main():
@@ -706,6 +722,8 @@ def main():
     opts = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO)
+    if not os.path.exists(opts.replay_dir):
+        os.mkdir(opts.replay_dir)
 
     model = QualityFunction.Model()
     sess = get_session()
