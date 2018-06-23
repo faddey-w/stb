@@ -203,10 +203,10 @@ class StbEngine:
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
             if ctl.shield and bot.load >= SHIELD_LOAD_REQUIRED and not bot.has_shield:
-                bot.shield_remaining = SHIELD_DURATION_SEC * tps
+                bot.shield_remaining = SHIELD_DURATION_SEC
                 bot.load -= SHIELD_LOAD_REQUIRED
             if bot.has_shield:
-                bot.shield_remaining -= 1
+                bot.shield_remaining -= 1 / tps
             else:
                 if ctl.fire and not typ.shots_ray and bot.shot_ready:
                     angle = random.gauss(

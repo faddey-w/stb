@@ -13,6 +13,8 @@ from math import pi, sin, cos
 from strateobots.engine import BotType, StbEngine, dist_points, BotControl
 from ._base import DuelAI
 from .simple_duel import RaiderVsSniper, SniperVsRaider
+from .lib.data import state2vec, action2vec, bot2vec
+from .lib import layers
 
 
 tf.reset_default_graph()
@@ -43,8 +45,8 @@ def AI(team, engine):
             RunAI.Shared.instance = RunAI.Shared()
         return RunAI(team, engine, RunAI.Shared.instance)
     else:
-        # return PassiveAI(team, engine)
-        return TrainerAI(team, engine)
+        return PassiveAI(team, engine)
+        # return TrainerAI(team, engine)
 
 
 class RunAI(BaseDQNDualAI):
@@ -53,10 +55,10 @@ class RunAI(BaseDQNDualAI):
         instance = None
 
         def __init__(self):
-            self.state_ph = tf.placeholder(tf.float32, [1, aug_state_vector_len])
+            self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
             self.model = QualityFunction.Model()
             self.model.load_vars()
-            self.selector = SelectAction(self.model, self.state_ph, -1)
+            self.selector = SelectAction(self.model, self.state_ph)
 
     def __init__(self, team, engine, ai_shared):
         super(RunAI, self).__init__(team, engine)
@@ -69,10 +71,9 @@ class RunAI(BaseDQNDualAI):
         bot, enemy, ctl = self._get_bots()
         if None in (bot, enemy):
             return
-        st = make_state_vector(bot, enemy, self.engine)
-        st_aug = augment_state_vector(st)
-        action = self.shared.selector.call({self.shared.state_ph: [st_aug]})
-        decode_action(action[0], ctl)
+        st = state2vec([bot, enemy])
+        action = self.shared.selector.call({self.shared.state_ph: [st]})
+        action2vec.restore(action[0], ctl)
 
 
 class TrainableAI(BaseDQNDualAI):
@@ -86,10 +87,8 @@ class TrainableAI(BaseDQNDualAI):
         self.ctl = self.engine.get_control(self.bot)
 
     def tick(self):
-        bot, enemy, ctl = self._get_bots()
-        if None in (bot, enemy):
-            return
-        decode_action(self.action, ctl)
+        self.ctl.move = 0
+        self.ctl.shield = False
 
 
 class TrainerRaiderAI(RaiderVsSniper):
@@ -128,8 +127,7 @@ class PassiveAI(BaseDQNDualAI):
 
     def initialize(self):
         bot = self.create_bot()
-        bot.x = self.engine.world_width * 0.6
-        bot.y = self.engine.world_height * 0.5
+        _randomize_position(bot, self.engine)
         self.bot = bot
 
     def tick(self):
@@ -145,26 +143,28 @@ class QualityFunction:
         def __init__(self, levels=None):
             if levels is None:
                 levels = DEFAULT_QFUNC_MODEL
-            self.levels = tuple(levels)
+            self.levels_cfg = tuple(levels)
             self.__class__._cnt += 1
             self.name = 'Q{}'.format(self._cnt)
+            self.var_list = []
+            self.layers = []
             with tf.variable_scope(self.name):
-                d_in = aug_state_vector_len + action_vector_len
-                self.transforms = []
-                self.weights = []
-                self.biases = []
-                self.var_list = []
-                for i, d_out in enumerate(self.levels):
-                    t = tf.get_variable('T{}'.format(i), [d_out, d_in])
-                    w = tf.get_variable('W{}'.format(i), [d_out, d_in])
-                    b = tf.get_variable('B{}'.format(i), [d_out, 1])
-                    self.transforms.append(t)
-                    self.weights.append(w)
-                    self.biases.append(b)
-                    self.var_list.extend((w, b, t))
+                l0x = layers.Linear.Model('L0x', 4, self.levels_cfg[0])
+                l0y = layers.Linear.Model('L0y', 4, self.levels_cfg[0], l0x.weight)
+                l0a = layers.Linear.Model('L0a', 29, self.levels_cfg[0])
+                self.layers.append((l0x, l0y, l0a))
+                d_in = levels[0]
+                for i, d_out in enumerate(self.levels_cfg[1:], 1):
+                    lx = layers.Linear.Model('L{}x'.format(i), d_in, d_out)
+                    ly = layers.Linear.Model('L{}y'.format(i), d_in, d_out, lx.weight)
+                    la = layers.Linear.Model('L{}a'.format(i), d_in, d_out)
+                    self.layers.append((lx, ly, la))
                     d_in = d_out
 
-                self.qw = tf.get_variable('QW', [1, d_in])
+                for lx, ly, la in self.layers:
+                    self.var_list.extend([*lx.var_list, *ly.var_list, *la.var_list])
+
+                self.qw = tf.get_variable('QW', [d_in, 1])
                 self.var_list.append(self.qw)
 
             self.initializer = tf.variables_initializer(self.var_list)
@@ -198,9 +198,6 @@ class QualityFunction:
                      self.name, ckpt.model_checkpoint_path, self.step_counter)
             self.saver.restore(session, ckpt.model_checkpoint_path)
 
-        def augment_state(self, vector):
-            return augment_state_vector(vector)
-
     def __init__(self, model, state, action):
         """
         :param model: QualityFunction.Model
@@ -211,43 +208,35 @@ class QualityFunction:
         self.model = model  # type: QualityFunction.Model
         self.state = state  # type: tf.Tensor
         self.action = action  # type: tf.Tensor
-        self.args = tf.concat([state, action], -1)  # type: tf.Tensor
 
-        syncshape = functools.partial(
-            add_batch_shape,
-            batch_shape=self.args.get_shape()[:-1],
-        )
+        bvl = bot2vec.vector_length
+        self.angles0 = tf.concat([state[..., bvl-2:bvl], state[..., -2:]], -1)  # 4
+        self.cos0 = tf.concat([state[..., 4:bvl-2], state[..., bvl+4:-2], action], -1)  # 25
+        self.x0 = tf.concat([state[..., :4:2], state[..., bvl:bvl+4:2]], -1)  # 4
+        self.y0 = tf.concat([state[..., 1:4:2], state[..., bvl+1:bvl+4:2]], -1)  # 4
+        self.a0 = tf.concat([self.angles0, tf.acos(self.cos0)], -1)  # 29
 
         self.levels = []
-        vector = tf.expand_dims(self.args, -1)
-        for w, b, tr in zip(model.weights, model.biases, model.transforms):
-            transformed = tf.matmul(syncshape(tr), vector)
-            nobias = tf.matmul(syncshape(w), vector)
-            noact = tf.add(nobias, syncshape(b))
-            d = transformed.shape.as_list()[-1]
-            dhalf = d // 2
-            act1 = tf.nn.relu(noact[..., :dhalf])
-            act2 = tf.sigmoid(noact[..., dhalf:])
-            out1 = transformed[..., :dhalf] + act1
-            out2 = transformed[..., dhalf:] * act2
-            out = tf.concat([out1, out2], -1)
-            self.levels.append(dict(
-                transf=transformed,
-                nobias=nobias,
-                noact=noact,
-                act1=act1,
-                act2=act2,
-                out=out,
-            ))
-            vector = out
+        vectors = (self.x0, self.y0, self.a0)
+        for i, (mx, my, ma) in enumerate(self.model.layers):
+            x, y, a = vectors
+            lx = layers.Linear(mx.name, x, mx, tf.nn.relu)
+            ly = layers.Linear(my.name, y, my, tf.nn.relu)
+            la = layers.Linear(ma.name, a, ma, tf.nn.relu)
+            a_cos = tf.cos(la.out)
+            a_sin = tf.sin(la.out)
+            new_x = lx.out * a_cos - ly.out * a_sin
+            new_y = lx.out * a_sin + ly.out * a_cos
+            self.levels.append((lx, ly, la, (new_x, new_y)))
+            vectors = (new_x, new_y, la.out)
 
-        quality = tf.matmul(syncshape(model.qw), vector)
+        quality = layers.batch_matmul(vectors[0], self.model.qw, )
         finite_assert = tf.Assert(
             tf.reduce_all(tf.is_finite(quality)),
             [tf.reduce_all(tf.is_finite(v)) for v in model.var_list],
         )
         with tf.control_dependencies([finite_assert]):
-            self.quality = tf.squeeze(quality, [-2, -1])
+            self.quality = tf.squeeze(quality, [-1])
 
     def call(self, state, action, session=None):
         session = session or get_session()
@@ -259,14 +248,14 @@ class QualityFunction:
 
 class SelectAction:
 
-    def __init__(self, qfunc_model, state, random_prob=0.05):
+    def __init__(self, qfunc_model, state):
         n_all_actions = all_actions.shape[0]
-        batch_shape = shape_to_list(state.shape[:-1])
+        batch_shape = layers.shape_to_list(state.shape[:-1])
 
         batched_all_actions = np.reshape(
             all_actions,
-            [n_all_actions] + [1] * len(batch_shape) + [action_vector_len]
-        ) + np.zeros([n_all_actions, *batch_shape, action_vector_len])
+            [n_all_actions] + [1] * len(batch_shape) + [action2vec.vector_length]
+        ) + np.zeros([n_all_actions, *batch_shape, action2vec.vector_length])
 
         self.all_actions = tf.constant(all_actions, dtype=tf.float32)
         self.batched_all_actions = tf.constant(batched_all_actions, dtype=tf.float32)
@@ -276,17 +265,9 @@ class SelectAction:
         self.max_idx = tf.argmax(self.qfunc.quality, 0)
         self.max_q = tf.reduce_max(self.qfunc.quality, 0)
 
-        self.random_prob = random_prob
-        self.random_prob_sample = tf.random_uniform(batch_shape, 0, 1)
-        self.random_mask = tf.less(self.random_prob_sample, random_prob)
-
-        self.random_indices = tf.random_uniform(batch_shape, 0, n_all_actions, tf.int64)
-
-        self.selected_idx = tf.where(self.random_mask, self.random_indices, self.max_idx)
-
         self.action = tf.gather_nd(
             self.all_actions,
-            tf.expand_dims(self.selected_idx, -1),
+            tf.expand_dims(self.max_idx, -1),
         )
 
     def call(self, feed_dict, session=None):
@@ -308,15 +289,14 @@ class ReinforcementLearning:
 
         emu_items = 2 if self_play else 1
         self.select_random_prob_decrease = select_random_prob_decrease
-        self.select_random_prob_ph = tf.placeholder(tf.float32, [])
-        self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, aug_state_vector_len])
-        self.emu_selector = SelectAction(self.model, self.emu_state_ph, self.select_random_prob_ph)
+        self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, state2vec.vector_length])
+        self.emu_selector = SelectAction(self.model, self.emu_state_ph)
 
-        self.train_state_ph = tf.placeholder(tf.float32, [batch_size, aug_state_vector_len])
-        self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, aug_state_vector_len])
-        self.train_action_ph = tf.placeholder(tf.float32, [batch_size, action_vector_len])
+        self.train_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
+        self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
+        self.train_action_ph = tf.placeholder(tf.float32, [batch_size, action2vec.vector_length])
         self.train_reward_ph = tf.placeholder(tf.float32, [batch_size])
-        self.train_selector = SelectAction(self.model, self.train_next_state_ph, -1)
+        self.train_selector = SelectAction(self.model, self.train_next_state_ph)
         self.train_qfunc = QualityFunction(self.model, self.train_state_ph, self.train_action_ph)
 
         self.optimizer = tf.train.AdamOptimizer()
@@ -330,7 +310,7 @@ class ReinforcementLearning:
             for v in model.var_list
         ]
         self.regularization_loss = tf.add_n(regularization_losses)
-        self.total_loss = self.loss + 0.001 * self.regularization_loss
+        self.total_loss = self.loss  # + 0.001 * self.regularization_loss
 
         self.train_step = self.optimizer.minimize(self.total_loss, var_list=model.var_list)
 
@@ -338,8 +318,8 @@ class ReinforcementLearning:
 
     def run(self, frameskip=0, max_ticks=1000, world_size=300):
         sess = get_session()
-        # ai2_cls = TrainableAI if self.self_play else PassiveAI
-        ai2_cls = TrainableAI if self.self_play else TrainerAI
+        ai2_cls = TrainableAI if self.self_play else PassiveAI
+        # ai2_cls = TrainableAI if self.self_play else TrainerAI
         games = {
             i: StbEngine(
                 world_size, world_size,
@@ -350,15 +330,17 @@ class ReinforcementLearning:
         memcap = self.memory_cap
         self.init_replay_memory()
         replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
-        replay_state_aug = np.empty((*replay_state.shape[:-1], aug_state_vector_len))
-        for i in replay_indices:
-            for j, k in [(0, 0), (0, 1), (1, 0), (1, 1)]:
-                s_aug = self.model.augment_state(replay_state[i, j, k])
-                replay_state_aug[i, j, k] = s_aug
         replay_idx = {i: i for i in range(self.n_games)}
         last_replay_idx = {}
 
         stats = collections.defaultdict(float)
+
+        for engine in games.values():
+            side = random.choice([-1, +1])
+            engine.ai1.bot.x = (0.5 + side * 0.05) * engine.world_width
+            engine.ai2.bot.x = (0.5 - side * 0.05) * engine.world_width
+            engine.ai1.bot.y = 0.50 * engine.world_height
+            engine.ai2.bot.y = 0.50 * engine.world_height
 
         iteration = 0
         while games:
@@ -367,37 +349,35 @@ class ReinforcementLearning:
             # do step of games
             for g, engine in games.items():
                 idx = replay_idx[g]
-                replay_state[idx, 0, 0] = s1 = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
-                replay_state[idx, 0, 1] = s2 = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
-                replay_state_aug[idx, 0, 0] = self.model.augment_state(s1)
-                replay_state_aug[idx, 0, 1] = self.model.augment_state(s2)
+                replay_state[idx, 0, 0] = state2vec((engine.ai1.bot, engine.ai2.bot))
+                replay_state[idx, 0, 1] = state2vec((engine.ai2.bot, engine.ai1.bot))
 
-                select_random_prob = max(
-                    0.1,
-                    1 - self.select_random_prob_decrease * self.model.step_counter
-                )
                 emu_stats_t = self.get_emu_stats()
                 if self.self_play:
                     actions, emu_stats = sess.run([
                         self.emu_selector.action,
                         emu_stats_t
                     ], {
-                        self.emu_state_ph: replay_state_aug[idx, 0],
-                        self.select_random_prob_ph: select_random_prob,
+                        self.emu_state_ph: replay_state[idx, 0],
                     })
                 else:
                     actions, emu_stats = sess.run([
                         self.emu_selector.action,
                         emu_stats_t
                     ], {
-                        self.emu_state_ph: replay_state_aug[idx, 0, :1],
-                        self.select_random_prob_ph: select_random_prob,
+                        self.emu_state_ph: replay_state[idx, 0, :1],
                     })
                 replay_action[idx] = actions[0]
 
-                engine.ai1.action = actions[0]
+                select_random_prob = max(
+                    0.1,
+                    1 - self.select_random_prob_decrease * self.model.step_counter
+                )
+                action2vec.restore(actions[0], engine.ai1.ctl)
+                control_noise(engine.ai1.ctl, select_random_prob)
                 if self.self_play:
-                    engine.ai2.action = actions[1]
+                    action2vec.restore(actions[1], engine.ai2.ctl)
+                    control_noise(engine.ai2.ctl, select_random_prob)
                 for _ in range(1 + frameskip):
                     engine.tick()
 
@@ -407,10 +387,8 @@ class ReinforcementLearning:
 
                 self.add_emu_stats(stats, emu_stats, reward)
 
-                replay_state[idx, 1, 0] = s1 = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
-                replay_state[idx, 1, 1] = s2 = make_state_vector(engine.ai2.bot, engine.ai1.bot, engine)
-                replay_state_aug[idx, 1, 0] = self.model.augment_state(s1)
-                replay_state_aug[idx, 1, 1] = self.model.augment_state(s2)
+                replay_state[idx, 1, 0] = state2vec((engine.ai1.bot, engine.ai2.bot))
+                replay_state[idx, 1, 1] = state2vec((engine.ai2.bot, engine.ai1.bot))
                 replay_indices.add(idx)
 
                 if engine.is_finished:
@@ -441,7 +419,7 @@ class ReinforcementLearning:
                     replay_indices - set(replay_idx.values()),
                     self.batch_size-len(last_replay_idx),
                 )) + tuple(last_replay_idx.values())
-                bots_sample = replay_state_aug[replay_sample, ]
+                bots_sample = replay_state[replay_sample, ]
                 action_sample = replay_action[replay_sample, ]
                 reward_sample = replay_reward[replay_sample, ]
                 _, train_stats = sess.run([
@@ -533,8 +511,8 @@ class ReinforcementLearning:
     def init_replay_memory(self):
         if self.replay_memory is None:
             memcap = self.memory_cap
-            replay_state = np.empty((memcap, 2, 2, state_vector_len), np.float32)
-            replay_action = np.empty((memcap, action_vector_len), np.float32)
+            replay_state = np.empty((memcap, 2, 2, state2vec.vector_length), np.float32)
+            replay_action = np.empty((memcap, action2vec.vector_length), np.float32)
             replay_reward = np.empty((memcap,), np.float32)
             replay_indices = set()
             self.replay_memory = replay_state, replay_action, replay_reward, replay_indices
@@ -568,92 +546,6 @@ class ReinforcementLearning:
             self.replay_memory[3].update(range(data_size))
 
 
-def make_state_vector(bot, enemy, engine):
-    b = bot2vec(bot, engine)
-    e = bot2vec(enemy, engine)
-    return b + e
-
-
-def augment_state_vector(vector):
-    sz = len(vector)
-    b = bot_vector(*vector[:sz//2])
-    e = bot_vector(*vector[sz//2:])
-    aug = tuple(
-        getattr(b1, elem1) * getattr(b2, elem2)
-        for elem1 in _aug_elements
-        for elem2 in _aug_elements
-        if (elem1, elem2) not in _no_aug
-        for b1, b2 in [[b, e], [b, b], [e, e]]
-    )
-    return np.concatenate([vector, aug])
-
-_aug_elements = ['x', 'y', 'vx', 'vy', 'o_cos', 'o_sin', 'g_cos', 'g_sin']
-_no_aug = [
-    ('x', 'vx'),
-    ('x', 'vy'),
-    ('y', 'vx'),
-    ('y', 'vy'),
-    ('o_cos', 'g_cos'),
-    ('o_cos', 'g_sin'),
-    ('o_sin', 'g_cos'),
-    ('o_sin', 'g_sin'),
-]
-_no_aug += [tup[::-1] for tup in _no_aug]
-
-
-bot_vector = collections.namedtuple('bot_vector', [
-    'type1', 'type2', 'type3', 'hp', 'load', 'shield', 'is_firing',
-    'x', 'y', 'vx', 'vy', 'o_cos', 'o_sin', 'g_cos', 'g_sin',
-    # 'ori', 'gun_ori',
-])
-
-
-def bot2vec(bot, engine):
-    return bot_vector(
-        int(bot.type == BotType.Raider),
-        int(bot.type == BotType.Heavy),
-        int(bot.type == BotType.Sniper),
-        bot.hp_ratio,
-        bot.load,
-        max(0, bot.shield_remaining / engine.ticks_per_sec),
-        bot.is_firing,
-        bot.x,
-        bot.y,
-        bot.vx,
-        bot.vy,
-        cos(bot.orientation),
-        sin(bot.orientation),
-        cos(bot.orientation + bot.tower_orientation),
-        sin(bot.orientation + bot.tower_orientation),
-        # bot.orientation % (2*pi),
-        # bot.tower_orientation % (2*pi),
-    )
-
-
-def action2vec(ctl):
-    return [
-        ctl.move == +1,
-        ctl.move == 0,
-        ctl.move == -1,
-        ctl.rotate == +1,
-        ctl.rotate == 0,
-        ctl.rotate == -1,
-        ctl.tower_rotate == +1,
-        ctl.tower_rotate == 0,
-        ctl.tower_rotate == -1,
-        int(ctl.fire),
-        int(ctl.shield),
-    ]
-
-
-def decode_action(vec, ctl):
-    ctl.move = +1 if vec[0] > 0.5 else 0 if vec[0] > -0.5 else -1
-    ctl.rotate = +1 if vec[1] > 0.5 else 0 if vec[1] > -0.5 else -1
-    ctl.tower_rotate = +1 if vec[2] > 0.5 else 0 if vec[2] > -0.5 else -1
-    ctl.fire = vec[3] > 0.5
-    ctl.shield = vec[4] > 0.5
-
-
 def __generate_all_actions():
     opts = [[-1, 0, +1], [-1, 0, +1], [-1, 0, +1], [0, 1], [0, 1]]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
@@ -668,6 +560,19 @@ def random_bot_type():
         BotType.Heavy,
         BotType.Sniper,
     ])
+
+
+def control_noise(ctl, noise_prob):
+    if random.random() < noise_prob:
+        ctl.move = random.choice([-1, 0, +1])
+    if random.random() < noise_prob:
+        ctl.rotate = random.choice([-1, 0, +1])
+    if random.random() < noise_prob:
+        ctl.tower_rotate = random.choice([-1, 0, +1])
+    if random.random() < noise_prob:
+        ctl.fire = random.choice([False, True])
+    if random.random() < noise_prob:
+        ctl.shield = random.choice([False, True])
 
 
 def shape_to_list(shape):
@@ -685,16 +590,6 @@ def add_batch_shape(x, batch_shape):
     x = tf.reshape(x, newshape)
     newshape = batch_shape + tail_shape
     return x * tf.ones(newshape)
-
-
-def __get_state_vector_len():
-    engine = StbEngine(1, 1, PassiveAI, PassiveAI)
-    st = make_state_vector(engine.ai1.bot, engine.ai2.bot, engine)
-    st_aug = augment_state_vector(st)
-    return len(st), len(st_aug)
-state_vector_len, aug_state_vector_len = __get_state_vector_len()
-action_vector_len = len(action2vec(BotControl()))
-print('vector lengths:', (state_vector_len, aug_state_vector_len, action_vector_len))
 
 
 _global_session_ref = None
@@ -735,9 +630,9 @@ def main():
         model,
         batch_size=80,
         n_games=1,
-        memory_cap=50000,
+        memory_cap=200000,
         reward_decay=0.95,
-        select_random_prob_decrease=0.01,
+        select_random_prob_decrease=0.03,
         self_play=False,
     )
     sess.run(rl.init_op)
@@ -745,13 +640,14 @@ def main():
 
     if opts.action == 'play':
         import code
-        code.interact(local=dict(globals(), **locals()))
+        with sess.as_default():
+            code.interact(local=dict(globals(), **locals()))
     if opts.action == 'train':
         try:
             while True:
                 rl.run(
                     frameskip=2,
-                    max_ticks=8000,
+                    max_ticks=2000,
                     world_size=1000,
                 )
                 if opts.save:
