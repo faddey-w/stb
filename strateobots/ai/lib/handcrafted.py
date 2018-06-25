@@ -1,5 +1,6 @@
-from strateobots.engine import dist_points, vec_len, dist_line, BOT_RADIUS, vec_dot
+import random
 from math import pi, acos, sqrt, asin, copysign, cos, sin
+from strateobots.engine import dist_points, vec_len, dist_line, BOT_RADIUS, vec_dot
 
 
 def short_range_attack(bot, enemy, ctl):
@@ -76,7 +77,9 @@ def distance_attack(bot, enemy, ctl):
     ctl.fire = should_fire(bot, enemy, dist) and not enemy.has_shield
 
 
-def to_angle(dx, dy, dist):
+def to_angle(dx, dy, dist=None):
+    if dist is None:
+        dist = sqrt(dx*dx + dy*dy)
     angle = acos(dx / dist)
     if dy < 0:
         angle = -angle
@@ -143,3 +146,62 @@ def is_at_back(bot, angle):
     gun_angle = bot.orientation + bot.tower_orientation
     need_to_rotate = abs(norm_angle(angle - gun_angle))
     return need_to_rotate > 2*pi/3
+
+
+class StatefulChaotic:
+
+    def __init__(self, bot, ctl, engine, change_period=(3, 1), shield_period=(5, 10)):
+        self.bot = bot
+        self.ctl = ctl
+        self.engine = engine
+
+        self.change_min, self.change_range = change_period
+        self.shield_min, self.shield_range = shield_period
+
+        self.tgt_x = 0
+        self.tgt_y = 0
+        self.fire_x = 0
+        self.fire_y = 0
+
+        self.next_select = self.change_min + self.change_range * random.random()
+        self.next_shield = -1
+        self.select_aim()
+
+    def select_aim(self):
+        self.tgt_x = random.random() * self.engine.world_width
+        self.tgt_y = random.random() * self.engine.world_width
+        self.fire_x = random.random() * self.engine.world_width
+        self.fire_y = random.random() * self.engine.world_width
+
+    def update_control(self):
+        tgt_angle = to_angle(
+            self.tgt_x - self.bot.x,
+            self.tgt_y - self.bot.y,
+        )
+        fire_angle = to_angle(
+            self.fire_x - self.bot.x,
+            self.fire_y - self.bot.y,
+        )
+        self.ctl.rotate = navigate_shortest(self.bot, tgt_angle, False)
+        self.ctl.tower_rotate = navigate_shortest(self.bot, fire_angle, True)
+        self.ctl.move = +1
+
+        delta_fire_angle = fire_angle - (self.bot.orientation + self.bot.tower_orientation)
+        delta_fire_angle %= 2 * pi
+        self.ctl.fire = abs(delta_fire_angle - pi) > 0.9 * pi
+
+        if self.engine.time > self.next_shield:
+            if self.bot.has_shield:
+                self.next_shield = self.engine.time + self.shield_min + self.shield_range * random.random()
+                self.ctl.shield = False
+            else:
+                self.ctl.fire = False
+                self.ctl.shield = True
+        else:
+            self.ctl.shield = False
+
+    def run(self):
+        if self.engine.time > self.next_select:
+            self.select_aim()
+            self.next_select = self.engine.time + self.change_min + self.change_range * random.random()
+        self.update_control()

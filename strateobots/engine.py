@@ -18,7 +18,8 @@ log = logging.getLogger(__name__)
 
 class StbEngine:
 
-    def __init__(self, world_width, world_height, ai1_cls, ai2_cls, max_ticks=1000):
+    def __init__(self, world_width, world_height, ai1_cls, ai2_cls,
+                 max_ticks=1000, wait_after_win=1):
         self.world_width = world_width
         self.world_height = world_height
         self.teams = 0x00DD00, 0x0000FF
@@ -37,6 +38,7 @@ class StbEngine:
         self.max_ticks = max_ticks
         self._win_reached_at = None
         self.ticks_per_sec = 50
+        self._wait_after_win = wait_after_win * self.ticks_per_sec
 
         self.ai1 = ai1_cls(team1, self)
         self.ai2 = ai2_cls(team2, self)
@@ -393,8 +395,12 @@ class StbEngine:
                 self._win_reached_at = self.nticks
             return self.nticks >= self.max_ticks or self.error
         else:
-            return self.nticks >= self._win_reached_at + self.ticks_per_sec \
+            return self.nticks >= self._win_reached_at + self._wait_after_win \
                    or self.nticks >= self.max_ticks or self.error
+
+    @property
+    def time(self):
+        return self.nticks / self.ticks_per_sec
 
 
 BotTypeProperties = collections.namedtuple(

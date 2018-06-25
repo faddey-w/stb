@@ -74,7 +74,10 @@ class CombinedMapper:
 
     def __getitem__(self, item):
         idx, item = item
-        return self.mappers[idx][item]
+        result = self.mappers[idx][item]
+        if isinstance(result, int):
+            result += sum(m.vector_length for m in self.mappers[:idx])
+        return result
 
     def get(self, vector, *field_path):
         idx, *field_path = field_path

@@ -1,6 +1,5 @@
 import argparse
 import itertools
-import functools
 import traceback
 import collections
 import random
@@ -14,7 +13,8 @@ from strateobots.engine import BotType, StbEngine, dist_points, BotControl
 from ._base import DuelAI
 from .simple_duel import RaiderVsSniper, SniperVsRaider
 from .lib.data import state2vec, action2vec, bot2vec
-from .lib import layers
+from .lib import layers, stable, replay
+from .lib.handcrafted import get_angle, StatefulChaotic
 
 
 tf.reset_default_graph()
@@ -23,14 +23,17 @@ log = logging.getLogger(__name__)
 
 class BaseDQNDualAI(DuelAI):
 
+    bot_type = None
+
     def create_bot(self, teamize_x=True):
         x = random.random()
         if teamize_x:
             x = self.x_to_team_field(x)
         else:
             x *= self.engine.world_width
+        bot_type = self.bot_type or random_bot_type()
         return self.engine.add_bot(
-            bottype=random_bot_type(),
+            bottype=bot_type,
             team=self.team,
             x=x,
             y=self.engine.world_height * random.random(),
@@ -40,13 +43,14 @@ class BaseDQNDualAI(DuelAI):
 
 
 def AI(team, engine):
-    if team == engine.teams[0]:
-        if RunAI.Shared.instance is None:
-            RunAI.Shared.instance = RunAI.Shared()
+    if RunAI.Shared.instance is None:
+        RunAI.Shared.instance = RunAI.Shared(2 * pi * random.random())
+    if team == engine.teams[0] or True:
         return RunAI(team, engine, RunAI.Shared.instance)
     else:
-        return PassiveAI(team, engine)
+        # return PassiveAI.parametrize(side=+1)(team, engine)
         # return TrainerAI(team, engine)
+        return ChaoticAI.parametrize(orientation=RunAI.Shared.instance.orientation)(team, engine)
 
 
 class RunAI(BaseDQNDualAI):
@@ -54,18 +58,21 @@ class RunAI(BaseDQNDualAI):
     class Shared:
         instance = None
 
-        def __init__(self):
+        def __init__(self, orientation):
             self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
             self.model = QualityFunction.Model()
             self.model.load_vars()
             self.selector = SelectAction(self.model, self.state_ph)
+            self.orientation = orientation
 
     def __init__(self, team, engine, ai_shared):
         super(RunAI, self).__init__(team, engine)
         self.shared = ai_shared  # type: RunAI.Shared
 
     def initialize(self):
-        self.create_bot()
+        # self.create_bot()
+        self.orientation = self.shared.orientation
+        PassiveAI.initialize(self)
 
     def tick(self):
         bot, enemy, ctl = self._get_bots()
@@ -74,19 +81,6 @@ class RunAI(BaseDQNDualAI):
         st = state2vec([bot, enemy])
         action = self.shared.selector.call({self.shared.state_ph: [st]})
         action2vec.restore(action[0], ctl)
-
-
-class TrainableAI(BaseDQNDualAI):
-
-    action = None
-    bot = None
-    ctl = None
-
-    def initialize(self):
-        self.bot = self.create_bot(teamize_x=False)
-        self.ctl = self.engine.get_control(self.bot)
-
-    def tick(self):
         self.ctl.move = 0
         self.ctl.shield = False
 
@@ -107,6 +101,21 @@ class TrainerSniperAI(SniperVsRaider):
         _randomize_position(self.bot, self.engine)
 
 
+class ChaoticAI(BaseDQNDualAI):
+
+    algo = None  # type: StatefulChaotic
+
+    def initialize(self):
+        PassiveAI.initialize(self)
+        self.algo = StatefulChaotic(self.bot, self.ctl, self.engine,
+                                    shield_period=(1000, 0))
+
+    def tick(self):
+        self.algo.run()
+        self.ctl.move = 0
+        self.ctl.shield = 0
+
+
 def TrainerAI(team, engine):
     if random.random() > 0.5:
         log.info('initializing short-range-attack trainer')
@@ -119,19 +128,32 @@ def TrainerAI(team, engine):
 def _randomize_position(bot, engine):
     bot.x = random.random() * engine.world_width
     bot.y = random.random() * engine.world_height
-    bot.orientation = random.random() * 2 * pi
-    bot.tower_orientation = random.random() * 2 * pi
+    bot.orientation = random.random() * 2 * pi - pi
+    bot.tower_orientation = random.random() * 2 * pi - pi
 
 
 class PassiveAI(BaseDQNDualAI):
 
+    action = None
+    bot = None
+    ctl = None
+    orientation = 0
+
     def initialize(self):
-        bot = self.create_bot()
+        bot = self.create_bot(teamize_x=False)
         _randomize_position(bot, self.engine)
         self.bot = bot
+        self.ctl = self.engine.get_control(self.bot)
+
+        ori = self.orientation
+        if self.team != self.engine.teams[0]:
+            ori += pi
+        bot.x = (0.5 + cos(ori) * 0.05) * self.engine.world_width
+        bot.y = (0.5 + sin(ori) * 0.05) * self.engine.world_height
 
     def tick(self):
-        pass
+        self.ctl.move = 0
+        self.ctl.shield = False
 
 
 class QualityFunction:
@@ -149,22 +171,25 @@ class QualityFunction:
             self.var_list = []
             self.layers = []
             with tf.variable_scope(self.name):
-                l0x = layers.Linear.Model('L0x', 4, self.levels_cfg[0])
-                l0y = layers.Linear.Model('L0y', 4, self.levels_cfg[0], l0x.weight)
-                l0a = layers.Linear.Model('L0a', 29, self.levels_cfg[0])
+                # l0x = layers.Linear.Model('L0x', 4, self.levels_cfg[0])
+                # l0y = layers.Linear.Model('L0y', 4, self.levels_cfg[0], l0x.weight)
+                # l0a = layers.Linear.Model('L0a', 29, self.levels_cfg[0])
+                l0x = layers.Linear.Model('L0x', 6, self.levels_cfg[0])
+                l0y = layers.Linear.Model('L0y', 6, self.levels_cfg[0], l0x.weight)
+                l0a = layers.Linear.Model('L0a', 8, self.levels_cfg[0])
                 self.layers.append((l0x, l0y, l0a))
                 d_in = levels[0]
                 for i, d_out in enumerate(self.levels_cfg[1:], 1):
                     lx = layers.Linear.Model('L{}x'.format(i), d_in, d_out)
                     ly = layers.Linear.Model('L{}y'.format(i), d_in, d_out, lx.weight)
-                    la = layers.Linear.Model('L{}a'.format(i), d_in, d_out)
+                    la = layers.Linear.Model('L{}a'.format(i), 2 * d_in, d_out)
                     self.layers.append((lx, ly, la))
                     d_in = d_out
 
                 for lx, ly, la in self.layers:
                     self.var_list.extend([*lx.var_list, *ly.var_list, *la.var_list])
 
-                self.qw = tf.get_variable('QW', [d_in, 1])
+                self.qw = tf.get_variable('QW', [d_in, action2vec.vector_length-4])
                 self.var_list.append(self.qw)
 
             self.initializer = tf.variables_initializer(self.var_list)
@@ -207,36 +232,58 @@ class QualityFunction:
         """
         self.model = model  # type: QualityFunction.Model
         self.state = state  # type: tf.Tensor
-        self.action = action  # type: tf.Tensor
+        self.action = action[..., 3:-1]  # type: tf.Tensor
 
         bvl = bot2vec.vector_length
+        # self.angles0 = tf.concat([state[..., bvl-2:bvl], state[..., -2:]], -1)  # 4
+        # self.cos0 = tf.concat([state[..., 4:bvl-2], state[..., bvl+4:-2], action], -1)  # 25
+        # self.x0 = tf.concat([state[..., :4:2], state[..., bvl:bvl+4:2]], -1)  # 4
+        # self.y0 = tf.concat([state[..., 1:4:2], state[..., bvl+1:bvl+4:2]], -1)  # 4
+        # self.a0 = tf.concat([self.angles0, tf.acos(self.cos0)], -1)  # 29
         self.angles0 = tf.concat([state[..., bvl-2:bvl], state[..., -2:]], -1)  # 4
-        self.cos0 = tf.concat([state[..., 4:bvl-2], state[..., bvl+4:-2], action], -1)  # 25
-        self.x0 = tf.concat([state[..., :4:2], state[..., bvl:bvl+4:2]], -1)  # 4
-        self.y0 = tf.concat([state[..., 1:4:2], state[..., bvl+1:bvl+4:2]], -1)  # 4
-        self.a0 = tf.concat([self.angles0, tf.acos(self.cos0)], -1)  # 29
+        self.cos0 = tf.concat([state[..., 7:9], state[..., bvl+7:bvl+9]], -1)  # 4
+        self.sin0 = tf.sqrt(1 - tf.square(self.cos0))
+        self.x0 = tf.concat([state[..., :1], state[..., bvl:bvl+1], self.cos0], -1)  # 6
+        self.y0 = tf.concat([state[..., 1:2], state[..., bvl+1:bvl+2], self.sin0], -1)  # 6
+        self.a0 = tf.concat([self.angles0, tf.acos(self.cos0)], -1)  # 8
+
+        def make_activation(dim):
+            def activation(vec):
+                half = dim // 2
+                vec1 = tf.nn.relu(vec[..., :half])
+                vec2 = tf.identity(vec[..., half:])
+                return tf.concat([vec1, vec2], -1)
+            return activation
 
         self.levels = []
         vectors = (self.x0, self.y0, self.a0)
         for i, (mx, my, ma) in enumerate(self.model.layers):
             x, y, a = vectors
-            lx = layers.Linear(mx.name, x, mx, tf.nn.relu)
-            ly = layers.Linear(my.name, y, my, tf.nn.relu)
-            la = layers.Linear(ma.name, a, ma, tf.nn.relu)
+            lx = layers.Linear(mx.name, x, mx, make_activation(mx.out_dim))
+            ly = layers.Linear(my.name, y, my, make_activation(my.out_dim))
+            la = layers.Linear(ma.name, a, ma, make_activation(ma.out_dim))
             a_cos = tf.cos(la.out)
             a_sin = tf.sin(la.out)
             new_x = lx.out * a_cos - ly.out * a_sin
             new_y = lx.out * a_sin + ly.out * a_cos
+            # add_a = tf.atan2(
+            #     lx.out + tf.stop_gradient(10 * tf.sign(lx.out)),
+            #     ly.out,# + tf.stop_gradient(10 * tf.sign(ly.out))
+            # )
+            # add_a = tf.acos(0.98 * lx.out / norm(tf.stack([lx.out, ly.out], -1))) * tf.sign(ly.out)
+            add_a = stable.atan2(ly.out, lx.out)
+            new_a = tf.concat([la.out, add_a], -1)
             self.levels.append((lx, ly, la, (new_x, new_y)))
-            vectors = (new_x, new_y, la.out)
+            vectors = (new_x, new_y, new_a)
 
-        quality = layers.batch_matmul(vectors[0], self.model.qw, )
+        self.features = layers.batch_matmul(vectors[0], self.model.qw, )
         finite_assert = tf.Assert(
-            tf.reduce_all(tf.is_finite(quality)),
+            tf.reduce_all(tf.is_finite(self.features)),
             [tf.reduce_all(tf.is_finite(v)) for v in model.var_list],
         )
+        masked_features = self.action * self.features
         with tf.control_dependencies([finite_assert]):
-            self.quality = tf.squeeze(quality, [-1])
+            self.quality = tf.reduce_mean(masked_features, axis=-1)
 
     def call(self, state, action, session=None):
         session = session or get_session()
@@ -277,11 +324,9 @@ class SelectAction:
 
 class ReinforcementLearning:
 
-    def __init__(self, model, batch_size=10, n_games=10, memory_cap=200,
-                 reward_decay=0.03, self_play=True, select_random_prob_decrease=0.05):
-        self.memory_cap = memory_cap
-        self.replay_memory = None
-
+    def __init__(self, model, batch_size=10, n_games=10,
+                 reward_prediction=0.97, self_play=True, select_random_prob_decrease=0.05,
+                 select_random_min_prob=0.1):
         self.model = model  # type: QualityFunction.Model
         self.batch_size = batch_size
         self.n_games = n_games
@@ -289,6 +334,7 @@ class ReinforcementLearning:
 
         emu_items = 2 if self_play else 1
         self.select_random_prob_decrease = select_random_prob_decrease
+        self.select_random_min_prob = select_random_min_prob
         self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, state2vec.vector_length])
         self.emu_selector = SelectAction(self.model, self.emu_state_ph)
 
@@ -301,7 +347,13 @@ class ReinforcementLearning:
 
         self.optimizer = tf.train.AdamOptimizer()
 
-        self.y = self.train_reward_ph + (1 - reward_decay) * self.train_selector.max_q
+        self.is_terminal_ph = tf.placeholder(tf.bool, [batch_size])
+        self.y_predict_part = tf.where(
+            self.is_terminal_ph,
+            tf.zeros_like(self.train_selector.max_q),
+            reward_prediction * self.train_selector.max_q,
+        )
+        self.y = self.train_reward_ph + self.y_predict_part
         self.loss_vector = (self.y - self.train_qfunc.quality) ** 2
         self.loss = tf.reduce_mean(self.loss_vector)
 
@@ -316,61 +368,62 @@ class ReinforcementLearning:
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
-    def run(self, frameskip=0, max_ticks=1000, world_size=300):
+    def run(self, replay_memory, frameskip=0, max_ticks=1000, world_size=300):
         sess = get_session()
-        ai2_cls = TrainableAI if self.self_play else PassiveAI
-        # ai2_cls = TrainableAI if self.self_play else TrainerAI
+
+        init_orientation = random.random() * 2 * pi
+        ai1_cls = PassiveAI.parametrize(
+            orientation=init_orientation,
+            bot_type=BotType.Heavy,
+        )
+        ai2_cls = ai1_cls
+        # ai2_cls = ChaoticAI.parametrize(
+        #     orientation=init_orientation,
+        #     bot_type=BotType.Sniper,
+        # )
+        # ai2_cls = ai1_cls if self.self_play else TrainerAI
+
         games = {
             i: StbEngine(
                 world_size, world_size,
-                TrainableAI, ai2_cls,
-                max_ticks)
+                ai1_cls, ai2_cls,
+                max_ticks, wait_after_win=0)
             for i in range(self.n_games)
         }
-        memcap = self.memory_cap
-        self.init_replay_memory()
-        replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
-        replay_idx = {i: i for i in range(self.n_games)}
-        last_replay_idx = {}
 
         stats = collections.defaultdict(float)
-
-        for engine in games.values():
-            side = random.choice([-1, +1])
-            engine.ai1.bot.x = (0.5 + side * 0.05) * engine.world_width
-            engine.ai2.bot.x = (0.5 - side * 0.05) * engine.world_width
-            engine.ai1.bot.y = 0.50 * engine.world_height
-            engine.ai2.bot.y = 0.50 * engine.world_height
 
         iteration = 0
         while games:
             iteration += 1
 
             # do step of games
-            for g, engine in games.items():
-                idx = replay_idx[g]
-                replay_state[idx, 0, 0] = state2vec((engine.ai1.bot, engine.ai2.bot))
-                replay_state[idx, 0, 1] = state2vec((engine.ai2.bot, engine.ai1.bot))
+            for g, engine in list(games.items()):
+                state1_before = state2vec((engine.ai1.bot, engine.ai2.bot))
+                state2_before = state2vec((engine.ai2.bot, engine.ai1.bot))
 
                 emu_stats_t = self.get_emu_stats()
                 if self.self_play:
+                    two_states_before = np.stack([state1_before, state2_before], 0)
                     actions, emu_stats = sess.run([
                         self.emu_selector.action,
                         emu_stats_t
                     ], {
-                        self.emu_state_ph: replay_state[idx, 0],
+                        self.emu_state_ph: two_states_before,
                     })
                 else:
+                    # try:
                     actions, emu_stats = sess.run([
                         self.emu_selector.action,
                         emu_stats_t
                     ], {
-                        self.emu_state_ph: replay_state[idx, 0, :1],
+                        self.emu_state_ph: [state1_before],
                     })
-                replay_action[idx] = actions[0]
+                    # except:
+                    #     import pdb; pdb.set_trace()
 
                 select_random_prob = max(
-                    0.1,
+                    self.select_random_min_prob,
                     1 - self.select_random_prob_decrease * self.model.step_counter
                 )
                 action2vec.restore(actions[0], engine.ai1.ctl)
@@ -378,58 +431,50 @@ class ReinforcementLearning:
                 if self.self_play:
                     action2vec.restore(actions[1], engine.ai2.ctl)
                     control_noise(engine.ai2.ctl, select_random_prob)
+
+                # do game ticks
                 for _ in range(1 + frameskip):
                     engine.tick()
 
-                reward = engine.ai1.bot.hp_ratio - engine.ai2.bot.hp_ratio
-                reward *= 10  # make reward scale larger to stabilize learning
-                replay_reward[idx] = reward
+                action1 = action2vec(engine.ai1.ctl)
+                action2 = action2vec(engine.ai2.ctl)
+                state1_after = state2vec((engine.ai1.bot, engine.ai2.bot))
+                state2_after = state2vec((engine.ai2.bot, engine.ai1.bot))
+                reward1 = self.compute_reward(state1_before, action1, state1_after)
 
-                self.add_emu_stats(stats, emu_stats, reward)
-
-                replay_state[idx, 1, 0] = state2vec((engine.ai1.bot, engine.ai2.bot))
-                replay_state[idx, 1, 1] = state2vec((engine.ai2.bot, engine.ai1.bot))
-                replay_indices.add(idx)
+                self.add_emu_stats(stats, emu_stats, reward1)
+                replay_memory.put_entry(state1_before, action1, state1_after)
+                replay_memory.put_entry(state2_before, action2, state2_after)
 
                 if engine.is_finished:
                     games.pop(g)
-                    replay_idx.pop(g)
-                    break
-
-                next_idx = idx+1
-                if len(replay_indices) < memcap:
-                    while next_idx in replay_indices or next_idx in replay_idx.values():
-                        next_idx += 1
-                    next_idx %= memcap
-                else:
-                    for _ in range(memcap):
-                        next_idx += 1
-                        next_idx %= memcap
-                        if next_idx not in replay_idx.values():
-                            break
-                    else:
-                        next_idx = idx
-
-                last_replay_idx[g] = replay_idx[g]
-                replay_idx[g] = next_idx
 
             # do GD step
-            if len(replay_indices) >= self.batch_size:
-                replay_sample = tuple(random.sample(
-                    replay_indices - set(replay_idx.values()),
-                    self.batch_size-len(last_replay_idx),
-                )) + tuple(last_replay_idx.values())
-                bots_sample = replay_state[replay_sample, ]
-                action_sample = replay_action[replay_sample, ]
-                reward_sample = replay_reward[replay_sample, ]
+            if replay_memory.used_size >= self.batch_size:
+                random_part = self.batch_size // 5
+                states_before_1, actions_1, states_after_1 = \
+                    replay_memory.get_random_sample(random_part)
+                states_before_2, actions_2, states_after_2 = \
+                    replay_memory.get_last_entries(self.batch_size - random_part)
+
+                states_before_sample = np.concatenate([states_before_1, states_before_2], axis=0)
+                states_after_sample = np.concatenate([states_after_1, states_after_2], axis=0)
+                actions_sample = np.concatenate([actions_1, actions_2], axis=0)
+                reward_sample = self.compute_reward(
+                    states_before_sample,
+                    actions_sample,
+                    states_after_sample
+                )
+
                 _, train_stats = sess.run([
                     self.train_step,
                     self.get_train_stats()
                 ], {
-                    self.train_state_ph: bots_sample[:, 0, 0],
-                    self.train_next_state_ph: bots_sample[:, 1, 0],
-                    self.train_action_ph: action_sample,
+                    self.train_state_ph: states_before_sample,
+                    self.train_next_state_ph: states_after_sample,
+                    self.train_action_ph: actions_sample,
                     self.train_reward_ph: reward_sample,
+                    self.is_terminal_ph: self.compute_is_terminal(states_after_sample)
                 })
                 self.add_train_stats(stats, reward_sample, train_stats)
 
@@ -453,6 +498,17 @@ class ReinforcementLearning:
 
     def get_emu_stats(self):
         return self.emu_selector.max_q
+
+    def compute_reward(self, state_before, action, state_after):
+        # import pdb; pdb.set_trace()
+        b_hp_idx = state2vec[0, 'hp_ratio']
+        e_hp_idx = state2vec[1, 'hp_ratio']
+        return 10 * (state_after[..., b_hp_idx] - state_after[..., e_hp_idx])
+
+    def compute_is_terminal(self, state):
+        b_hp = state[..., state2vec[0, 'hp_ratio']]
+        e_hp = state[..., state2vec[1, 'hp_ratio']]
+        return (b_hp <= 0) | (e_hp <= 0)
 
     def add_emu_stats(self, stat_store, stat_values, reward):
         max_q = stat_values
@@ -487,14 +543,17 @@ class ReinforcementLearning:
             engine.ai2.bot.x,
             engine.ai2.bot.y,
         )
+        gun_ori = engine.ai1.bot.orientation + engine.ai1.bot.tower_orientation
+        init_gun_ori = stats.setdefault('init_gun_ori', gun_ori)
+        bot_ori = get_angle(engine.ai1.bot, engine.ai2.bot)
         averages['dist_sum'] += d_center
         report = (
-            'dc={:5.1f} de={:5.1f}   '
+            'a={:5.3f}   {:5.3f}   '
             'b1=({:5.1f},{:5.1f})   b2=({:5.1f}, {:5.1f})    '
             'r={:5.3f}    Q={:5.3f}    '
             'r\'={:5.3f}    y={:5.3f}    Q\'={:5.3f}'.format(
-                d_center,
-                d_enemy,
+                ((gun_ori - bot_ori) / pi + 1) % 2 - 1,
+                (gun_ori-init_gun_ori) / pi,
                 engine.ai1.bot.x,
                 engine.ai1.bot.y,
                 engine.ai2.bot.x,
@@ -506,44 +565,9 @@ class ReinforcementLearning:
                 stats['t_q'] / max(1, stats['n_train']),
             ))
         stats.clear()
+        stats['init_gun_ori'] = init_gun_ori
+
         return report
-
-    def init_replay_memory(self):
-        if self.replay_memory is None:
-            memcap = self.memory_cap
-            replay_state = np.empty((memcap, 2, 2, state2vec.vector_length), np.float32)
-            replay_action = np.empty((memcap, action2vec.vector_length), np.float32)
-            replay_reward = np.empty((memcap,), np.float32)
-            replay_indices = set()
-            self.replay_memory = replay_state, replay_action, replay_reward, replay_indices
-
-    def save_replay_memory(self, directory):
-        if self.replay_memory is None:
-            return
-        replay_state, replay_action, replay_reward, replay_indices = self.replay_memory
-        idx = tuple(replay_indices)
-        np.save(os.path.join(directory, 'state.npy'), replay_state[idx, ])
-        np.save(os.path.join(directory, 'action.npy'), replay_action[idx, ])
-        np.save(os.path.join(directory, 'reward.npy'), replay_reward[idx, ])
-
-    def load_replay_memory(self, directory):
-        try:
-            state = np.load(os.path.join(directory, 'state.npy'))
-            action = np.load(os.path.join(directory, 'action.npy'))
-            reward = np.load(os.path.join(directory, 'reward.npy'))
-        except:
-            traceback.print_exc()
-            return
-        else:
-            if not (state.shape[0] == action.shape[0] == reward.shape[0]):
-                raise AssertionError('saved replay memory is inconsistent')
-            data_size = min(self.memory_cap, state.shape[0])
-            self.init_replay_memory()
-            self.replay_memory[0][:data_size] = state[:data_size]
-            self.replay_memory[1][:data_size] = action[:data_size]
-            self.replay_memory[2][:data_size] = reward[:data_size]
-            self.replay_memory[3].clear()
-            self.replay_memory[3].update(range(data_size))
 
 
 def __generate_all_actions():
@@ -604,7 +628,7 @@ def get_session():
     return sess
 
 
-DEFAULT_QFUNC_MODEL = (25, 15, 10)
+DEFAULT_QFUNC_MODEL = (10, 8, 8, 8)
 
 
 def main():
@@ -626,17 +650,26 @@ def main():
         model.load_vars()
     except:
         model.init_vars()
+    replay_memory = replay.ReplayMemory(
+        capacity=2000,
+        state_size=state2vec.vector_length,
+        action_size=action2vec.vector_length
+    )
     rl = ReinforcementLearning(
         model,
         batch_size=80,
         n_games=1,
-        memory_cap=200000,
-        reward_decay=0.95,
-        select_random_prob_decrease=0.03,
-        self_play=False,
+        reward_prediction=0.95,
+        select_random_prob_decrease=0.01,
+        select_random_min_prob=0.1,
+        self_play=True,
     )
     sess.run(rl.init_op)
-    rl.load_replay_memory(opts.replay_dir)
+    try:
+        replay_memory.load(opts.replay_dir)
+        log.info('replay memory buffer loaded from %s', opts.replay_dir)
+    except FileNotFoundError:
+        log.info('collecting new replay memory buffer')
 
     if opts.action == 'play':
         import code
@@ -649,16 +682,15 @@ def main():
                     frameskip=2,
                     max_ticks=2000,
                     world_size=1000,
+                    replay_memory=replay_memory,
                 )
                 if opts.save:
                     model.save_vars()
-                    rl.save_replay_memory(opts.replay_dir)
+                    replay_memory.save(opts.replay_dir)
         except KeyboardInterrupt:
-            pass
-        finally:
             if opts.save:
                 model.save_vars()
-                rl.save_replay_memory(opts.replay_dir)
+                replay_memory.save(opts.replay_dir)
 
 
 if __name__ == '__main__':

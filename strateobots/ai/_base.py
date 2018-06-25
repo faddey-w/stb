@@ -22,6 +22,17 @@ class BaseAI:
     def train(self):
         pass
 
+    @classmethod
+    def parametrize(cls, **kwargs):
+        def factory(team, engine):
+            ai = cls(team, engine)
+            for attr, val in kwargs.items():
+                setattr(ai, attr, val)
+            return ai
+        for attr, val in kwargs.items():
+            setattr(factory, attr, val)
+        return factory
+
 
 class DuelAI(BaseAI):
 
