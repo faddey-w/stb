@@ -35,17 +35,14 @@ class Config:
         return [
             ai.NotMovingMode(),
             ai.LocateAtCircleMode(),
+            ai.NoShieldMode()
         ]
     
     def make_ai1_modes(self):
-        return [
-            ai.PassiveMode()
-        ]
+        return []
 
     def make_ai2_modes(self):
-        return [
-            ai.TrainerMode([handcrafted.turret_behavior])
-        ]
+        return [ai.TrainerMode([handcrafted.turret_behavior])]
 
 
 def main():

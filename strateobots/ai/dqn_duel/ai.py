@@ -6,13 +6,13 @@ from math import pi, sin, cos
 import tensorflow as tf
 
 from strateobots.engine import BotType
-from .core import SelectAction
+from .core import SelectAction, get_session
 from .train import REPO_ROOT
 from .._base import DuelAI
 from ..lib import model_saving
 from ..lib.data import state2vec, action2vec
 from ..lib.handcrafted import StatefulChaotic
-from ..lib.handcrafted import short_range_attack, distance_attack
+from ..lib.handcrafted import short_range_attack, distance_attack, turret_behavior
 
 log = logging.getLogger(__name__)
 
@@ -63,11 +63,7 @@ class Mode:
 
 class PassiveMode(Mode):
 
-    action = None
-
-    def on_runtime(self, bot, enemy, ctl, engine):
-        if self.action is not None:
-            action2vec.restore(self.action, ctl)
+    pass
 
 
 class TrainerMode(Mode):
@@ -108,6 +104,12 @@ class NotRotatingMode(Mode):
         ctl.tower_rotate = 0
 
 
+class NoShieldMode(Mode):
+
+    def on_runtime(self, bot, enemy, ctl, engine):
+        ctl.shield = False
+
+
 class LocateAtCircleMode(Mode):
 
     def __init__(self, orientation=None, radius_ratio=0.05):
@@ -133,8 +135,9 @@ def AI(team, engine):
     if team == engine.teams[0]:
         return RunAI(team, engine, RunAI.Shared.instance)
     else:
+        all_modes = [RunAI.Shared.instance.ai2_mode, *RunAI.Shared.instance.modes]
         return DQNDuelAI.parametrize(
-            modes=RunAI.Shared.instance.modes,
+            modes=all_modes,
             bot_type=BotType.Raider
         )(team, engine)
 
@@ -143,21 +146,28 @@ class RunAI(DQNDuelAI):
 
     class Shared:
         instance = None  # type: RunAI.Shared
-        model_path = os.path.join(REPO_ROOT, '_data/2018-06-26_01-29-44/model/')
+        model_path = os.path.join(REPO_ROOT, '_data/2018-06-27_21-18-54/model/')
         self_play = False
-        bot_type = None
+        bot_type = BotType.Raider
+        ai2_mode = TrainerMode([turret_behavior])
 
         @staticmethod
         def _modes():
             return [
-
+                NotMovingMode(),
+                LocateAtCircleMode(),
+                NoShieldMode(),
             ]
 
         def __init__(self):
             self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
             self.model_mgr = model_saving.ModelManager.load_existing_model(self.model_path)
-            self.model_mgr.load_vars()
-            self.selector = SelectAction(self.model_mgr.model, self.state_ph)
+            self.model_mgr.load_vars(get_session())
+            self.selector = SelectAction(
+                self.model_mgr.model,
+                self.model_mgr.model.QualityFunction,
+                self.state_ph,
+            )
             self.modes = self._modes()
 
     def __init__(self, team, engine, ai_shared):

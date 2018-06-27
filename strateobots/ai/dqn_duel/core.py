@@ -173,7 +173,6 @@ class ReinforcementLearning:
                         self.emu_state_ph: two_states_before,
                     })
                 else:
-                    # try:
                     actions, emu_stats, sumry = sess.run([
                         self.emu_selector.action,
                         emu_stats_t,
@@ -181,8 +180,6 @@ class ReinforcementLearning:
                     ], {
                         self.emu_state_ph: [state1_before],
                     })
-                    # except:
-                    #     import pdb; pdb.set_trace()
                 if emu_writer:
                     emu_writer.add_summary(sumry, summary_step)
 
