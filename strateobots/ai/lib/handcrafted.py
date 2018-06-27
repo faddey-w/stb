@@ -77,6 +77,17 @@ def distance_attack(bot, enemy, ctl):
     ctl.fire = should_fire(bot, enemy, dist) and not enemy.has_shield
 
 
+def turret_behavior(bot, enemy, ctl):
+    angl = get_angle(bot, enemy)
+    rot = navigate_shortest(bot, angl, with_gun=True)
+    ctl.tower_rotate = rot
+    ctl.fire = should_fire(bot, enemy)
+    if ctl.fire:
+        ctl.rotate = navigate_shortest(bot, angl, with_gun=False)
+    else:
+        ctl.rotate = rot
+
+
 def to_angle(dx, dy, dist=None):
     if dist is None:
         dist = sqrt(dx*dx + dy*dy)
@@ -93,7 +104,9 @@ def norm_angle(angle):
     return angle
 
 
-def should_fire(bot, enemy, dist):
+def should_fire(bot, enemy, dist=None):
+    if dist is None:
+        dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
     gun_angle = bot.orientation + bot.tower_orientation
     kx = cos(gun_angle)
     ky = sin(gun_angle)

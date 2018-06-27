@@ -19,9 +19,6 @@ class BaseAI:
         idx = self.engine.teams.index(self.team)
         return self.engine.world_width * (0.2 + x0to1 * 0.8 + idx) / 2
 
-    def train(self):
-        pass
-
     @classmethod
     def parametrize(cls, **kwargs):
         def factory(team, engine):

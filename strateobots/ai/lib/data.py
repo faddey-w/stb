@@ -145,8 +145,8 @@ bot2vec = Mapper(
     Field('load'),
     Field('shield', lambda bot: max(0, bot.shield_remaining / SHIELD_DURATION_SEC)),
     Field('is_firing'),
-    Field('orientation'),
-    Field('tower_orientation'),
+    Field('orientation', lambda bot: bot.orientation % (2 * np.pi)),
+    Field('tower_orientation', lambda bot: bot.tower_orientation % (2 * np.pi)),
 )
 
 
