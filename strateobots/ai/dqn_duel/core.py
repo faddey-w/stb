@@ -159,111 +159,121 @@ class ReinforcementLearning:
 
             # do step of games
             for g, engine in list(games.items()):
-                state1_before = state2vec((engine.ai1.bot, engine.ai2.bot))
-                state2_before = state2vec((engine.ai2.bot, engine.ai1.bot))
-
-                emu_stats_t = self.get_emu_stats()
-                if self.self_play:
-                    two_states_before = np.stack([state1_before, state2_before], 0)
-                    actions, emu_stats, sumry = sess.run([
-                        self.emu_selector.action,
-                        emu_stats_t,
-                        self.emu_summaries
-                    ], {
-                        self.emu_state_ph: two_states_before,
-                    })
-                else:
-                    actions, emu_stats, sumry = sess.run([
-                        self.emu_selector.action,
-                        emu_stats_t,
-                        self.emu_summaries,
-                    ], {
-                        self.emu_state_ph: [state1_before],
-                    })
-                if emu_writer:
-                    emu_writer.add_summary(sumry, summary_step)
-
                 select_random_prob = max(
                     self.select_random_min_prob,
                     1 - self.select_random_prob_decrease * step_counter
                 )
-                action2vec.restore(actions[0], engine.ai1.ctl)
-                control_noise(engine.ai1.ctl, select_random_prob)
-                if self.self_play:
-                    action2vec.restore(actions[1], engine.ai2.ctl)
-                    control_noise(engine.ai2.ctl, select_random_prob)
+                emu_stats_t = self.get_emu_stats()
+                transition1, transition2, (emu_stats, sumry) = self.do_emulate_step(
+                    sess, engine, select_random_prob, frameskip,
+                    [emu_stats_t, self.emu_summaries]
+                )
+                if emu_writer:
+                    emu_writer.add_summary(sumry, summary_step)
 
-                # do game ticks
-                for _ in range(1 + frameskip):
-                    engine.tick()
-
-                action1 = action2vec(engine.ai1.ctl)
-                action2 = action2vec(engine.ai2.ctl)
-                state1_after = state2vec((engine.ai1.bot, engine.ai2.bot))
-                state2_after = state2vec((engine.ai2.bot, engine.ai1.bot))
-                reward1 = self.compute_reward(state1_before, action1, state1_after)
+                reward1 = self.compute_reward(*transition1)
 
                 self.add_emu_stats(stats, emu_stats, reward1)
-                replay_memory.put_entry(state1_before, action1, state1_after)
-                replay_memory.put_entry(state2_before, action2, state2_after)
+                replay_memory.put_entry(*transition1)
+                replay_memory.put_entry(*transition2)
 
                 if engine.is_finished:
                     games.pop(g)
 
             # do GD step
             if replay_memory.used_size >= self.batch_size:
-                random_part = 1  # self.batch_size // 5
-                states_before_1, actions_1, states_after_1 = \
-                    replay_memory.get_random_sample(random_part)
-                states_before_2, actions_2, states_after_2 = \
-                    replay_memory.get_last_entries(self.batch_size - random_part)
-
-                states_before_sample = np.concatenate([states_before_1, states_before_2], axis=0)
-                states_after_sample = np.concatenate([states_after_1, states_after_2], axis=0)
-                actions_sample = np.concatenate([actions_1, actions_2], axis=0)
-                reward_sample = self.compute_reward(
-                    states_before_sample,
-                    actions_sample,
-                    states_after_sample
+                train_stats, sumry, reward_sample = self.do_train_step(
+                    sess, replay_memory,
+                    random_batch_size=1,
+                    extra_tensors=[
+                        self.get_train_stats(),
+                        self.train_summaries,
+                        self.train_reward_ph,
+                    ],
                 )
-
-                _, train_stats, sumry = sess.run([
-                    self.train_step,
-                    self.get_train_stats(),
-                    self.train_summaries
-                ], {
-                    self.train_state_ph: states_before_sample,
-                    self.train_next_state_ph: states_after_sample,
-                    self.train_action_ph: actions_sample,
-                    self.train_reward_ph: reward_sample,
-                    self.is_terminal_ph: self.compute_is_terminal(states_after_sample)
-                })
                 self.add_train_stats(stats, reward_sample, train_stats)
                 if train_writer:
                     train_writer.add_summary(sumry, summary_step)
 
             # report on games
             if iteration % 11 == 1 and games:
-                averages = collections.defaultdict(float)
-                for g, engine in games.items():
-                    print('#{}: {}/{} t={} hp={:.2f}/{:.2f} {}'.format(
-                        g,
-                        engine.ai1.bot.type.name[:1],
-                        engine.ai2.bot.type.name[:1],
-                        engine.nticks,
-                        engine.ai1.bot.hp_ratio,
-                        engine.ai2.bot.hp_ratio,
-                        self.report_on_game(engine, averages, stats)
-                    ))
-                if self.n_games > 1:
-                    for key, val in averages.items():
-                        print('{} = {:.3f}'.format(key, val / len(games)))
-                    print()
+                self.print_games_report(games, stats)
 
         if emu_writer:
             emu_writer.flush()
         if train_writer:
             train_writer.flush()
+
+    def do_emulate_step(self, sess, engine, select_random_prob, frameskip, extra_tensors=()):
+        state1_before = state2vec((engine.ai1.bot, engine.ai2.bot))
+        state2_before = state2vec((engine.ai2.bot, engine.ai1.bot))
+
+        if self.self_play:
+            two_states_before = np.stack([state1_before, state2_before], 0)
+            actions, extra_values = sess.run([
+                self.emu_selector.action,
+                extra_tensors
+            ], {
+                self.emu_state_ph: two_states_before,
+            })
+        else:
+            actions, extra_values = sess.run([
+                self.emu_selector.action,
+                extra_tensors
+            ], {
+                self.emu_state_ph: [state1_before],
+            })
+
+        action2vec.restore(actions[0], engine.ai1.ctl)
+        control_noise(engine.ai1.ctl, select_random_prob)
+        if self.self_play:
+            action2vec.restore(actions[1], engine.ai2.ctl)
+            control_noise(engine.ai2.ctl, select_random_prob)
+
+        # do game ticks
+        for _ in range(1 + frameskip):
+            engine.tick()
+
+        action1 = action2vec(engine.ai1.ctl)
+        action2 = action2vec(engine.ai2.ctl)
+        state1_after = state2vec((engine.ai1.bot, engine.ai2.bot))
+        state2_after = state2vec((engine.ai2.bot, engine.ai1.bot))
+
+        transition1 = (state1_before, action1, state1_after)
+        transition2 = (state2_before, action2, state2_after)
+        return transition1, transition2, extra_values
+
+    def do_train_step(self, session, replay_memory, extra_tensors=(),
+                      random_batch_size=None):
+        if random_batch_size is None:
+            random_batch_size = self.batch_size // 2
+        states_before_1, actions_1, states_after_1 = \
+            replay_memory.get_random_sample(random_batch_size)
+        states_before_2, actions_2, states_after_2 = \
+            replay_memory.get_last_entries(self.batch_size - random_batch_size)
+
+        states_before_sample = np.concatenate(
+            [states_before_1, states_before_2], axis=0)
+        states_after_sample = np.concatenate([states_after_1, states_after_2],
+                                             axis=0)
+        actions_sample = np.concatenate([actions_1, actions_2], axis=0)
+        reward_sample = self.compute_reward(
+            states_before_sample,
+            actions_sample,
+            states_after_sample
+        )
+
+        _, extra_results = session.run([
+            self.train_step,
+            extra_tensors
+        ], {
+            self.train_state_ph: states_before_sample,
+            self.train_next_state_ph: states_after_sample,
+            self.train_action_ph: actions_sample,
+            self.train_reward_ph: reward_sample,
+            self.is_terminal_ph: self.compute_is_terminal(states_after_sample)
+        })
+        return extra_results
 
     def get_emu_stats(self):
         return self.emu_selector.max_q
@@ -299,6 +309,7 @@ class ReinforcementLearning:
     def add_train_stats(self, stat_store, reward_sample, stat_values):
         loss, y, t_q = stat_values
         stat_store['y'] += np.sum(y) / np.size(y)
+        stat_store['loss'] += np.sum(loss) / np.size(loss)
         stat_store['t_q'] += np.sum(t_q) / np.size(t_q)
         stat_store['reward_sample'] += np.sum(reward_sample) / np.size(reward_sample)
         stat_store['n_train'] += 1
@@ -321,10 +332,10 @@ class ReinforcementLearning:
         bot_ori = get_angle(engine.ai1.bot, engine.ai2.bot)
         averages['dist_sum'] += d_center
         report = (
-            'a={:5.3f}   {:5.3f}   '
+            'a={:6.3f}   {:6.3f}   '
             'b1=({:5.1f},{:5.1f})   b2=({:5.1f}, {:5.1f})    '
             'r={:5.3f}    Q={:5.3f}    '
-            'r\'={:5.3f}    y={:5.3f}    Q\'={:5.3f}'.format(
+            'loss={:7.5f}'.format(
                 ((gun_ori - bot_ori) / pi + 1) % 2 - 1,
                 (gun_ori-init_gun_ori) / pi,
                 engine.ai1.bot.x,
@@ -333,14 +344,32 @@ class ReinforcementLearning:
                 engine.ai2.bot.y,
                 stats['reward'] / max(1, stats['n_emu']),
                 stats['emu_max_q'] / max(1, stats['n_emu']),
-                stats['reward_sample'] / max(1, stats['n_train']),
-                stats['y'] / max(1, stats['n_train']),
-                stats['t_q'] / max(1, stats['n_train']),
+                # stats['reward_sample'] / max(1, stats['n_train']),
+                # stats['y'] / max(1, stats['n_train']),
+                # stats['t_q'] / max(1, stats['n_train']),
+                stats['loss'] / max(1, stats['n_train']),
             ))
         stats.clear()
         stats['init_gun_ori'] = init_gun_ori
 
         return report
+
+    def print_games_report(self, games_dict, stats_dict):
+        averages = collections.defaultdict(float)
+        for g, engine in games_dict.items():
+            print('#{}: {}/{} t={} hp={:.2f}/{:.2f} {}'.format(
+                g,
+                engine.ai1.bot.type.name[:1],
+                engine.ai2.bot.type.name[:1],
+                engine.nticks,
+                engine.ai1.bot.hp_ratio,
+                engine.ai2.bot.hp_ratio,
+                self.report_on_game(engine, averages, stats_dict)
+            ))
+        if self.n_games > 1:
+            for key, val in averages.items():
+                print('{} = {:.3f}'.format(key, val / len(games_dict)))
+            print()
 
 
 def __generate_all_actions():
