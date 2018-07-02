@@ -5,9 +5,9 @@ from math import pi, sin, cos
 
 import tensorflow as tf
 
+from strateobots import REPO_ROOT
 from strateobots.engine import BotType
 from .core import SelectAction, get_session
-from .train import REPO_ROOT
 from .._base import DuelAI
 from ..lib import model_saving
 from ..lib.data import state2vec, action2vec
@@ -54,6 +54,9 @@ class DQNDuelAI(DuelAI):
 
 class Mode:
 
+    def reset(self):
+        pass
+
     def on_init(self, bot, team, engine):
         pass
 
@@ -84,6 +87,9 @@ class ChaoticMode(Mode):
 
     chaos = None
 
+    def reset(self):
+        self.chaos = None
+
     def on_runtime(self, bot, enemy, ctl, engine):
         if self.chaos is None:
             self.chaos = StatefulChaotic(bot, ctl, engine,
@@ -113,10 +119,15 @@ class NoShieldMode(Mode):
 class LocateAtCircleMode(Mode):
 
     def __init__(self, orientation=None, radius_ratio=0.05):
-        if orientation is None:
-            orientation = random.random() * 2 * pi
+        self.configured_orientation = orientation
         self.orientation = orientation
         self.radius_ratio = radius_ratio
+
+    def reset(self):
+        if self.configured_orientation is None:
+            self.orientation = random.random() * 2 * pi
+        else:
+            self.orientation = self.configured_orientation
 
     def on_init(self, bot, team, engine):
         _randomize_position(bot, engine)
@@ -150,14 +161,11 @@ class RunAI(DQNDuelAI):
         self_play = False
         bot_type = BotType.Raider
         ai2_mode = TrainerMode([turret_behavior])
-
-        @staticmethod
-        def _modes():
-            return [
-                NotMovingMode(),
-                LocateAtCircleMode(),
-                NoShieldMode(),
-            ]
+        modes = [
+            NotMovingMode(),
+            LocateAtCircleMode(),
+            NoShieldMode(),
+        ]
 
         def __init__(self):
             self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
@@ -168,7 +176,9 @@ class RunAI(DQNDuelAI):
                 self.model_mgr.model.QualityFunction,
                 self.state_ph,
             )
-            self.modes = self._modes()
+            for mode in self.modes:
+                mode.reset()
+            self.ai2_mode.reset()
 
     def __init__(self, team, engine, ai_shared):
         super(RunAI, self).__init__(team, engine)

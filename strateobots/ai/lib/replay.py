@@ -98,3 +98,9 @@ class ReplayMemory:
         smpl = tuple(random.sample(range(self._used), sample_size))
         return self._states[smpl, :, 0], self._actions[smpl, :], self._states[smpl, :, 1]
 
+    def get_random_slice(self, slice_size):
+        # TODO doctring
+        start = random.randint(0, self._used-slice_size)
+        slc = slice(start, start+slice_size)
+        return self._states[slc, :, 0], self._actions[slc, :], self._states[slc, :, 1]
+

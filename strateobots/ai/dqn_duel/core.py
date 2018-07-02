@@ -27,7 +27,7 @@ class QualityFunction:
 
 class SelectAction:
 
-    def __init__(self, qfunc_model, qfunc_class, state):
+    def __init__(self, qfunc_model, state):
         n_all_actions = all_actions.shape[0]
         batch_shape = layers.shape_to_list(state.shape[:-1])
 
@@ -40,7 +40,7 @@ class SelectAction:
         self.batched_all_actions = tf.constant(batched_all_actions, dtype=tf.float32)
         self.state = add_batch_shape(state, [1])
 
-        self.qfunc = qfunc_class(qfunc_model, self.state, self.batched_all_actions)
+        self.qfunc = qfunc_model.apply(self.state, self.batched_all_actions)
         self.max_idx = tf.argmax(self.qfunc.get_quality(), 0)
         self.max_q = tf.reduce_max(self.qfunc.get_quality(), 0)
 
@@ -56,26 +56,22 @@ class SelectAction:
 
 class ReinforcementLearning:
 
-    def __init__(self, model, qfunc_class, batch_size=10, n_games=10,
-                 reward_prediction=0.97, self_play=True, select_random_prob_decrease=0.05,
-                 select_random_min_prob=0.1):
+    def __init__(self, model, batch_size=10,
+                 reward_prediction=0.97, self_play=True):
         self.model = model
         self.batch_size = batch_size
-        self.n_games = n_games
         self.self_play = self_play
 
         emu_items = 2 if self_play else 1
-        self.select_random_prob_decrease = select_random_prob_decrease
-        self.select_random_min_prob = select_random_min_prob
         self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, state2vec.vector_length])
-        self.emu_selector = SelectAction(self.model, qfunc_class, self.emu_state_ph)
+        self.emu_selector = SelectAction(self.model, self.emu_state_ph)
 
         self.train_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
         self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
         self.train_action_ph = tf.placeholder(tf.float32, [batch_size, action2vec.vector_length])
         self.train_reward_ph = tf.placeholder(tf.float32, [batch_size])
-        self.train_selector = SelectAction(self.model, qfunc_class, self.train_next_state_ph)
-        self.train_qfunc = qfunc_class(self.model, self.train_state_ph, self.train_action_ph)
+        self.train_selector = SelectAction(self.model, self.train_next_state_ph)
+        self.train_qfunc = self.model.apply(self.train_state_ph, self.train_action_ph)
 
         self.optimizer = tf.train.AdamOptimizer()
 
@@ -122,11 +118,11 @@ class ReinforcementLearning:
         ])
 
     def run(self, replay_memory, frameskip=0, max_ticks=1000, world_size=300,
-            log_root_dir=None, *, step_counter, ai1_cls, ai2_cls):
+            logdir=None, *, ai1_cls, ai2_cls,
+            random_batch_size, n_games, select_random_prob):
         sess = get_session()
         emu_writer = train_writer = None
-        if log_root_dir is not None:
-            logdir = os.path.join(log_root_dir, str(step_counter))
+        if logdir is not None:
             os.makedirs(logdir, exist_ok=False)
             emu_writer = tf.summary.FileWriter(
                 os.path.join(logdir, 'emu'),
@@ -144,25 +140,18 @@ class ReinforcementLearning:
                 max_ticks,
                 wait_after_win=0,
             )
-            for i in range(self.n_games)
+            for i in range(n_games)
         }
 
         stats = collections.defaultdict(float)
 
-        step_base = int(step_counter * max_ticks / (1 + frameskip))
-
         iteration = 0
         while games:
             iteration += 1
-            # summary_step = step_base + iteration
             summary_step = iteration
 
             # do step of games
             for g, engine in list(games.items()):
-                select_random_prob = max(
-                    self.select_random_min_prob,
-                    1 - self.select_random_prob_decrease * step_counter
-                )
                 emu_stats_t = self.get_emu_stats()
                 transition1, transition2, (emu_stats, sumry) = self.do_emulate_step(
                     sess, engine, select_random_prob, frameskip,
@@ -184,7 +173,7 @@ class ReinforcementLearning:
             if replay_memory.used_size >= self.batch_size:
                 train_stats, sumry, reward_sample = self.do_train_step(
                     sess, replay_memory,
-                    random_batch_size=1,
+                    random_batch_size=random_batch_size,
                     extra_tensors=[
                         self.get_train_stats(),
                         self.train_summaries,
@@ -245,18 +234,23 @@ class ReinforcementLearning:
 
     def do_train_step(self, session, replay_memory, extra_tensors=(),
                       random_batch_size=None):
-        if random_batch_size is None:
-            random_batch_size = self.batch_size // 2
+        # if random_batch_size is None:
+        #     random_batch_size = self.batch_size // 2
+        slc1 = 3 * self.batch_size // 8
+
         states_before_1, actions_1, states_after_1 = \
-            replay_memory.get_random_sample(random_batch_size)
+            replay_memory.get_random_slice(slc1)
         states_before_2, actions_2, states_after_2 = \
-            replay_memory.get_last_entries(self.batch_size - random_batch_size)
+            replay_memory.get_random_slice(slc1)
+        states_before_3, actions_3, states_after_3 = \
+            replay_memory.get_last_entries(self.batch_size - 2 * slc1)
 
         states_before_sample = np.concatenate(
-            [states_before_1, states_before_2], axis=0)
-        states_after_sample = np.concatenate([states_after_1, states_after_2],
-                                             axis=0)
-        actions_sample = np.concatenate([actions_1, actions_2], axis=0)
+            [states_before_1, states_before_2, states_before_3], axis=0)
+        actions_sample = np.concatenate(
+            [actions_1, actions_2, actions_3], axis=0)
+        states_after_sample = np.concatenate(
+            [states_after_1, states_after_2, states_after_3], axis=0)
         reward_sample = self.compute_reward(
             states_before_sample,
             actions_sample,
@@ -366,7 +360,7 @@ class ReinforcementLearning:
                 engine.ai2.bot.hp_ratio,
                 self.report_on_game(engine, averages, stats_dict)
             ))
-        if self.n_games > 1:
+        if len(games_dict) > 1:
             for key, val in averages.items():
                 print('{} = {:.3f}'.format(key, val / len(games_dict)))
             print()
@@ -421,3 +415,7 @@ def get_session():
         _global_session_ref = weakref.ref(sess, sess.close)
     return sess
 
+
+def reset_session():
+    global _global_session_ref
+    _global_session_ref = None

@@ -5,44 +5,52 @@ import os
 
 import tensorflow as tf
 
+from strateobots import REPO_ROOT
 from strateobots.engine import BotType
 from .core import get_session, ReinforcementLearning
-from .model import QualityFunction
+from .model import QualityFunctionModel
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
 from . import ai
 
 tf.reset_default_graph()
 log = logging.getLogger(__name__)
-REPO_ROOT = os.path.dirname(os.path.dirname(__import__('strateobots').__file__))
 
 
 class Config:
     
-    memory_capacity = 20000
+    memory_capacity = 200000
 
-    model_layers = (10, 8, 6, 4)
+    model_params = dict(
+        # coord_cfg=[8] * 4,
+        # angle_cfg=[8] * 4,
+        # fc_cfg=[20] * (8 - 1) + [8],
+        # exp_layers=[4],
+
+        fc_cfg=[8]*7 + [6]*16 + [8],
+        exp_layers=[],
+        pool_layers=[2, 4, 5, 9, 12],
+        join_point=7,
+    )
 
     batch_size = 80
-    reward_prediction = 0.05
+    random_batch_size = 40
+    reward_prediction = 0.95
     select_random_prob_decrease = 0.005
     select_random_min_prob = 0.03
     self_play = False
 
     bot_type = BotType.Raider
         
-    def make_common_modes(self):
-        return [
-            ai.NotMovingMode(),
-            ai.LocateAtCircleMode(),
-            ai.NoShieldMode()
-        ]
-    
-    def make_ai1_modes(self):
-        return []
-
-    def make_ai2_modes(self):
-        return [ai.TrainerMode([handcrafted.turret_behavior])]
+    common_modes = [
+        ai.NotMovingMode(),
+        ai.LocateAtCircleMode(),
+        ai.NoShieldMode()
+    ]
+    ai1_modes = []
+    ai2_modes = [
+        ai.TrainerMode([handcrafted.turret_behavior])
+    ]
 
 
 def main():
@@ -52,6 +60,7 @@ def main():
     parser.add_argument('--save-dir', default=None)
     parser.add_argument('--max-games', default=None, type=int)
     opts = parser.parse_args()
+    cfg = Config()
 
     if opts.save_dir is None:
         run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -64,15 +73,14 @@ def main():
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
-    cfg = Config()
 
     sess = get_session()
     try:
         model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
         model_mgr.load_vars(sess)
-        model = model_mgr.model  # type: QualityFunction.Model
+        model = model_mgr.model  # type: QualityFunctionModel
     except:
-        model = QualityFunction.Model(cfg.model_layers)
+        model = QualityFunctionModel(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
     replay_memory = replay.ReplayMemory(
@@ -83,12 +91,8 @@ def main():
     rl = ReinforcementLearning(
         model,
         batch_size=cfg.batch_size,
-        n_games=1,
         reward_prediction=cfg.reward_prediction,
-        select_random_prob_decrease=cfg.select_random_prob_decrease,
-        select_random_min_prob=cfg.select_random_min_prob,
         self_play=cfg.self_play,
-        qfunc_class=model.__class__.QualityFunction
     )
     sess.run(rl.init_op)
     try:
@@ -105,25 +109,38 @@ def main():
         try:
             i = 0
             while True:
+                for mode in cfg.common_modes + cfg.ai1_modes + cfg.ai2_modes:
+                    mode.reset()
+                select_random_prob = max(
+                    cfg.select_random_min_prob,
+                    1 - cfg.select_random_prob_decrease * model_mgr.step_counter
+                )
                 ai1_factory = ai.DQNDuelAI.parametrize(
                     bot_type=cfg.bot_type,
-                    modes=cfg.make_common_modes() + cfg.make_ai1_modes()
+                    modes=cfg.common_modes + cfg.ai1_modes
                 )
                 ai2_factory = ai.DQNDuelAI.parametrize(
                     bot_type=cfg.bot_type,
-                    modes=cfg.make_common_modes() + cfg.make_ai2_modes()
+                    modes=cfg.common_modes + cfg.ai2_modes
                 )
                 
+                if opts.save:
+                    logdir = os.path.join(logs_dir, str(model_mgr.step_counter))
+                else:
+                    logdir = None
+
                 i += 1
                 rl.run(
                     frameskip=2,
                     max_ticks=2000,
                     world_size=1000,
                     replay_memory=replay_memory,
-                    log_root_dir=logs_dir if opts.save else None,
+                    logdir=logdir,
                     ai1_cls=ai1_factory,
                     ai2_cls=ai2_factory,
-                    step_counter=model_mgr.step_counter
+                    random_batch_size=cfg.random_batch_size,
+                    n_games=1,
+                    select_random_prob=select_random_prob,
                 )
                 if opts.save:
                     model_mgr.save_vars(sess)
