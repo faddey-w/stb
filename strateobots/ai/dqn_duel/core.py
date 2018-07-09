@@ -8,10 +8,11 @@ from math import pi
 import numpy as np
 import tensorflow as tf
 
-from strateobots.engine import StbEngine, dist_points, BotControl
+from strateobots.engine import StbEngine, dist_points, BotControl, BulletModel
 from ..lib import layers
 from ..lib.data import state2vec, action2vec
 from ..lib.handcrafted import get_angle
+from .._base import BaseAI
 
 
 class QualityFunction:
@@ -73,7 +74,9 @@ class ReinforcementLearning:
         self.train_selector = SelectAction(self.model, self.train_next_state_ph)
         self.train_qfunc = self.model.apply(self.train_state_ph, self.train_action_ph)
 
+        # self.optimizer = tf.train.RMSPropOptimizer(0.001)
         self.optimizer = tf.train.AdamOptimizer()
+        # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
 
         self.is_terminal_ph = tf.placeholder(tf.bool, [batch_size])
         self.y_predict_part = tf.where(
@@ -133,6 +136,9 @@ class ReinforcementLearning:
                 sess.graph
             )
 
+        if not self.self_play:
+            ai2_cls = ProxyTrainerAI.wrap(ai2_cls)
+
         games = {
             i: StbEngine(
                 world_size, world_size,
@@ -155,7 +161,7 @@ class ReinforcementLearning:
                 emu_stats_t = self.get_emu_stats()
                 transition1, transition2, (emu_stats, sumry) = self.do_emulate_step(
                     sess, engine, select_random_prob, frameskip,
-                    [emu_stats_t, self.emu_summaries]
+                    [emu_stats_t, self.emu_summaries],
                 )
                 if emu_writer:
                     emu_writer.add_summary(sumry, summary_step)
@@ -194,8 +200,14 @@ class ReinforcementLearning:
             train_writer.flush()
 
     def do_emulate_step(self, sess, engine, select_random_prob, frameskip, extra_tensors=()):
-        state1_before = state2vec((engine.ai1.bot, engine.ai2.bot))
-        state2_before = state2vec((engine.ai2.bot, engine.ai1.bot))
+        if not self.self_play and not isinstance(engine.ai2, ProxyTrainerAI):
+            raise TypeError("In non-self-play mode second AI must be "
+                            "wrapped into ProxyTrainerAI")
+
+        bot1, bot2 = engine.ai1.bot, engine.ai2.bot
+        bullet1, bullet2 = find_bullets(engine, [bot1, bot2])
+        state1_before = state2vec((bot1, bot2, bullet1, bullet2))
+        state2_before = state2vec((bot2, bot1, bullet2, bullet1))
 
         if self.self_play:
             two_states_before = np.stack([state1_before, state2_before], 0)
@@ -218,15 +230,18 @@ class ReinforcementLearning:
         if self.self_play:
             action2vec.restore(actions[1], engine.ai2.ctl)
             control_noise(engine.ai2.ctl, select_random_prob)
+        else:
+            engine.ai2.update_action()
 
         # do game ticks
         for _ in range(1 + frameskip):
             engine.tick()
 
+        bullet1, bullet2 = find_bullets(engine, [bot1, bot2])
         action1 = action2vec(engine.ai1.ctl)
         action2 = action2vec(engine.ai2.ctl)
-        state1_after = state2vec((engine.ai1.bot, engine.ai2.bot))
-        state2_after = state2vec((engine.ai2.bot, engine.ai1.bot))
+        state1_after = state2vec((bot1, bot2, bullet1, bullet2))
+        state2_after = state2vec((bot2, bot1, bullet2, bullet1))
 
         transition1 = (state1_before, action1, state1_after)
         transition2 = (state2_before, action2, state2_after)
@@ -234,16 +249,32 @@ class ReinforcementLearning:
 
     def do_train_step(self, session, replay_memory, extra_tensors=(),
                       random_batch_size=None):
+        _, extra_results = self.compute_on_sample(
+            session,
+            replay_memory,
+            [self.train_step, extra_tensors],
+            random_batch_size,
+        )
+        return extra_results
+
+    def compute_on_sample(self, session, replay_memory, tensors,
+                          random_batch_size=None):
         # if random_batch_size is None:
         #     random_batch_size = self.batch_size // 2
-        slc1 = 3 * self.batch_size // 8
+        if random_batch_size is None:
+            slc1 = 3 * self.batch_size // 8
+        else:
+            slc1 = random_batch_size // 2
+            # slc1 = random_batch_size
 
         states_before_1, actions_1, states_after_1 = \
             replay_memory.get_random_slice(slc1)
         states_before_2, actions_2, states_after_2 = \
             replay_memory.get_random_slice(slc1)
+            # replay_memory.get_random_slice(0)
         states_before_3, actions_3, states_after_3 = \
             replay_memory.get_last_entries(self.batch_size - 2 * slc1)
+            # replay_memory.get_last_entries(self.batch_size - slc1)
 
         states_before_sample = np.concatenate(
             [states_before_1, states_before_2, states_before_3], axis=0)
@@ -257,17 +288,13 @@ class ReinforcementLearning:
             states_after_sample
         )
 
-        _, extra_results = session.run([
-            self.train_step,
-            extra_tensors
-        ], {
+        return session.run(tensors, {
             self.train_state_ph: states_before_sample,
             self.train_next_state_ph: states_after_sample,
             self.train_action_ph: actions_sample,
             self.train_reward_ph: reward_sample,
             self.is_terminal_ph: self.compute_is_terminal(states_after_sample)
         })
-        return extra_results
 
     def get_emu_stats(self):
         return self.emu_selector.max_q
@@ -276,9 +303,10 @@ class ReinforcementLearning:
         # b_hp_idx = state2vec[0, 'hp_ratio']
         e_hp_idx = state2vec[1, 'hp_ratio']
         # return 10 * (state_after[..., b_hp_idx] - state_after[..., e_hp_idx])
-        return 10 * (1 - state_after[..., e_hp_idx])
-        # e_hp_before = state_before[..., e_hp_idx]
-        # e_hp_after = state_after[..., e_hp_idx]
+        # return 10 * (1 - state_after[..., e_hp_idx])
+        e_hp_before = state_before[..., e_hp_idx]
+        e_hp_after = state_after[..., e_hp_idx]
+        return 100 * (e_hp_before - e_hp_after)
         # reward_flag = e_hp_after + 0.01 < e_hp_before
         # return np.cast[np.float32](reward_flag)
 
@@ -367,7 +395,15 @@ class ReinforcementLearning:
 
 
 def __generate_all_actions():
-    opts = [[-1, 0, +1], [-1, 0, +1], [-1, 0, +1], [0, 1], [0, 1]]
+    opts = [
+        # [-1, 0, +1],  # move
+        [0],  # move
+        [-1, 0, +1],  # rotate
+        [-1, 0, +1],  # tower rotate
+        [0, 1],  # fire
+        # [0, 1],  # shield
+        [0],  # shield
+    ]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
         ctl = BotControl(mv, rt, trt, fr, sh)
         yield action2vec(ctl)
@@ -387,11 +423,46 @@ def control_noise(ctl, noise_prob):
         ctl.shield = random.choice([False, True])
 
 
+class ProxyTrainerAI(BaseAI):
+
+    wrapped_cls = None
+    wrapped_ai = None
+    noise = None
+
+    @classmethod
+    def wrap(cls, ai_cls):
+        return cls.parametrize(wrapped_cls=ai_cls)
+
+    def initialize(self):
+        self.wrapped_ai = self.wrapped_cls(self.team, self.engine)
+        self.wrapped_ai.initialize()
+
+    def update_action(self):
+        self.wrapped_ai.tick()
+
+    def tick(self):
+        pass
+
+    def __getattr__(self, item):
+        return getattr(self.wrapped_ai, item)
+
+
 def shape_to_list(shape):
     if hasattr(shape, 'as_list'):
         return shape.as_list()
     else:
         return list(shape)
+
+
+def find_bullets(engine, bots):
+    bullets = {
+        bullet.origin_id: bullet
+        for bullet in engine.iter_bullets()
+    }
+    return [
+        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0))
+        for bot in bots
+    ]
 
 
 def add_batch_shape(x, batch_shape):

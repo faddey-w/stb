@@ -38,6 +38,13 @@ class ReplayMemory:
         self._used = min_idx+insert_size
         self._last_insert = self._used-1
 
+    def trunc(self, to_size, offset=0):
+        assert offset+to_size <= self._used
+        if offset != 0:
+            self._states[:to_size] = self._states[offset:offset+to_size]
+            self._actions[:to_size] = self._actions[offset:offset+to_size]
+        self._used = to_size
+
     @property
     def used_size(self):
         """

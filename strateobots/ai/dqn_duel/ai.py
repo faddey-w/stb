@@ -6,7 +6,7 @@ from math import pi, sin, cos
 import tensorflow as tf
 
 from strateobots import REPO_ROOT
-from strateobots.engine import BotType
+from strateobots.engine import BotType, BulletModel
 from .core import SelectAction, get_session
 from .._base import DuelAI
 from ..lib import model_saving
@@ -21,6 +21,7 @@ class DQNDuelAI(DuelAI):
 
     bot_type = None
     modes = ()
+    trainer_function = None
 
     def create_bot(self, teamize_x=True):
         x = random.random()
@@ -48,6 +49,8 @@ class DQNDuelAI(DuelAI):
         bot, enemy, ctl = self._get_bots()
         if None in (bot, enemy):
             return
+        if self.trainer_function is not None:
+            self.trainer_function(bot, enemy, ctl)
         for mode in self.modes:
             mode.on_runtime(bot, enemy, ctl, self.engine)
 
@@ -67,20 +70,6 @@ class Mode:
 class PassiveMode(Mode):
 
     pass
-
-
-class TrainerMode(Mode):
-
-    def __init__(self, algorithms=(distance_attack, short_range_attack)):
-        self.algorithms = list(algorithms)
-        self.selected_algorithm = None
-
-    def on_init(self, bot, team, engine):
-        self.selected_algorithm = random.choice(self.algorithms)
-        log.info("selected trainer algorithm: %s", self.selected_algorithm)
-
-    def on_runtime(self, bot, enemy, ctl, engine):
-        self.selected_algorithm(bot, enemy, ctl)
 
 
 class ChaoticMode(Mode):
@@ -146,10 +135,10 @@ def AI(team, engine):
     if team == engine.teams[0]:
         return RunAI(team, engine, RunAI.Shared.instance)
     else:
-        all_modes = [RunAI.Shared.instance.ai2_mode, *RunAI.Shared.instance.modes]
         return DQNDuelAI.parametrize(
-            modes=all_modes,
-            bot_type=BotType.Raider
+            modes=RunAI.Shared.instance.modes,
+            bot_type=BotType.Raider,
+            trainer_function=turret_behavior,
         )(team, engine)
 
 
@@ -157,10 +146,9 @@ class RunAI(DQNDuelAI):
 
     class Shared:
         instance = None  # type: RunAI.Shared
-        model_path = os.path.join(REPO_ROOT, '_data/2018-06-27_21-18-54/model/')
+        model_path = os.path.join(REPO_ROOT, '_data/2018-07-09_21-52-27/model/')
         self_play = False
         bot_type = BotType.Raider
-        ai2_mode = TrainerMode([turret_behavior])
         modes = [
             NotMovingMode(),
             LocateAtCircleMode(),
@@ -173,12 +161,10 @@ class RunAI(DQNDuelAI):
             self.model_mgr.load_vars(get_session())
             self.selector = SelectAction(
                 self.model_mgr.model,
-                self.model_mgr.model.QualityFunction,
                 self.state_ph,
             )
             for mode in self.modes:
                 mode.reset()
-            self.ai2_mode.reset()
 
     def __init__(self, team, engine, ai_shared):
         super(RunAI, self).__init__(team, engine)
@@ -190,7 +176,8 @@ class RunAI(DQNDuelAI):
         bot, enemy, ctl = self._get_bots()
         if None in (bot, enemy):
             return
-        st = state2vec([bot, enemy])
+        b1, b2 = find_bullets(self.engine, [bot, enemy])
+        st = state2vec([bot, enemy, b1, b2])
         action = self.shared.selector.call({self.shared.state_ph: [st]})
         action2vec.restore(action[0], ctl)
         super(RunAI, self).tick()
@@ -209,4 +196,15 @@ def random_bot_type():
         BotType.Heavy,
         BotType.Sniper,
     ])
+
+
+def find_bullets(engine, bots):
+    bullets = {
+        bullet.origin_id: bullet
+        for bullet in engine.iter_bullets()
+    }
+    return [
+        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0))
+        for bot in bots
+    ]
 

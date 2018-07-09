@@ -479,7 +479,7 @@ class BotModel:
                  'is_firing',
                  'shield_remaining', 'tower_rot_speed']
 
-    def __init__(self, id, team, type, x, y, orientation):
+    def __init__(self, id, team, type, x, y, orientation, tower_orientation=0.0):
         self.id = id
         self.team = team
         self.type = type  # type: BotTypeProperties
@@ -492,7 +492,7 @@ class BotModel:
         self.rot_speed = 0
         self.tower_rot_speed = 0
         self.orientation = orientation
-        self.tower_orientation = 0.0
+        self.tower_orientation = tower_orientation
         self.shield_remaining = 0
         self.is_firing = False
 
@@ -516,19 +516,29 @@ class BotModel:
 class BulletModel:
 
     __slots__ = [
-        'type', 'origin_id', 'orientation', 'x', 'y',
+        'type', 'origin_id', '_orientation', 'x', 'y',
         'range', 'remaining_range', 'cos', 'sin']
 
     def __init__(self, type, origin_id, orientation, x, y, range):
         self.origin_id = origin_id
         self.type = type
-        self.orientation = orientation
+        self._orientation = orientation
         self.x = x
         self.y = y
         self.range = range
         self.remaining_range = range
         self.cos = cos(orientation)
         self.sin = sin(orientation)
+
+    @property
+    def orientation(self):
+        return self._orientation
+
+    @orientation.setter
+    def orientation(self, value):
+        self._orientation = value
+        self.cos = cos(value)
+        self.sin = sin(value)
 
 
 class ExplosionModel:

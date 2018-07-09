@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType
-from .core import get_session, ReinforcementLearning
+from .core import get_session, ReinforcementLearning, control_noise
 from .model import QualityFunctionModel
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
@@ -15,6 +15,13 @@ from . import ai
 
 tf.reset_default_graph()
 log = logging.getLogger(__name__)
+
+
+def noised(trainer_function, noise_prob):
+    def function(bot, enemy, ctl):
+        trainer_function(bot, enemy, ctl)
+        control_noise(ctl, noise_prob)
+    return function
 
 
 class Config:
@@ -27,30 +34,36 @@ class Config:
         # fc_cfg=[20] * (8 - 1) + [8],
         # exp_layers=[4],
 
-        fc_cfg=[8]*7 + [6]*16 + [8],
-        exp_layers=[],
-        pool_layers=[2, 4, 5, 9, 12],
-        join_point=7,
+        # fc_cfg=[8]*7 + [6]*16 + [8],
+        # exp_layers=[],
+        # pool_layers=[2, 4, 5, 9, 12],
+        # join_point=7,
+
+        # lin_h=20,
+        # log_h=20,
+        # lin_o=40,
+        # n_evt=30,
+
+        linear_cfg=[(30, 30), (30, 30), (10, 10)],
+        logical_cfg=[30, 30, 10],
+        values_cfg=[(5, 10)],
     )
 
     batch_size = 80
     random_batch_size = 40
-    reward_prediction = 0.95
+    reward_prediction = 0.995
     select_random_prob_decrease = 0.005
     select_random_min_prob = 0.03
     self_play = False
 
     bot_type = BotType.Raider
         
-    common_modes = [
+    modes = [
         ai.NotMovingMode(),
         ai.LocateAtCircleMode(),
         ai.NoShieldMode()
     ]
-    ai1_modes = []
-    ai2_modes = [
-        ai.TrainerMode([handcrafted.turret_behavior])
-    ]
+    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
 
 
 def main():
@@ -79,7 +92,8 @@ def main():
         model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
         model_mgr.load_vars(sess)
         model = model_mgr.model  # type: QualityFunctionModel
-    except:
+    except Exception as exc:
+        log.info("Cannot load model (%r), so creating a new one", exc)
         model = QualityFunctionModel(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
@@ -107,9 +121,9 @@ def main():
             code.interact(local=dict(globals(), **locals()))
     if opts.action == 'train':
         try:
-            i = 0
+            i = model_mgr.step_counter
             while True:
-                for mode in cfg.common_modes + cfg.ai1_modes + cfg.ai2_modes:
+                for mode in cfg.modes:
                     mode.reset()
                 select_random_prob = max(
                     cfg.select_random_min_prob,
@@ -117,11 +131,12 @@ def main():
                 )
                 ai1_factory = ai.DQNDuelAI.parametrize(
                     bot_type=cfg.bot_type,
-                    modes=cfg.common_modes + cfg.ai1_modes
+                    modes=cfg.modes
                 )
                 ai2_factory = ai.DQNDuelAI.parametrize(
                     bot_type=cfg.bot_type,
-                    modes=cfg.common_modes + cfg.ai2_modes
+                    modes=cfg.modes,
+                    trainer_function=cfg.trainer_function if not cfg.self_play else None,
                 )
                 
                 if opts.save:

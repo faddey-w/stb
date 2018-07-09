@@ -133,6 +133,10 @@ class Field:
         return restore_categorical
 
 
+def _norm_angle(a):
+    return ((a + np.pi) % (2 * np.pi)) - np.pi
+
+
 bot2vec = Mapper(
     Field('x'),
     Field('y'),
@@ -144,9 +148,18 @@ bot2vec = Mapper(
     Field('hp_ratio'),
     Field('load'),
     Field('shield', lambda bot: max(0, bot.shield_remaining / SHIELD_DURATION_SEC)),
-    Field('is_firing'),
-    Field('orientation', lambda bot: bot.orientation % (2 * np.pi)),
-    Field('tower_orientation', lambda bot: bot.tower_orientation % (2 * np.pi)),
+    Field('orientation', lambda bot: _norm_angle(bot.orientation)),
+    Field('tower_orientation', lambda bot: _norm_angle(bot.tower_orientation)),
+)
+bullet2vec = Mapper(
+    Field('present', lambda bullet: bullet.origin_id is not None),
+    Field('x'),
+    Field('y'),
+    Field('orientation', lambda bullet: _norm_angle(bullet.orientation)),
+    Field('remaining_range'),
+    Field('is_raider', categorical=BotType.Raider, attr='type'),
+    Field('is_heavy', categorical=BotType.Heavy, attr='type'),
+    Field('is_sniper', categorical=BotType.Sniper, attr='type'),
 )
 
 
@@ -168,4 +181,4 @@ action2vec = Mapper(
 )
 
 
-state2vec = CombinedMapper(bot2vec, bot2vec)
+state2vec = CombinedMapper(bot2vec, bot2vec, bullet2vec, bullet2vec)

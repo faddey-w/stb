@@ -21,15 +21,45 @@ class Config:
 def main():
     logging.basicConfig(level=logging.INFO)
 
-    # cfg = Config()
-    # cfg.params = dict(
-    #     coord_cfg=(16, 16, 16, 16),
-    #     angle_cfg=(16, 16, 16, 16),
-    #     fc_cfg=(10, 10, 10, 10, 10, 10, 8),
-    #     exp_layers=[],
-    # )
-    # train(cfg)
-    search_params()
+    cfg = Config()
+    cfg.params = dict(
+
+        # cfg=[200, 150, 100],
+        # cfg=[50, 45, 40, 35, 30, 25, 20, 15],
+
+        # coord_cfg=(16, 16, 16, 16),
+        # angle_cfg=(16, 16, 16, 16),
+        # fc_cfg=(10, 10, 10, 10, 10, 10, 8),
+        # exp_layers=[],
+
+        # lin_h=20,
+        # log_h=20,
+        # lin_o=40,
+        # n_evt=30,
+
+        # lin_h=7,
+        # log_h=7,
+        # lin_o=20,
+        # n_evt=10,
+
+        # linear_cfg=[(20, 20)] * 3,
+        # logical_cfg=[20] * 2,
+        # values_cfg=[(20, 20)] * 3,
+
+        linear_cfg=[(30, 30), (15, 30), (10, 10)],
+        logical_cfg=[30, 30, 10],
+        values_cfg=[(5, 10)],
+
+        # linear_cfg=[(60, 60)] * 2,
+        # logical_cfg=[60] * 2,
+        # values_cfg=[(60, 60)] * 2,
+
+        # linear_cfg=[(200, 200)] * 1,
+        # logical_cfg=[200] * 1,
+        # values_cfg=[(200, 200)] * 1,
+    )
+    train(cfg)
+    # search_params()
 
 
 def C(n, k):
@@ -123,7 +153,7 @@ def train(cfg, print_each=17):
     rl = core.ReinforcementLearning(
         model=mdl,
         batch_size=cfg.batch_size,
-        reward_prediction=0.95,
+        reward_prediction=0.995,
         self_play=False,
     )
 
@@ -141,8 +171,8 @@ def train(cfg, print_each=17):
             ai.NotMovingMode(),
             ai.LocateAtCircleMode(),
             ai.NoShieldMode(),
-            ai.TrainerMode([handcrafted.turret_behavior])
-        ]
+        ],
+        trainer_function=handcrafted.turret_behavior,
     )
     data_dir = PATH_PREFIX + 'replay'
     model_dir = PATH_PREFIX + run_name + '/model'
@@ -173,10 +203,14 @@ def train(cfg, print_each=17):
             )
         mem.save(data_dir)
 
+    # mem.trunc(3 * cfg.batch_size, 400)
+    # get = lambda what: rl.compute_on_sample(sess, mem, what, cfg.batch_size)
+    # import pdb; pdb.set_trace()
+
     loss_sum = 0
     loss_n = 0
     last_losses = []
-    for i in range(7001):
+    for i in range(2501):
         [loss, sumry] = rl.do_train_step(
             sess, mem,
             random_batch_size=cfg.batch_size,
