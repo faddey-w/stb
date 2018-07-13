@@ -22,7 +22,8 @@ class QualityFunctionModel:
         self.var_list = []
 
         with tf.variable_scope(self.name):
-            n_lin0 = state2vec.vector_length + action2vec.vector_length + 1
+            n_lin0 = state2vec.vector_length + action2vec.vector_length + 2
+            # n_lin0 = state2vec.vector_length + action2vec.vector_length + 1
 
             self.linear = []
             in_dim = n_lin0
@@ -95,9 +96,15 @@ class QualityFunction:
         y0 = select_features(state, state2vec, (0, 'y'))
         x1 = select_features(state, state2vec, (1, 'x'))
         y1 = select_features(state, state2vec, (1, 'y'))
-        to_enemy = tf.atan2(y1-y0, x1-x0)
+        to_enemy = tf.atan2(y1 - y0, x1-x0)
+        load = select_features(state, state2vec, (0, 'load'))
+        shot_ready = tf.cast(load > 0.99, tf.float32)
 
-        self.vector0 = tf.concat([state, action, to_enemy], -1)
+        self.vector0 = tf.concat([
+            state, action,
+            to_enemy,
+            shot_ready,
+        ], -1)
 
         self.linear = []
         vector = self.vector0

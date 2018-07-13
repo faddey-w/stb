@@ -1,7 +1,7 @@
 import logging
 import os
 import random
-from math import pi, sin, cos
+from math import pi, sin, cos, atan2
 
 import tensorflow as tf
 
@@ -92,10 +92,15 @@ class NotMovingMode(Mode):
         ctl.move = 0
 
 
-class NotRotatingMode(Mode):
+class NotBodyRotatingMode(Mode):
 
     def on_runtime(self, bot, enemy, ctl, engine):
         ctl.rotate = 0
+
+
+class NotTowerRotatingMode(Mode):
+
+    def on_runtime(self, bot, enemy, ctl, engine):
         ctl.tower_rotate = 0
 
 
@@ -129,6 +134,17 @@ class LocateAtCircleMode(Mode):
         bot.y = (0.5 + sin(ori) * r) * engine.world_height
 
 
+class BackToCenter(Mode):
+
+    def on_init(self, bot, team, engine):
+        x = bot.x
+        y = bot.y
+        cx = engine.world_width / 2
+        cy = engine.world_height / 2
+        angle = atan2(y-cy, x-cx)
+        bot.orientation = angle
+
+
 def AI(team, engine):
     if RunAI.Shared.instance is None:
         RunAI.Shared.instance = RunAI.Shared()
@@ -146,13 +162,15 @@ class RunAI(DQNDuelAI):
 
     class Shared:
         instance = None  # type: RunAI.Shared
-        model_path = os.path.join(REPO_ROOT, '_data/2018-07-09_21-52-27/model/')
+        model_path = os.path.join(REPO_ROOT, '_data/2018-07-10_02-19-22/model/')
         self_play = False
         bot_type = BotType.Raider
         modes = [
             NotMovingMode(),
             LocateAtCircleMode(),
             NoShieldMode(),
+            NotBodyRotatingMode(),
+            BackToCenter(),
         ]
 
         def __init__(self):

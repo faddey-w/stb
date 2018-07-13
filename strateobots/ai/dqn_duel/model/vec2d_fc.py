@@ -33,15 +33,15 @@ class QualityFunctionModel:
         with tf.variable_scope(self.name):
             coord_in, angle_in = 2, 2
             for i, (coord_out, angle_out) in enumerate(self.vec2d_cfg):
-                lx = layers.Linear.Model('L{}x'.format(i), coord_in, coord_out)
-                ly = layers.Linear.Model('L{}y'.format(i), coord_in, coord_out, lx.weight)
-                la = layers.Linear.Model('L{}a'.format(i), coord_in + angle_in, angle_out)
+                lx = layers.Linear('L{}x'.format(i), coord_in, coord_out)
+                ly = layers.Linear('L{}y'.format(i), coord_in, coord_out, lx.weight)
+                la = layers.Linear('L{}a'.format(i), coord_in + angle_in, angle_out)
                 self.vec2d_layers.append((lx, ly, la))
                 coord_in, angle_in = coord_out, angle_out
 
             fc_in = 3 + coord_in + 2 * angle_in
             for i, fc_out in enumerate(self.fc_cfg):
-                fc = layers.Linear.Model('FC{}'.format(i), fc_in, fc_out)
+                fc = layers.Linear('FC{}'.format(i), fc_in, fc_out)
                 self.fc_layers.append(fc)
                 fc_in = fc_out
 
@@ -116,9 +116,9 @@ class QualityFunction:
         vectors = (self.x0, self.y0, self.a0)
         for mx, my, ma in self.model.vec2d_layers:
             x, y, a = vectors
-            lx = layers.Linear(mx.name, x, mx, make_activation(mx.out_dim))
-            ly = layers.Linear(my.name, y, my, make_activation(my.out_dim))
-            la = layers.Linear(ma.name, a, ma, make_activation(ma.out_dim, angle=True))
+            lx = mx.apply(x, make_activation(mx.out_dim))
+            ly = my.apply(y, make_activation(my.out_dim))
+            la = ma.apply(a, make_activation(ma.out_dim, angle=True))
             a_cos = tf.cos(la.out)
             a_sin = tf.sin(la.out)
             new_x = lx.out * a_cos - ly.out * a_sin
@@ -135,7 +135,7 @@ class QualityFunction:
                 act = make_activation(fc.out_dim, lambda t: 0.95 ** tf.nn.relu(t))
             else:
                 act = make_activation(fc.out_dim)
-            fc_lr = layers.Linear(fc.name, fc_vec, fc, act)
+            fc_lr = fc.apply(fc_vec, act)
             self.fc_layers.append(fc_lr)
             fc_vec = fc_lr.out
 
@@ -157,6 +157,7 @@ class QualityFunction:
             self.state: state,
             self.action: action,
         })
+Model = QualityFunctionModel
 
 
 def select_features(tensor, mapper, *feature_names):

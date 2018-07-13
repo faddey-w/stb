@@ -122,7 +122,7 @@ class ReinforcementLearning:
 
     def run(self, replay_memory, frameskip=0, max_ticks=1000, world_size=300,
             logdir=None, *, ai1_cls, ai2_cls,
-            random_batch_size, n_games, select_random_prob):
+            n_games, select_random_prob, **sampling_kwargs):
         sess = get_session()
         emu_writer = train_writer = None
         if logdir is not None:
@@ -179,12 +179,12 @@ class ReinforcementLearning:
             if replay_memory.used_size >= self.batch_size:
                 train_stats, sumry, reward_sample = self.do_train_step(
                     sess, replay_memory,
-                    random_batch_size=random_batch_size,
                     extra_tensors=[
                         self.get_train_stats(),
                         self.train_summaries,
                         self.train_reward_ph,
                     ],
+                    **sampling_kwargs
                 )
                 self.add_train_stats(stats, reward_sample, train_stats)
                 if train_writer:
@@ -248,40 +248,43 @@ class ReinforcementLearning:
         return transition1, transition2, extra_values
 
     def do_train_step(self, session, replay_memory, extra_tensors=(),
-                      random_batch_size=None):
+                      **sampling_kwargs):
         _, extra_results = self.compute_on_sample(
             session,
             replay_memory,
             [self.train_step, extra_tensors],
-            random_batch_size,
+            **sampling_kwargs
         )
         return extra_results
 
-    def compute_on_sample(self, session, replay_memory, tensors,
-                          random_batch_size=None):
-        # if random_batch_size is None:
-        #     random_batch_size = self.batch_size // 2
-        if random_batch_size is None:
-            slc1 = 3 * self.batch_size // 8
-        else:
-            slc1 = random_batch_size // 2
-            # slc1 = random_batch_size
+    def compute_on_sample(self, session, replay_memory, tensors, *,
+                          n_seq_samples=0, seq_sample_size=0,
+                          n_rnd_entries=0, n_last_entries=0):
+        total = n_seq_samples * seq_sample_size + n_rnd_entries + n_last_entries
+        if total != self.batch_size:
+            raise ValueError("incorrect batch size: {}".format(total))
 
-        states_before_1, actions_1, states_after_1 = \
-            replay_memory.get_random_slice(slc1)
-        states_before_2, actions_2, states_after_2 = \
-            replay_memory.get_random_slice(slc1)
-            # replay_memory.get_random_slice(0)
-        states_before_3, actions_3, states_after_3 = \
-            replay_memory.get_last_entries(self.batch_size - 2 * slc1)
-            # replay_memory.get_last_entries(self.batch_size - slc1)
+        states_before, actions, states_after = [], [], []
 
-        states_before_sample = np.concatenate(
-            [states_before_1, states_before_2, states_before_3], axis=0)
-        actions_sample = np.concatenate(
-            [actions_1, actions_2, actions_3], axis=0)
-        states_after_sample = np.concatenate(
-            [states_after_1, states_after_2, states_after_3], axis=0)
+        for _ in range(n_seq_samples):
+            st_before, act, st_after = replay_memory.get_random_slice(seq_sample_size)
+            states_before.append(st_before)
+            actions.append(act)
+            states_after.append(st_after)
+
+        st_before, act, st_after = replay_memory.get_random_sample(n_rnd_entries)
+        states_before.append(st_before)
+        actions.append(act)
+        states_after.append(st_after)
+
+        st_before, act, st_after = replay_memory.get_last_entries(n_last_entries)
+        states_before.append(st_before)
+        actions.append(act)
+        states_after.append(st_after)
+
+        states_before_sample = np.concatenate(states_before, axis=0)
+        actions_sample = np.concatenate(actions, axis=0)
+        states_after_sample = np.concatenate(states_after, axis=0)
         reward_sample = self.compute_reward(
             states_before_sample,
             actions_sample,
@@ -314,6 +317,7 @@ class ReinforcementLearning:
         b_hp = state[..., state2vec[0, 'hp_ratio']]
         e_hp = state[..., state2vec[1, 'hp_ratio']]
         return (b_hp <= 0) | (e_hp <= 0)
+        # return e_hp <= 0
 
     def add_emu_stats(self, stat_store, stat_values, reward):
         max_q = stat_values
@@ -398,14 +402,16 @@ def __generate_all_actions():
     opts = [
         # [-1, 0, +1],  # move
         [0],  # move
-        [-1, 0, +1],  # rotate
+        # [-1, 0, +1],  # rotate
+        [0],  # rotate
         [-1, 0, +1],  # tower rotate
         [0, 1],  # fire
         # [0, 1],  # shield
         [0],  # shield
     ]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
-        ctl = BotControl(mv, rt, trt, fr, sh)
+        ctl = BotControl(move=mv, rotate=rt, tower_rotate=trt,
+                         fire=fr, shield=sh)
         yield action2vec(ctl)
 all_actions = np.array(list(__generate_all_actions()))
 

@@ -30,7 +30,7 @@ def main():
         # coord_cfg=(16, 16, 16, 16),
         # angle_cfg=(16, 16, 16, 16),
         # fc_cfg=(10, 10, 10, 10, 10, 10, 8),
-        # exp_layers=[],
+        # exp_layers=[6],
 
         # lin_h=20,
         # log_h=20,
@@ -46,9 +46,9 @@ def main():
         # logical_cfg=[20] * 2,
         # values_cfg=[(20, 20)] * 3,
 
-        linear_cfg=[(30, 30), (15, 30), (10, 10)],
+        linear_cfg=[(30, 30), (15, 30), (15, 30), (15, 30), (10, 10)],
         logical_cfg=[30, 30, 10],
-        values_cfg=[(5, 10)],
+        values_cfg=[(5, 10), (5, 10), (5, 10)],
 
         # linear_cfg=[(60, 60)] * 2,
         # logical_cfg=[60] * 2,
@@ -163,6 +163,8 @@ def train(cfg, print_each=17):
             ai.NotMovingMode(),
             ai.LocateAtCircleMode(),
             ai.NoShieldMode(),
+            ai.NotBodyRotatingMode(),
+            ai.BackToCenter(),
         ]
     )
     ai2_factory = ai.DQNDuelAI.parametrize(
@@ -171,6 +173,8 @@ def train(cfg, print_each=17):
             ai.NotMovingMode(),
             ai.LocateAtCircleMode(),
             ai.NoShieldMode(),
+            ai.NotBodyRotatingMode(),
+            ai.BackToCenter(),
         ],
         trainer_function=handcrafted.turret_behavior,
     )

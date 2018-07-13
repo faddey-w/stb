@@ -26,7 +26,7 @@ def noised(trainer_function, noise_prob):
 
 class Config:
     
-    memory_capacity = 200000
+    memory_capacity = 10000
 
     model_params = dict(
         # coord_cfg=[8] * 4,
@@ -44,16 +44,22 @@ class Config:
         # lin_o=40,
         # n_evt=30,
 
-        linear_cfg=[(30, 30), (30, 30), (10, 10)],
-        logical_cfg=[30, 30, 10],
-        values_cfg=[(5, 10)],
+        # linear_cfg=[(30, 50), (30, 50), (20, 20)],
+        linear_cfg=[(30, 50), (30, 50), (30, 50), (30, 50), (20, 20)],
+        logical_cfg=[40, 40, 20],
+        values_cfg=[(10, 20)],
     )
 
     batch_size = 80
-    random_batch_size = 40
+    sampling = dict(
+        n_seq_samples=0,
+        seq_sample_size=0,
+        n_rnd_entries=75,
+        n_last_entries=5
+    )
     reward_prediction = 0.995
-    select_random_prob_decrease = 0.005
-    select_random_min_prob = 0.03
+    select_random_prob_decrease = 0.03
+    select_random_min_prob = 0.1
     self_play = False
 
     bot_type = BotType.Raider
@@ -61,9 +67,11 @@ class Config:
     modes = [
         ai.NotMovingMode(),
         ai.LocateAtCircleMode(),
-        ai.NoShieldMode()
+        ai.NoShieldMode(),
+        ai.NotBodyRotatingMode(),
+        ai.BackToCenter(),
     ]
-    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
+    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.2))
 
 
 def main():
@@ -153,9 +161,9 @@ def main():
                     logdir=logdir,
                     ai1_cls=ai1_factory,
                     ai2_cls=ai2_factory,
-                    random_batch_size=cfg.random_batch_size,
                     n_games=1,
                     select_random_prob=select_random_prob,
+                    **cfg.sampling
                 )
                 if opts.save:
                     model_mgr.save_vars(sess)
