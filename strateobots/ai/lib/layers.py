@@ -73,6 +73,26 @@ class ResidualV2:
             self.out = self.join.out
 
 
+class ResidualV3:
+
+    def __init__(self, name, n_dim):
+        self.name = name
+        self.n_dim = n_dim
+
+        self.resid = Linear(name + '/Resid', n_dim, n_dim)
+        self.mask = tf.get_variable(name + '/M', [n_dim])
+
+        self.var_list = [*self.resid.var_list, self.mask]
+
+    def apply(self, x, activation):
+        return self.Apply(x, self, activation)
+
+    class Apply:
+        def __init__(self, x, model: 'ResidualV3', activation):
+            self.resid = model.resid.apply(x, activation)
+            self.out = x + model.mask * self.resid.out
+
+
 def shape_to_list(shape):
     if hasattr(shape, 'as_list'):
         return shape.as_list()

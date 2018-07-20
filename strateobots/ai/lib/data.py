@@ -44,6 +44,10 @@ class Mapper:
         idx = self._indices[field_name]
         return vector[idx]
 
+    @property
+    def field_names(self):
+        return [f.name for f in self._fields]
+
 
 class CombinedMapper:
 
@@ -86,6 +90,14 @@ class CombinedMapper:
             offs += mapper.vector_length
         mapper = self.mappers[idx]
         return vector[offs:offs+mapper.vector_length]
+
+    @property
+    def field_names(self):
+        return [
+            (i, *fn) if isinstance(m, CombinedMapper) else (i, fn)
+            for i, m in enumerate(self.mappers)
+            for fn in m.field_names
+        ]
 
 
 class MappedVector:

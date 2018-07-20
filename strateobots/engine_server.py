@@ -11,6 +11,9 @@ from strateobots.engine import StbEngine
 
 log = logging.getLogger('strateobots.engine_server')
 
+# pre-import it to speed-up launch of AIs
+import tensorflow
+
 
 class schema:
 

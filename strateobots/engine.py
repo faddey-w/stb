@@ -594,6 +594,10 @@ def dist_points(x1, y1, x2, y2):
     return sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2))
 
 
+def dist_bot(bot, x, y):
+    return dist_points(bot.x, bot.y, x, y)
+
+
 def vec_len(x, y):
     return sqrt(x*x + y*y)
 
@@ -625,6 +629,12 @@ class BotControl:
         self.tower_rotate = tower_rotate
         self.fire = fire
         self.shield = shield
+
+    def __eq__(self, other):
+        return all(
+            getattr(self, slot) == getattr(other, slot)
+            for slot in self.__slots__
+        )
 
     def __repr__(self):
         return 'BotControl(move={}, rotate={}, tower_rotate={}, fire={}, shield={})'.format(

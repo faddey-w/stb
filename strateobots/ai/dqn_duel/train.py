@@ -106,9 +106,10 @@ def main():
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
     replay_memory = replay.ReplayMemory(
-        capacity=cfg.memory_capacity,
-        state_size=state2vec.vector_length,
-        action_size=action2vec.vector_length
+        cfg.memory_capacity,
+        state2vec.vector_length,
+        action2vec.vector_length,
+        state2vec.vector_length,
     )
     rl = ReinforcementLearning(
         model,

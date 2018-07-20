@@ -55,7 +55,11 @@ class ModelManager:
 
     def load_vars(self, session):
         with open(_get_step_filepath(self.save_path)) as f:
-            self.step_counter = int(f.read().strip())
+            step_counter = int(f.read().strip())
+        if self.step_counter == step_counter:
+            log.info("Model is not changed after step=%s, skip loading", self.step_counter)
+            return
+        self.step_counter = step_counter
         ckpt = tf.train.get_checkpoint_state(self.save_path)
         log.info('loading model "%s" from %s at step=%s',
                  self.model.name, ckpt.model_checkpoint_path, self.step_counter)
