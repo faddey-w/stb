@@ -12,7 +12,7 @@ from . import core, ai, model
 
 class Config:
 
-    n_games = 2
+    n_games = 10
     batch_size = 80
 
     params = {}
@@ -57,6 +57,9 @@ def main():
         # linear_cfg=[(200, 200)] * 1,
         # logical_cfg=[200] * 1,
         # values_cfg=[(200, 200)] * 1,
+
+        vec2d_cfg=[(17, 17)] * 6,
+        fc_cfg=[11] * 6,
     )
     train(cfg)
     # search_params()
@@ -142,13 +145,26 @@ PATH_PREFIX = os.path.join(REPO_ROOT, '_data', '_overfit', '')
 
 
 def train(cfg, print_each=17):
-    mdl = model.QualityFunctionModel(**cfg.params)
+    # mdl = model.eventbased.QualityFunctionModel(
+    #     linear_cfg=[(30, 30), (15, 30), (15, 30), (15, 30), (10, 10)],
+    #     logical_cfg=[30, 30, 10],
+    #     values_cfg=[(5, 10), (5, 10), (5, 10)],
+    # )
+    # mdl = model.vec2d_v2.QualityFunctionModel(
+    #     vec2d_cfg=[(17, 17)] * 6,
+    #     fc_cfg=[11] * 6,
+    # )
+    mdl = model.vec2d_v2.QualityFunctionModel(
+        vec2d_cfg=[(11, 19)] * 2,
+        fc_cfg=[31, 23, 17, 13, 7],
+    )
     sess = core.get_session()
     run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     mem = replay.ReplayMemory(
-        capacity=2000 * cfg.n_games,
-        action_size=data.action2vec.vector_length,
-        state_size=data.state2vec.vector_length,
+        2000 * cfg.n_games,
+        data.state2vec.vector_length,
+        data.action2vec.vector_length,
+        data.state2vec.vector_length,
     )
     rl = core.ReinforcementLearning(
         model=mdl,
@@ -160,23 +176,23 @@ def train(cfg, print_each=17):
     ai1_factory = ai.DQNDuelAI.parametrize(
         bot_type=BotType.Raider,
         modes=[
-            ai.NotMovingMode(),
-            ai.LocateAtCircleMode(),
-            ai.NoShieldMode(),
-            ai.NotBodyRotatingMode(),
-            ai.BackToCenter(),
+            # ai.NotMovingMode(),
+            # ai.LocateAtCircleMode(),
+            # ai.NoShieldMode(),
+            # ai.NotBodyRotatingMode(),
+            # ai.BackToCenter(),
         ]
     )
     ai2_factory = ai.DQNDuelAI.parametrize(
         bot_type=BotType.Raider,
         modes=[
-            ai.NotMovingMode(),
-            ai.LocateAtCircleMode(),
-            ai.NoShieldMode(),
-            ai.NotBodyRotatingMode(),
-            ai.BackToCenter(),
+            # ai.NotMovingMode(),
+            # ai.LocateAtCircleMode(),
+            # ai.NoShieldMode(),
+            # ai.NotBodyRotatingMode(),
+            # ai.BackToCenter(),
         ],
-        trainer_function=handcrafted.turret_behavior,
+        trainer_function=handcrafted.short_range_attack,
     )
     data_dir = PATH_PREFIX + 'replay'
     model_dir = PATH_PREFIX + run_name + '/model'
@@ -197,17 +213,18 @@ def train(cfg, print_each=17):
             rl.run(
                 replay_memory=mem,
                 n_games=1,
-                random_batch_size=cfg.batch_size,
+                n_rnd_entries=cfg.batch_size,
                 select_random_prob=0.8,
                 world_size=1000,
                 max_ticks=2000,
                 frameskip=2,
                 ai1_cls=ai1_factory,
                 ai2_cls=ai2_factory,
+                do_train=False,
             )
         mem.save(data_dir)
 
-    # mem.trunc(3 * cfg.batch_size, 400)
+    # mem.trunc(1 * cfg.batch_size, 400)
     # get = lambda what: rl.compute_on_sample(sess, mem, what, cfg.batch_size)
     # import pdb; pdb.set_trace()
 
@@ -217,7 +234,7 @@ def train(cfg, print_each=17):
     for i in range(2501):
         [loss, sumry] = rl.do_train_step(
             sess, mem,
-            random_batch_size=cfg.batch_size,
+            n_rnd_entries=cfg.batch_size,
             extra_tensors=[
                 rl.loss,
                 rl.train_summaries,

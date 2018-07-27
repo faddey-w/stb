@@ -10,7 +10,7 @@ def AI(team, engine):
         state.mgr.load_vars(state.session)
         function = state.function
     else:
-        function = adopt_handcrafted_function(handcrafted.short_range_attack)
+        function = adopt_handcrafted_function(handcrafted.distance_attack)
     return AINDuelAI.parametrize(
         function=function,
         bot_type=BotType.Raider,

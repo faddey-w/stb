@@ -5,7 +5,7 @@ import time
 import numpy as np
 import tensorflow as tf
 from math import pi
-from strateobots.engine import StbEngine, BotType, dist_bot, BulletModel, BotControl
+from strateobots.engine import StbEngine, BotType, BulletModel, BotControl
 from .._base import DuelAI
 from ..lib import replay, model_saving, handcrafted, data, util
 from . import model as modellib
@@ -100,7 +100,8 @@ def adopt_handcrafted_function(ai_function):
     return function
 
 
-def run_one_game(function1, function2, winner_memory, frequency=1, **params):
+def run_one_game(function1, function2, winner_memory, loser_memory, frequency=1,
+                 save_win=True, **params):
     ai1_factory = AINDuelAI.parametrize(function=function1, **params)
     ai2_factory = AINDuelAI.parametrize(function=function2, **params)
 
@@ -115,7 +116,7 @@ def run_one_game(function1, function2, winner_memory, frequency=1, **params):
         data.action2vec.vector_length,
     )
 
-    engine = StbEngine(1000, 1000, ai1_factory, ai2_factory, 1500, 0)
+    engine = StbEngine(1000, 1000, ai1_factory, ai2_factory, 2500, 0)
 
     while not engine.is_finished:
         state1, state2 = make_states(engine)
@@ -129,17 +130,24 @@ def run_one_game(function1, function2, winner_memory, frequency=1, **params):
             engine.tick()
 
     if engine.ai1.bot.hp_ratio != engine.ai2.bot.hp_ratio:
-        win_mem = mem1 if engine.ai1.bot.hp_ratio > engine.ai2.bot.hp_ratio else mem2
-    else:
-        center = engine.world_width / 2, engine.world_height / 2
-        if dist_bot(engine.ai1.bot, *center) < dist_bot(engine.ai2.bot, *center):
-            win_mem = mem1
+        if engine.ai1.bot.hp_ratio > engine.ai2.bot.hp_ratio:
+            # winner_memory.update(mem1)
+            loser_memory.update(mem2)
+            win = True
+            if save_win and engine.ai2.bot.hp_ratio <= 0.2:
+                winner_memory.update(mem1)
+            elif engine.ai2.bot.hp_ratio > 0.99:
+                loser_memory.update(mem1)
         else:
-            win_mem = mem2
-    total_damage = 2 - engine.ai1.bot.hp_ratio - engine.ai2.bot.hp_ratio
-    if total_damage > 0.0:
-        winner_memory.update(win_mem)
-    return win_mem is mem1, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio
+            loser_memory.update(mem1)
+            win = False
+            if save_win and engine.ai1.bot.hp_ratio <= 0.2:
+                winner_memory.update(mem1)
+            elif engine.ai1.bot.hp_ratio > 0.99:
+                loser_memory.update(mem2)
+    else:
+        win = False
+    return win, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio
 
 
 class AccuracyMetrics:
@@ -158,7 +166,10 @@ class AccuracyMetrics:
             self.matches[correct] += 1
         self.total_amount += 1
 
-    def get_accuracy(self):
+    def get_accuracy(self, symbol):
+        return self.matches[symbol] / max(1, self.amounts[symbol])
+
+    def get_overall_accuracy(self):
         return sum(self.matches.values()) / max(1, self.total_amount)
 
     def get_jaccard(self, symbol):
@@ -173,10 +184,11 @@ class AccuracyMetrics:
 
     def __str__(self):
         return '{:.1f}%\t{:.2f}\t{}'.format(
-            100 * self.get_accuracy(),
+            100 * self.get_overall_accuracy(),
             self.get_overall_jaccard(),
             '\t'.join(
-                '{}={:.2f}'.format(s, self.get_jaccard(s))
+                # '{}={:.2f}'.format(s, self.get_jaccard(s))
+                '{}={:.2f}'.format(s, self.get_accuracy(s))
                 for s in self.symbols
             )
         )
@@ -186,67 +198,94 @@ class AINTraining:
 
     def __init__(self, model, batch_size):
         self.batch_size = batch_size
-        self.state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
-        self.action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
+        self.win_state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
+        self.win_action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
+        self.lose_state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
+        self.lose_action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
 
         self.model = model
-        self.inference = model.apply(self.state_ph)
+        self.win_inference = model.apply(self.win_state_ph)
+        self.lose_inference = model.apply(self.lose_state_ph)
 
-        self.loss_vector = -(
-            self.action_ph * tf.log(0.001 + 0.999 * self.inference.action_prediction)
+        self.cross_entropy = -(
+            self.win_action_ph * tf.log(0.001 + 0.999 * self.win_inference.action_prediction)
             +
-            (1 - self.action_ph) * tf.log(1 - 0.999 * self.inference.action_prediction)
+            (1 - self.win_action_ph) * tf.log(1 - 0.999 * self.win_inference.action_prediction)
         )
-        # self.loss_vector = tf.square(self.action_ph - self.inference.action_prediction)
-        self.loss = tf.reduce_mean(self.loss_vector[..., 6:9])
+        self.win_loss_vector = self.cross_entropy
+        self.win_loss = tf.reduce_mean(self.win_loss_vector)
 
-        self.optimizer = tf.train.AdamOptimizer(0.0001)
+        delta = self.lose_inference.action_prediction - self.lose_action_ph
+        self.lose_loss_vector = tf.square(1 - tf.abs(delta))
+        self.lose_loss = tf.reduce_mean(self.lose_loss_vector)
+
+        # w = 0.2
+        # self.loss = w * self.lose_loss + (1 - w) * self.win_loss
+        self.loss = self.lose_loss
+
+        self.optimizer = tf.train.AdamOptimizer(0.001)
         # self.optimizer = tf.train.RMSPropOptimizer(0.0001)
         self.train_op = self.optimizer.minimize(self.loss, var_list=model.var_list)
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
-    def train_n_steps(self, session, memory, n_steps, print_each_step=10):
-        loss_avg = util.Average()
+    def train_n_steps(self, session, win_memory, lose_memory, n_steps, print_each_step=10):
+        win_loss_avg = util.Average()
+        lose_loss_avg = util.Average()
         started = time.time()
         for i in range(1, 1+n_steps):
-            _, loss = self.run_on_sample(
-                [self.train_op, self.loss],
-                memory, session,
+            (
+                _,
+                # wloss,
+                lloss,
+            ) = self.run_on_sample(
+                [
+                    self.train_op,
+                    # self.win_loss,
+                    self.lose_loss,
+                ],
+                win_memory, lose_memory, session,
             )
-            loss_avg.add(loss)
+            # win_loss_avg.add(wloss)
+            lose_loss_avg.add(lloss)
             if i % print_each_step == 0:
+                # print('#{}: win_loss={:.4f}; lose_loss={:.4f}; time={:.2f}sec'.format(
+                #     i, win_loss_avg.get(), lose_loss_avg.get(), time.time()-started))
                 print('#{}: loss={:.4f}; time={:.2f}sec'.format(
-                    i, loss_avg.get(), time.time()-started))
+                    i, lose_loss_avg.get(), time.time()-started))
                 started = time.time()
-                loss_avg.reset()
+                win_loss_avg.reset()
+                lose_loss_avg.reset()
 
-    def run_on_sample(self, tensors, memory, session):
-        states, actions = memory.get_random_sample(self.batch_size)
+    def run_on_sample(self, tensors, win_memory, lose_memory, session):
+        # win_states, win_actions = win_memory.get_random_sample(self.batch_size)
+        lose_states, lose_actions = lose_memory.get_random_sample(self.batch_size)
         return session.run(tensors, {
-            self.state_ph: states,
-            self.action_ph: actions
+            # self.win_state_ph: win_states,
+            # self.win_action_ph: win_actions,
+            self.lose_state_ph: lose_states,
+            self.lose_action_ph: lose_actions,
         })
 
-    def evaluate_accuracy(self, session, memory, max_batches=50):
+    def evaluate_accuracy(self, session, winner_memory, max_batches=50):
         bsize = self.batch_size
-        n_batches = min(max_batches, int(memory.used_size / bsize))
-        states, actions = memory.get_random_sample(bsize * n_batches)
+        n_batches = min(max_batches, int(winner_memory.used_size / bsize))
+        states, actions = winner_memory.get_random_sample(bsize * n_batches)
         assert states.shape[0] == n_batches * bsize
         metrics = dict(
-            # move=AccuracyMetrics([-1, 0, +1]),
-            # rotate=AccuracyMetrics([-1, 0, +1]),
+            move=AccuracyMetrics([-1, 0, +1]),
+            rotate=AccuracyMetrics([-1, 0, +1]),
             tower_rotate=AccuracyMetrics([-1, 0, +1]),
-            # fire=AccuracyMetrics([0, 1]),
-            # shield=AccuracyMetrics([0, 1]),
+            fire=AccuracyMetrics([0, 1]),
+            shield=AccuracyMetrics([0, 1]),
         )
         example_ctls = [BotControl() for _ in range(bsize)]
         prediction_ctls = [BotControl() for _ in range(bsize)]
         for i in range(n_batches):
             slc = slice(i*bsize, (i+1)*bsize)
             predictions = session.run(
-                self.inference.action_prediction,
-                {self.state_ph: states[slc]},
+                self.win_inference.action_prediction,
+                {self.win_state_ph: states[slc]},
             )
             decode_prediction(predictions, ctl_list=prediction_ctls)
             decode_prediction(actions[slc], ctl_list=example_ctls)
@@ -321,28 +360,26 @@ def main():
     parser.add_argument('--restart', action='store_true', dest='restart')
     opts = parser.parse_args()
 
-    memory = replay.BalancedMemory(
+    winner_memory = replay.BalancedMemory(
         keyfunc=memory_keyfunc,
-        cap_per_class=2000,
+        cap_per_class=1000,
         vector_sizes=[data.state2vec.vector_length, data.action2vec.vector_length]
     )
-    data_path = '_data/AIN-data-balanced'
+    winner_data_path = '_data/AIN-data-win'
     try:
-        memory.load(data_path, eval)
+        winner_memory.load(winner_data_path, eval)
     except:
         pass
 
-    # memory = replay.ReplayMemory(
-    #     200000,
-    #     data.state2vec.vector_length,
-    #     data.action2vec.vector_length,
-    # )
-    # data_path = '_data/AIN-data-raw'
-    # try:
-    #     memory.load(data_path)
-    # except:
-    #     pass
-    # import pdb; pdb.set_trace()
+    loser_memory = replay.ReplayMemory(
+        500000,
+        data.state2vec.vector_length, data.action2vec.vector_length
+    )
+    loser_data_path = '_data/AIN-data-lose'
+    try:
+        loser_memory.load(loser_data_path)
+    except:
+        pass
 
     try:
         if opts.restart:
@@ -356,9 +393,10 @@ def main():
         print("NEW model")
         tf.reset_default_graph()
         model = modellib.vec2d_fc_v2.ActionInferenceModel(
-            vec_cfg=[(50, 50)] * 4,
-            fc_cfg=[50] * 1,
+            vec_cfg=[(50, 50)] * 5,
+            fc_cfg=[30] * 3,
         )
+        # model = modellib.handcrafted.ActionInferenceModel()
         # model = modellib.simple.ActionInferenceModel(
         #     cfg=[60] * 6,
         # )
@@ -370,53 +408,67 @@ def main():
         session = tf.Session()
         mgr.init_vars(session)
     # import code; code.interact(local=dict(**globals(), **locals()))
+    # session.run(tf.assign(model.var_list[0], [
+    #     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0],
+    #     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0, 0.0],
+    # ]))
+    # session.run(tf.assign(model.var_list[1], [[0.0] * 11]))
 
-    training = AINTraining(model, batch_size=50)
+    training = AINTraining(model, batch_size=500)
     session.run(training.init_op)
 
     ai_func = model_based_function(model, session)
     train_func_shortrange = adopt_handcrafted_function(handcrafted.short_range_attack)
     train_func_longrange = adopt_handcrafted_function(handcrafted.distance_attack)
-    ai2_funcs = [
-        # ai_func,
-        train_func_shortrange,
-        # train_func_longrange,
-    ]
+    ai2_funcs = {
+        'NN': noised(ai_func, 0.01),
+        # 'MA': train_func_shortrange,
+        # 'DA': train_func_longrange,
+    }
 
-    # N_GAMES = 1000
-    N_GAMES = 20
+    N_GAMES = 1000
+    # N_GAMES = 200
     statstr = ''
     for i in range(N_GAMES):
+        # ai1_func_name = random.choice(list(ai2_funcs.keys()))
+        ai1_func_name = 'NN'
+        # ai2_func_name = random.choice(list(ai2_funcs.keys()))
+        ai2_func_name = 'NN'
         win, hp1, hp2 = run_one_game(
-            # ai_func,
-            random.choice(ai2_funcs),
-            random.choice(ai2_funcs),
-            memory,
+            ai2_funcs[ai1_func_name],
+            ai2_funcs[ai2_func_name],
+            winner_memory,
+            loser_memory,
             frequency=4,
             bot_type=BotType.Raider,
+            save_win=(ai2_func_name == 'MA'),
         )
-        print('GAME#{}: {}, hp1={:.2f} hp2={:.2f}'.format(
+        print('GAME#{}: {} {}-vs-{}, hp1={:.2f} hp2={:.2f}'.format(
             i, 'win' if win else 'lost',
+            ai1_func_name,
+            ai2_func_name,
             hp1, hp2,
         ))
-        if memory.used_size >= training.batch_size:
+        # if winner_memory.used_size >= training.batch_size and loser_memory.used_size >= training.batch_size:
+        if loser_memory.used_size >= training.batch_size:
             # import pdb; pdb.set_trace()
-            training.train_n_steps(session, memory, 1000, print_each_step=1000)
+            training.train_n_steps(session, winner_memory, loser_memory, 99, print_each_step=33)
         if i != 0 and i % 10 == 0 or i+1 == N_GAMES:
             if opts.save:
                 mgr.save_vars(session)
-                memory.save(data_path)
+                # winner_memory.save(winner_data_path)
+                loser_memory.save(loser_data_path)
                 print("Save model at step", mgr.step_counter)
-        if True:
-            metrics = training.evaluate_accuracy(session, memory, max_batches=10)
-            width = max(map(len, metrics.keys()))
-            for prop in sorted(metrics.keys()):
-                print('  {} : {}'.format(prop.ljust(width), metrics[prop]))
-            statstr = '-'.join(
-                '{:.0f}'.format(100 * metrics[p].get_accuracy())
-                for p in sorted(metrics.keys())
-            )
-    print('STATS:', statstr)
+    #     if True:
+    #         metrics = training.evaluate_accuracy(session, winner_memory, max_batches=10)
+    #         width = max(map(len, metrics.keys()))
+    #         for prop in sorted(metrics.keys()):
+    #             print('  {} : {}'.format(prop.ljust(width), metrics[prop]))
+    #         statstr = '-'.join(
+    #             '{:.0f}'.format(100 * metrics[p].get_overall_accuracy())
+    #             for p in sorted(metrics.keys())
+    #         )
+    # print('STATS:', statstr)
 
 
 if __name__ == '__main__':

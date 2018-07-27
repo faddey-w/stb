@@ -120,21 +120,11 @@ class ReinforcementLearning:
             tf.summary.scalar('loss', self.total_loss),
         ])
 
-    def run(self, replay_memory, frameskip=0, max_ticks=1000, world_size=300,
-            logdir=None, *, ai1_cls, ai2_cls,
-            n_games, select_random_prob, **sampling_kwargs):
+    def run(self, replay_memory, frameskip=0, max_ticks=1000, world_size=300, *,
+            ai1_cls, ai2_cls, n_games, select_random_prob, do_train=True,
+            emu_writer=None, train_writer=None,
+            **sampling_kwargs):
         sess = get_session()
-        emu_writer = train_writer = None
-        if logdir is not None:
-            os.makedirs(logdir, exist_ok=False)
-            emu_writer = tf.summary.FileWriter(
-                os.path.join(logdir, 'emu'),
-                sess.graph
-            )
-            train_writer = tf.summary.FileWriter(
-                os.path.join(logdir, 'train'),
-                sess.graph
-            )
 
         if not self.self_play:
             ai2_cls = ProxyTrainerAI.wrap(ai2_cls)
@@ -170,13 +160,14 @@ class ReinforcementLearning:
 
                 self.add_emu_stats(stats, emu_stats, reward1)
                 replay_memory.put_entry(*transition1)
-                replay_memory.put_entry(*transition2)
+                if self.self_play:
+                    replay_memory.put_entry(*transition2)
 
                 if engine.is_finished:
                     games.pop(g)
 
             # do GD step
-            if replay_memory.used_size >= self.batch_size:
+            if do_train and replay_memory.used_size >= self.batch_size:
                 train_stats, sumry, reward_sample = self.do_train_step(
                     sess, replay_memory,
                     extra_tensors=[
@@ -257,7 +248,7 @@ class ReinforcementLearning:
         )
         return extra_results
 
-    def compute_on_sample(self, session, replay_memory, tensors, *,
+    def compute_on_sample(self, session, replay_memory, tensors,
                           n_seq_samples=0, seq_sample_size=0,
                           n_rnd_entries=0, n_last_entries=0):
         total = n_seq_samples * seq_sample_size + n_rnd_entries + n_last_entries
@@ -303,13 +294,16 @@ class ReinforcementLearning:
         return self.emu_selector.max_q
 
     def compute_reward(self, state_before, action, state_after):
-        # b_hp_idx = state2vec[0, 'hp_ratio']
+        b_hp_idx = state2vec[0, 'hp_ratio']
         e_hp_idx = state2vec[1, 'hp_ratio']
-        # return 10 * (state_after[..., b_hp_idx] - state_after[..., e_hp_idx])
+        b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
+        e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
+        return 100 * (b_hp_delta - e_hp_delta)
         # return 10 * (1 - state_after[..., e_hp_idx])
-        e_hp_before = state_before[..., e_hp_idx]
-        e_hp_after = state_after[..., e_hp_idx]
-        return 100 * (e_hp_before - e_hp_after)
+        # e_hp_before = state_before[..., e_hp_idx]
+        # e_hp_after = state_after[..., e_hp_idx]
+        # return 100 * (e_hp_before - e_hp_after)
+        # return 100 * (1 - e_hp_after)
         # reward_flag = e_hp_after + 0.01 < e_hp_before
         # return np.cast[np.float32](reward_flag)
 
@@ -400,14 +394,15 @@ class ReinforcementLearning:
 
 def __generate_all_actions():
     opts = [
-        # [-1, 0, +1],  # move
-        [0],  # move
-        # [-1, 0, +1],  # rotate
-        [0],  # rotate
+        # [0],  # move
+        # [0],  # rotate
+        # [0],  # shield
+
+        [-1, 0, +1],  # move
+        [-1, 0, +1],  # rotate
         [-1, 0, +1],  # tower rotate
         [0, 1],  # fire
-        # [0, 1],  # shield
-        [0],  # shield
+        [0, 1],  # shield
     ]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
         ctl = BotControl(move=mv, rotate=rt, tower_rotate=trt,

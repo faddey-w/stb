@@ -8,10 +8,9 @@ import tensorflow as tf
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType
 from .core import get_session, ReinforcementLearning, control_noise
-from .model import QualityFunctionModel
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
-from . import ai
+from . import ai, model
 
 tf.reset_default_graph()
 log = logging.getLogger(__name__)
@@ -26,7 +25,9 @@ def noised(trainer_function, noise_prob):
 
 class Config:
     
-    memory_capacity = 10000
+    memory_capacity = 100000
+
+    new_model_cls = model.vec2d_v2.QualityFunctionModel
 
     model_params = dict(
         # coord_cfg=[8] * 4,
@@ -45,17 +46,20 @@ class Config:
         # n_evt=30,
 
         # linear_cfg=[(30, 50), (30, 50), (20, 20)],
-        linear_cfg=[(30, 50), (30, 50), (30, 50), (30, 50), (20, 20)],
-        logical_cfg=[40, 40, 20],
-        values_cfg=[(10, 20)],
+        # linear_cfg=[(30, 50), (30, 50), (30, 50), (30, 50), (20, 20)],
+        # logical_cfg=[40, 40, 20],
+        # values_cfg=[(10, 20)],
+
+        vec2d_cfg=[(13, 17)] * 3,
+        fc_cfg=[41, 37, 31, 29, 23, 19],
     )
 
-    batch_size = 80
+    batch_size = 120
     sampling = dict(
         n_seq_samples=0,
         seq_sample_size=0,
-        n_rnd_entries=75,
-        n_last_entries=5
+        n_rnd_entries=95,
+        n_last_entries=25
     )
     reward_prediction = 0.995
     select_random_prob_decrease = 0.03
@@ -65,18 +69,17 @@ class Config:
     bot_type = BotType.Raider
         
     modes = [
-        ai.NotMovingMode(),
-        ai.LocateAtCircleMode(),
-        ai.NoShieldMode(),
-        ai.NotBodyRotatingMode(),
-        ai.BackToCenter(),
+        # ai.NotMovingMode(),
+        # ai.LocateAtCircleMode(),
+        # ai.NoShieldMode(),
+        # ai.NotBodyRotatingMode(),
+        # ai.BackToCenter(),
     ]
-    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.2))
+    trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['train', 'play'], default='train')
     parser.add_argument('--no-save', action='store_false', dest='save')
     parser.add_argument('--save-dir', default=None)
     parser.add_argument('--max-games', default=None, type=int)
@@ -99,10 +102,10 @@ def main():
     try:
         model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
         model_mgr.load_vars(sess)
-        model = model_mgr.model  # type: QualityFunctionModel
+        model = model_mgr.model  # type: model.QualityFunctionModel
     except Exception as exc:
         log.info("Cannot load model (%r), so creating a new one", exc)
-        model = QualityFunctionModel(**cfg.model_params)
+        model = cfg.new_model_cls(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
     replay_memory = replay.ReplayMemory(
@@ -124,57 +127,62 @@ def main():
     except FileNotFoundError:
         log.info('collecting new replay memory buffer')
 
-    if opts.action == 'play':
-        import code
-        with sess.as_default():
-            code.interact(local=dict(globals(), **locals()))
-    if opts.action == 'train':
-        try:
-            i = model_mgr.step_counter
-            while True:
-                for mode in cfg.modes:
-                    mode.reset()
-                select_random_prob = max(
-                    cfg.select_random_min_prob,
-                    1 - cfg.select_random_prob_decrease * model_mgr.step_counter
-                )
-                ai1_factory = ai.DQNDuelAI.parametrize(
-                    bot_type=cfg.bot_type,
-                    modes=cfg.modes
-                )
-                ai2_factory = ai.DQNDuelAI.parametrize(
-                    bot_type=cfg.bot_type,
-                    modes=cfg.modes,
-                    trainer_function=cfg.trainer_function if not cfg.self_play else None,
-                )
-                
-                if opts.save:
-                    logdir = os.path.join(logs_dir, str(model_mgr.step_counter))
-                else:
-                    logdir = None
+    try:
+        i = model_mgr.step_counter
 
-                i += 1
-                rl.run(
-                    frameskip=2,
-                    max_ticks=2000,
-                    world_size=1000,
-                    replay_memory=replay_memory,
-                    logdir=logdir,
-                    ai1_cls=ai1_factory,
-                    ai2_cls=ai2_factory,
-                    n_games=1,
-                    select_random_prob=select_random_prob,
-                    **cfg.sampling
-                )
-                if opts.save:
-                    model_mgr.save_vars(sess)
-                    replay_memory.save(replay_dir)
-                if opts.max_games is not None and i >= opts.max_games:
-                    break
-        except KeyboardInterrupt:
+        if opts.save:
+            emu_writer = tf.summary.FileWriter(
+                os.path.join(logs_dir, 'emu'),
+                sess.graph
+            )
+            train_writer = tf.summary.FileWriter(
+                os.path.join(logs_dir, 'train'),
+                sess.graph
+            )
+        else:
+            emu_writer = None
+            train_writer = None
+
+        while True:
+            for mode in cfg.modes:
+                mode.reset()
+            select_random_prob = max(
+                cfg.select_random_min_prob,
+                1 - cfg.select_random_prob_decrease * model_mgr.step_counter
+            )
+            ai1_factory = ai.DQNDuelAI.parametrize(
+                bot_type=cfg.bot_type,
+                modes=cfg.modes
+            )
+            ai2_factory = ai.DQNDuelAI.parametrize(
+                bot_type=cfg.bot_type,
+                modes=cfg.modes,
+                trainer_function=cfg.trainer_function if not cfg.self_play else None,
+            )
+
+            i += 1
+            rl.run(
+                frameskip=2,
+                max_ticks=2000,
+                world_size=1000,
+                replay_memory=replay_memory,
+                ai1_cls=ai1_factory,
+                ai2_cls=ai2_factory,
+                n_games=1,
+                select_random_prob=select_random_prob,
+                emu_writer=emu_writer,
+                train_writer=train_writer,
+                **cfg.sampling
+            )
             if opts.save:
                 model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
+            if opts.max_games is not None and i >= opts.max_games:
+                break
+    except KeyboardInterrupt:
+        if opts.save:
+            model_mgr.save_vars(sess)
+            replay_memory.save(replay_dir)
 
 
 if __name__ == '__main__':

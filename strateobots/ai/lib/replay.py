@@ -208,7 +208,11 @@ class BalancedMemory:
     def put_entry(self, *vectors):
         key = self._keyfunc(*vectors)
         mem = self._get_mem(key)
+        was_full = mem._used < mem._capacity
         eid = mem.put_entry(*vectors)
+        now_full = mem._used < mem._capacity
+        if not was_full and now_full:
+            print("Buffer {} becomes full".format(key))
         return key, eid
 
     def get_entry(self, entry_id):

@@ -98,6 +98,7 @@ class ActionInferenceModel(BaseActionInferenceModel):
         r, a = r0, a0
         inference.vec_nodes = []
         for i, (lin_x, lin_y, rot, kat_r, kat_b) in enumerate(self.vec_layers):
+            # a = (a+pi)%(2*pi) - pi
             x = r * tf.cos(a)
             y = r * tf.sin(a)
 
@@ -131,7 +132,7 @@ class ActionInferenceModel(BaseActionInferenceModel):
 
         vector = tf.concat([
             r,
-            a,
+            tf.cos(a),
             select_features(state, state2vec, *OTHER_FEATURES),
         ], -1)
         inference.fc_layers = []

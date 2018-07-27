@@ -136,12 +136,12 @@ def navigate_gun(bot, enemy):
     enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
     gun_angle = norm_angle(bot.orientation + bot.tower_orientation)
     delta_angle = norm_angle(enemy_angle - gun_angle)
-    if dist < bot.type.shot_range:
-        limit_angle = asin((BOT_RADIUS / 2) / dist)
-    else:
-        limit_angle = pi / 6
-    if abs(delta_angle) < limit_angle:
-        return 0
+    # if dist < bot.type.shot_range:
+    #     limit_angle = asin((BOT_RADIUS / 2) / dist)
+    # else:
+    #     limit_angle = pi / 6
+    # if abs(delta_angle) < limit_angle:
+    #     return 0
     if delta_angle > 0:
         return +1
     else:
