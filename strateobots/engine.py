@@ -7,9 +7,7 @@ from math import pi, sin, cos, sqrt
 
 EPS = 0.000001
 BOT_RADIUS = 25
-SHIELD_DAMAGE_FACTOR = 1/5
-SHIELD_DURATION_SEC = 0.75
-SHIELD_LOAD_REQUIRED = 0.5
+SHIELD_DAMAGE_ABSORPTION = 4/5
 RAY_MIN_LOAD_REQUIRED = 0.33
 
 
@@ -200,16 +198,16 @@ class StbEngine:
             bot.tower_rot_speed = (rotation_smoothness * bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / (1 + rotation_smoothness)
             bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
-        # firing
+        # firing and shield
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
-            if ctl.shield and bot.load >= SHIELD_LOAD_REQUIRED and not bot.has_shield:
-                bot.shield_remaining = SHIELD_DURATION_SEC
-                bot.load -= SHIELD_LOAD_REQUIRED
-            if bot.has_shield:
-                bot.shield_remaining -= 1 / tps
+            if ctl.shield:
+                bot.shield_warmup += 1 / (tps * typ.shield_warmup_period)
+                bot.shield_warmup = min(1.0, bot.shield_warmup)
             else:
+                bot.shield_warmup = 0.0
+                bot.shield += typ.shield_regen / tps
                 if ctl.fire and not typ.shots_ray and bot.shot_ready:
                     angle = random.gauss(
                         mu=bot.orientation + bot.tower_orientation,
@@ -267,7 +265,7 @@ class StbEngine:
 
                 damage = bullet.type.damage * hit_factor / (2 + armor_factor)
                 if bot.has_shield:
-                    damage *= SHIELD_DAMAGE_FACTOR
+                    damage = absorb_damage_by_shield(bot, damage)
                 bot.hp -= damage
                 self._explosions.append(
                     ExplosionModel(bullet.x, bullet.y, 0.75 * tps, 0.5*bot_radius))
@@ -295,8 +293,6 @@ class StbEngine:
                     continue
 
                 hit_factor = half_chord_len(bot_radius, d) / bot_radius
-                if bot.has_shield:
-                    hit_factor *= SHIELD_DAMAGE_FACTOR
                 damaged.append((t, base_dmg * hit_factor, bot))
 
                 dt = sqrt(bot_radius * bot_radius - d * d)
@@ -310,14 +306,15 @@ class StbEngine:
             damaged.sort(key=lambda item: item[0])
             decay_factor = 1.0
             for _, dmg, bot in damaged:
-                bot.hp -= dmg * decay_factor
+                dmg *= decay_factor
+                dmg = absorb_damage_by_shield(bot, dmg)
+                bot.hp -= dmg
                 decay_factor /= 2
 
         # make collisions damage, fix coordinates
         all_bots = list(self._bots.values())
         for i1, b1 in enumerate(all_bots):
             m1 = b1.type.mass
-            dmg1_coeff = SHIELD_DAMAGE_FACTOR if b1.has_shield else 1
             for i2 in range(i1+1, len(all_bots)):
                 b2 = all_bots[i2]
                 d = dist_points(b1.x, b1.y, b2.x, b2.y)
@@ -325,7 +322,6 @@ class StbEngine:
                     continue
                 d = max(d, EPS)
 
-                dmg2_coeff = SHIELD_DAMAGE_FACTOR if b1.has_shield else 1
                 m2 = b2.type.mass
 
                 v1x, v1y = b1.vx, b1.vy
@@ -364,8 +360,22 @@ class StbEngine:
                 cf1 = 2 - vec_dot(cos(b1.orientation), sin(b1.orientation), c_cos, c_sin)
                 cf2 = 2 + vec_dot(cos(b2.orientation), sin(b2.orientation), c_cos, c_sin)
 
-                b1.hp -= dmg1_coeff * collision_factor * cf1 * h * m2 / (m1+m2)
-                b2.hp -= dmg2_coeff * collision_factor * cf2 * h * m1 / (m1+m2)
+                dmg1 = collision_factor * cf1 * h * m2 / (m1+m2)
+                dmg2 = collision_factor * cf2 * h * m1 / (m1+m2)
+
+                if b1.has_shield:
+                    dmg1 = absorb_damage_by_shield(b1, dmg1)
+                if b2.has_shield:
+                    dmg2 = absorb_damage_by_shield(b2, dmg2)
+
+                b1.hp -= dmg1
+                b2.hp -= dmg2
+
+        # shield discharge
+        for bot in self._bots.values():
+            if bot.has_shield:
+                bot.shield -= bot.type.shield_regen / tps
+                bot.shield = max(0.0, bot.shield)
 
         # remove killed bots
         next_bots = {}
@@ -419,6 +429,9 @@ BotTypeProperties = collections.namedtuple(
         'shot_range',
         'fire_scatter',  # sigma of bullet direction distribution
         'damage',  # per-shot or per-second if ray
+        'shield_warmup_period',  # sec
+        'shield_energy',
+        'shield_regen',  # hp / sec
     ]
 )
 
@@ -439,6 +452,9 @@ class BotType(BotTypeProperties, enum.Enum):
         shot_range=250,
         fire_scatter=2 * pi / 180,
         damage=120,
+        shield_warmup_period=0.5,
+        shield_energy=1200,
+        shield_regen=50,
     )
     Raider = BotTypeProperties(
         code=2,
@@ -454,6 +470,9 @@ class BotType(BotTypeProperties, enum.Enum):
         shot_range=200,
         fire_scatter=4 * pi / 180,
         damage=45,
+        shield_warmup_period=0.8,
+        shield_energy=200,
+        shield_regen=20,
     )
     Sniper = BotTypeProperties(
         code=3,
@@ -469,6 +488,9 @@ class BotType(BotTypeProperties, enum.Enum):
         shot_range=400,
         fire_scatter=0,
         damage=500,
+        shield_warmup_period=0.1,
+        shield_energy=500,
+        shield_regen=75,
     )
 
 
@@ -477,13 +499,15 @@ class BotModel:
     __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y', 'vx', 'vy',
                  'rot_speed', 'orientation', 'tower_orientation',
                  'is_firing',
-                 'shield_remaining', 'tower_rot_speed']
+                 'shield', 'shield_warmup', 'tower_rot_speed']
 
     def __init__(self, id, team, type, x, y, orientation, tower_orientation=0.0):
         self.id = id
         self.team = team
         self.type = type  # type: BotTypeProperties
         self.hp = type.max_hp
+        self.shield = type.shield_energy
+        self.shield_warmup = 0
         self.load = 1.0
         self.x = x
         self.y = y
@@ -493,7 +517,6 @@ class BotModel:
         self.tower_rot_speed = 0
         self.orientation = orientation
         self.tower_orientation = tower_orientation
-        self.shield_remaining = 0
         self.is_firing = False
 
     @property
@@ -501,16 +524,16 @@ class BotModel:
         return self.hp / self.type.max_hp
 
     @property
+    def shield_ratio(self):
+        return self.shield / self.type.shield_energy
+
+    @property
     def shot_ready(self):
         return self.load > 0.999
 
     @property
     def has_shield(self):
-        return self.shield_remaining > 0
-
-    @property
-    def can_enable_shield(self):
-        return self.load >= SHIELD_LOAD_REQUIRED
+        return self.shield_warmup > 0.99 and self.shield > 0
 
 
 class BulletModel:
@@ -559,6 +582,14 @@ class ExplosionModel:
     @property
     def is_ended(self):
         return self.t >= self.duration
+
+
+def absorb_damage_by_shield(bot, damage):
+    absorbed = max(bot.shield, SHIELD_DAMAGE_ABSORPTION * damage)
+    damage -= absorbed
+    bot.shield -= absorbed
+    bot.shield = max(0.0, bot.shield)
+    return damage
 
 
 def vec_rotate(x, y, angle):

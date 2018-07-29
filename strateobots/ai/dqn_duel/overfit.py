@@ -154,9 +154,14 @@ def train(cfg, print_each=17):
     #     vec2d_cfg=[(17, 17)] * 6,
     #     fc_cfg=[11] * 6,
     # )
-    mdl = model.vec2d_v2.QualityFunctionModel(
-        vec2d_cfg=[(11, 19)] * 2,
-        fc_cfg=[31, 23, 17, 13, 7],
+    # mdl = model.vec2d_v2.QualityFunctionModel(
+    #     vec2d_cfg=[(11, 19)] * 2,
+    #     fc_cfg=[31, 23, 17, 13, 7],
+    # )
+    mdl = model.vec2d_v3.QualityFunctionModel(
+        vec2d_cfg=[(9, 17)] * 6,
+        fc_n_parts=20,
+        fc_cfg=[3] * 20,
     )
     sess = core.get_session()
     run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
@@ -169,7 +174,7 @@ def train(cfg, print_each=17):
     rl = core.ReinforcementLearning(
         model=mdl,
         batch_size=cfg.batch_size,
-        reward_prediction=0.995,
+        reward_prediction=0.95,
         self_play=False,
     )
 

@@ -1,5 +1,5 @@
 import numpy as np
-from strateobots.engine import BotType, SHIELD_DURATION_SEC
+from strateobots.engine import BotType
 
 
 class Mapper:
@@ -159,7 +159,7 @@ bot2vec = Mapper(
     Field('is_sniper', categorical=BotType.Sniper, attr='type'),
     Field('hp_ratio'),
     Field('load'),
-    Field('shield', lambda bot: max(0, bot.shield_remaining / SHIELD_DURATION_SEC)),
+    Field('shield_ratio'),
     Field('orientation', lambda bot: _norm_angle(bot.orientation)),
     Field('tower_orientation', lambda bot: _norm_angle(bot.tower_orientation)),
 )

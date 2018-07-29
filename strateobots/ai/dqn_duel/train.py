@@ -26,8 +26,9 @@ def noised(trainer_function, noise_prob):
 class Config:
     
     memory_capacity = 100000
+    memory_capacity_per_class = 1000
 
-    new_model_cls = model.vec2d_v2.QualityFunctionModel
+    new_model_cls = model.semisparse_fc.QualityFunctionModel
 
     model_params = dict(
         # coord_cfg=[8] * 4,
@@ -50,32 +51,51 @@ class Config:
         # logical_cfg=[40, 40, 20],
         # values_cfg=[(10, 20)],
 
-        vec2d_cfg=[(13, 17)] * 3,
-        fc_cfg=[41, 37, 31, 29, 23, 19],
+        # vec2d_cfg=[(7, 11)] * 10,
+        # fc_cfg=[23, 17, 13],
+
+        n_parts=30,
+        cfg=[4] * 10,
     )
 
     batch_size = 120
     sampling = dict(
         n_seq_samples=0,
         seq_sample_size=0,
-        n_rnd_entries=95,
-        n_last_entries=25
+        n_rnd_entries=100,
+        n_last_entries=20
     )
-    reward_prediction = 0.995
+    reward_prediction = 0.95
     select_random_prob_decrease = 0.03
+    select_random_max_prob = 0.1
     select_random_min_prob = 0.1
     self_play = False
 
     bot_type = BotType.Raider
         
     modes = [
-        # ai.NotMovingMode(),
-        # ai.LocateAtCircleMode(),
-        # ai.NoShieldMode(),
+        ai.NotMovingMode(),
+        ai.LocateAtCircleMode(),
+        ai.NoShieldMode(),
         # ai.NotBodyRotatingMode(),
         # ai.BackToCenter(),
     ]
-    trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
+    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
+    # trainer_function = staticmethod(noised(handcrafted.distance_attack, 0.1))
+    # trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
+
+
+def memory_keyfunc(state_before, action, state_after):
+    x0 = state_before[state2vec[0, 'x']]
+    y0 = state_before[state2vec[0, 'y']]
+    x1 = state_before[state2vec[1, 'x']]
+    y1 = state_before[state2vec[1, 'y']]
+    x_flag = x0 > x1
+    y_flag = y0 > y1
+    d_flag = ((x1 - x0) ** 2 + (y1 - y0) ** 2) > 200 ** 2
+    e_dmg = state_before[state2vec[1, 'hp_ratio']] - state_after[state2vec[1, 'hp_ratio']]
+    b_dmg = state_before[state2vec[0, 'hp_ratio']] - state_after[state2vec[0, 'hp_ratio']]
+    return x_flag, y_flag, d_flag, e_dmg > 0.001, b_dmg > 0.001
 
 
 def main():
@@ -108,11 +128,18 @@ def main():
         model = cfg.new_model_cls(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
-    replay_memory = replay.ReplayMemory(
-        cfg.memory_capacity,
-        state2vec.vector_length,
-        action2vec.vector_length,
-        state2vec.vector_length,
+    # replay_memory = replay.ReplayMemory(
+    #     cfg.memory_capacity,
+    #     state2vec.vector_length,
+    #     action2vec.vector_length,
+    #     state2vec.vector_length,
+    # )
+    replay_memory = replay.BalancedMemory(
+        memory_keyfunc,
+        cfg.memory_capacity_per_class,
+        [state2vec.vector_length,
+         action2vec.vector_length,
+         state2vec.vector_length]
     )
     rl = ReinforcementLearning(
         model,
@@ -148,7 +175,7 @@ def main():
                 mode.reset()
             select_random_prob = max(
                 cfg.select_random_min_prob,
-                1 - cfg.select_random_prob_decrease * model_mgr.step_counter
+                cfg.select_random_max_prob - cfg.select_random_prob_decrease * model_mgr.step_counter
             )
             ai1_factory = ai.DQNDuelAI.parametrize(
                 bot_type=cfg.bot_type,
@@ -163,7 +190,7 @@ def main():
             i += 1
             rl.run(
                 frameskip=2,
-                max_ticks=2000,
+                max_ticks=3000,
                 world_size=1000,
                 replay_memory=replay_memory,
                 ai1_cls=ai1_factory,

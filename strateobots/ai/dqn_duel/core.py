@@ -394,15 +394,18 @@ class ReinforcementLearning:
 
 def __generate_all_actions():
     opts = [
-        # [0],  # move
-        # [0],  # rotate
-        # [0],  # shield
+        # [-1, 0, +1],  # move
+        [0],  # move
 
-        [-1, 0, +1],  # move
         [-1, 0, +1],  # rotate
+        # [0],  # rotate
+
         [-1, 0, +1],  # tower rotate
+
         [0, 1],  # fire
-        [0, 1],  # shield
+
+        # [0, 1],  # shield
+        [0],  # shield
     ]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
         ctl = BotControl(move=mv, rotate=rt, tower_rotate=trt,
