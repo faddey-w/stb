@@ -105,7 +105,7 @@ class ActionInferenceModel(BaseActionInferenceModel):
             xln = lin_x.apply(x, tf.identity)
             yln = lin_y.apply(y, tf.identity)
 
-            rlt = tf.sqrt(tf.square(xln.out) + tf.square(yln.out))
+            rlt = tf.sqrt(tf.square(xln.out) + tf.square(yln.out) + EPS**2)
             alt = tf.asin(yln.out / (rlt + EPS))
             aln = rot.apply(alt, tf.nn.relu)
 

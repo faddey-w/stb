@@ -68,7 +68,11 @@ class ActionInference:
         self.features = create_inference(self, state)
         finite_assert = tf.Assert(
             tf.reduce_all(tf.is_finite(self.features)),
-            [tf.reduce_all(tf.is_finite(v)) for v in model.var_list],
+            [
+                op
+                for v in model.var_list
+                for op in [v.name, tf.reduce_all(tf.is_finite(v))]
+            ],
         )
         with tf.control_dependencies([finite_assert]):
             self.action_evidences = model.out_layer.apply(self.features, tf.identity)

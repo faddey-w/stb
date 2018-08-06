@@ -2,6 +2,7 @@ import argparse
 import random
 import shutil
 import time
+import contextlib
 import numpy as np
 import tensorflow as tf
 from math import pi
@@ -18,9 +19,13 @@ class AINDuelAI(DuelAI):
     enabled = True
 
     def create_bot(self, teamize_x=True):
-        x = random.random()
+        x = 0.2
+        # x = random.random()
+        orientation = 0.0
+        # orientation = random.random() * 2 * pi
         if teamize_x:
             x = self.x_to_team_field(x)
+            orientation += pi
         else:
             x *= self.engine.world_width
         bot_type = self.bot_type or random_bot_type()
@@ -28,13 +33,15 @@ class AINDuelAI(DuelAI):
             bottype=bot_type,
             team=self.team,
             x=x,
-            y=self.engine.world_height * random.random(),
-            orientation=random.random() * 2 * pi,
-            tower_orientation=random.random() * 2 * pi,
+            # y=self.engine.world_height * random.random(),
+            y=self.engine.world_height * 0.5,
+            orientation=orientation,
+            # tower_orientation=random.random() * 2 * pi,
+            tower_orientation=0.0,
         )
 
     def initialize(self):
-        self.bot = bot = self.create_bot(False)
+        self.bot = bot = self.create_bot(True)
         self.ctl = self.engine.get_control(bot)
 
     def tick(self):
@@ -100,53 +107,67 @@ def adopt_handcrafted_function(ai_function):
     return function
 
 
-def run_one_game(function1, function2, winner_memory, loser_memory, frequency=1,
-                 save_win=True, **params):
+def run_one_game(function1, function2, memory, reward_func, reward_decay, frequency=1,
+                 self_play=False, data_dilution=1, **params):
     ai1_factory = AINDuelAI.parametrize(function=function1, **params)
     ai2_factory = AINDuelAI.parametrize(function=function2, **params)
 
+    max_ticks = 2500
+    max_entries = int(max_ticks / frequency) + 1
+
     mem1 = replay.ReplayMemory(
-        int(2000 / frequency),
+        max_entries,
         data.state2vec.vector_length,
         data.action2vec.vector_length,
+        1,
     )
     mem2 = replay.ReplayMemory(
-        int(2000 / frequency),
+        max_entries,
         data.state2vec.vector_length,
         data.action2vec.vector_length,
+        1,
     )
 
-    engine = StbEngine(1000, 1000, ai1_factory, ai2_factory, 2500, 0)
+    engine = StbEngine(1000, 1000, ai1_factory, ai2_factory, max_ticks, 0)
 
+    state1bef, state2bef = make_states(engine)
     while not engine.is_finished:
-        state1, state2 = make_states(engine)
+
         action1 = make_action(engine.ai1)
         action2 = make_action(engine.ai2)
-
-        mem1.put_entry(state1, action1)
-        mem2.put_entry(state2, action2)
 
         for _ in range(frequency):
             engine.tick()
 
-    if engine.ai1.bot.hp_ratio != engine.ai2.bot.hp_ratio:
-        if engine.ai1.bot.hp_ratio > engine.ai2.bot.hp_ratio:
-            # winner_memory.update(mem1)
-            loser_memory.update(mem2)
-            win = True
-            if save_win and engine.ai2.bot.hp_ratio <= 0.2:
-                winner_memory.update(mem1)
-            elif engine.ai2.bot.hp_ratio > 0.99:
-                loser_memory.update(mem1)
-        else:
-            loser_memory.update(mem1)
-            win = False
-            if save_win and engine.ai1.bot.hp_ratio <= 0.2:
-                winner_memory.update(mem1)
-            elif engine.ai1.bot.hp_ratio > 0.99:
-                loser_memory.update(mem2)
-    else:
-        win = False
+        state1aft, state2aft = make_states(engine)
+
+        rew1 = reward_func(state1bef, action1, state1aft)
+        rew2 = reward_func(state2bef, action2, state2aft)
+
+        mem1.put_entry(state1bef, action1, [rew1])
+        mem2.put_entry(state2bef, action2, [rew2])
+
+        state1bef = state1aft
+        state2bef = state2aft
+
+    def put_memory_with_reward(mem):
+        states, actions, rewards = mem.get_last_entries(mem.used_size)
+        rew_cum = np.zeros_like(rewards)
+        total_damage = 1 - states[-1, data.state2vec[1, 'hp_ratio']]
+        rew_cum[-1] = rewards[-1] + total_damage
+        for i in range(1, rewards.shape[0]):
+            rew_cum[-i-1] = rewards[-i-1] + reward_decay * rew_cum[-i]
+        if data_dilution > 1:
+            dilution_offset = random.choice(range(data_dilution))
+            states = states[dilution_offset::data_dilution]
+            actions = actions[dilution_offset::data_dilution]
+            rew_cum = rew_cum[dilution_offset::data_dilution]
+        memory.put_many(states, actions, rew_cum)
+    put_memory_with_reward(mem1)
+    if self_play:
+        put_memory_with_reward(mem2)
+
+    win = engine.ai1.bot.hp_ratio > engine.ai2.bot.hp_ratio
     return win, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio
 
 
@@ -198,101 +219,129 @@ class AINTraining:
 
     def __init__(self, model, batch_size):
         self.batch_size = batch_size
-        self.win_state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
-        self.win_action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
-        self.lose_state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
-        self.lose_action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
+        self.state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
+        self.action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
+        self.reward_ph = tf.placeholder(tf.float32, [batch_size, 1])
 
         self.model = model
-        self.win_inference = model.apply(self.win_state_ph)
-        self.lose_inference = model.apply(self.lose_state_ph)
+        self.inference = model.apply(self.state_ph)
 
-        self.cross_entropy = -(
-            self.win_action_ph * tf.log(0.001 + 0.999 * self.win_inference.action_prediction)
-            +
-            (1 - self.win_action_ph) * tf.log(1 - 0.999 * self.win_inference.action_prediction)
-        )
-        self.win_loss_vector = self.cross_entropy
-        self.win_loss = tf.reduce_mean(self.win_loss_vector)
+        act = self.inference.action_prediction
+        act_diff = tf.abs(act - self.action_ph)
+        self.act_same = 1 - act_diff
+        eps = 0.001
+        # self.entropy = - self.act_same * (
+        # act *= act_diff
+        # punishment = tf.reduce_max(self.reward_ph) - self.reward_ph
+        # self.entropy = - punishment * tf.log(eps + (1-eps) * act_diff)
+        # self.entropy = - (
+        #     tf.maximum(0.0, self.reward_ph) * tf.log(eps + (1-eps) * self.act_same)
+        #     +
+        #     tf.maximum(0.0, -self.reward_ph) * tf.log(eps + (1-eps) * act_diff)
+        # )
+        # self.entropy = - self.reward_ph * tf.log(eps + (1-eps) * act) * self.act_same
+        # self.entropy = - self.reward_ph * tf.log(eps + (1-eps) * act_diff)
 
-        delta = self.lose_inference.action_prediction - self.lose_action_ph
-        self.lose_loss_vector = tf.square(1 - tf.abs(delta))
-        self.lose_loss = tf.reduce_mean(self.lose_loss_vector)
+        # reward is negative!
+        # so training will lead to avoiding too negative rewards
+        self.entropy = self.reward_ph * tf.log(eps + (1-eps) * act_diff)
 
-        # w = 0.2
-        # self.loss = w * self.lose_loss + (1 - w) * self.win_loss
-        self.loss = self.lose_loss
+        # self.loss_vector = self.entropy
+        self.loss_vector = self.entropy * self.act_same
+        self.loss = tf.reduce_mean(self.loss_vector)
 
+        # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
         self.optimizer = tf.train.AdamOptimizer(0.001)
         # self.optimizer = tf.train.RMSPropOptimizer(0.0001)
         self.train_op = self.optimizer.minimize(self.loss, var_list=model.var_list)
 
+        self.avg_reward = tf.reduce_mean(self.reward_ph)
+
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
-    def train_n_steps(self, session, win_memory, lose_memory, n_steps, print_each_step=10):
-        win_loss_avg = util.Average()
-        lose_loss_avg = util.Average()
+    def train_n_steps(self, session, memory, n_steps, print_each_step=10):
+        loss_avg = util.Average()
+        rew_avg = util.Average()
         started = time.time()
         for i in range(1, 1+n_steps):
             (
                 _,
-                # wloss,
-                lloss,
+                loss,
+                rew,
             ) = self.run_on_sample(
                 [
                     self.train_op,
-                    # self.win_loss,
-                    self.lose_loss,
+                    self.loss,
+                    self.avg_reward
                 ],
-                win_memory, lose_memory, session,
+                memory, session,
             )
-            # win_loss_avg.add(wloss)
-            lose_loss_avg.add(lloss)
+            loss_avg.add(loss)
+            rew_avg.add(rew)
             if i % print_each_step == 0:
-                # print('#{}: win_loss={:.4f}; lose_loss={:.4f}; time={:.2f}sec'.format(
-                #     i, win_loss_avg.get(), lose_loss_avg.get(), time.time()-started))
-                print('#{}: loss={:.4f}; time={:.2f}sec'.format(
-                    i, lose_loss_avg.get(), time.time()-started))
+                print('#{}: loss={:.4f}; rew={:.4f}; time={:.2f}sec'.format(
+                    i, loss_avg.get(), rew_avg.get(), time.time()-started))
                 started = time.time()
-                win_loss_avg.reset()
-                lose_loss_avg.reset()
+                loss_avg.reset()
+                rew_avg.reset()
 
-    def run_on_sample(self, tensors, win_memory, lose_memory, session):
-        # win_states, win_actions = win_memory.get_random_sample(self.batch_size)
-        lose_states, lose_actions = lose_memory.get_random_sample(self.batch_size)
+    def run_on_sample(self, tensors, memory, session):
+        states, actions, cum_rewards = memory.get_random_sample(self.batch_size)
         return session.run(tensors, {
-            # self.win_state_ph: win_states,
-            # self.win_action_ph: win_actions,
-            self.lose_state_ph: lose_states,
-            self.lose_action_ph: lose_actions,
+            self.state_ph: states,
+            self.reward_ph: cum_rewards,
+            self.action_ph: actions,
         })
 
-    def evaluate_accuracy(self, session, winner_memory, max_batches=50):
-        bsize = self.batch_size
-        n_batches = min(max_batches, int(winner_memory.used_size / bsize))
-        states, actions = winner_memory.get_random_sample(bsize * n_batches)
-        assert states.shape[0] == n_batches * bsize
-        metrics = dict(
-            move=AccuracyMetrics([-1, 0, +1]),
-            rotate=AccuracyMetrics([-1, 0, +1]),
-            tower_rotate=AccuracyMetrics([-1, 0, +1]),
-            fire=AccuracyMetrics([0, 1]),
-            shield=AccuracyMetrics([0, 1]),
-        )
-        example_ctls = [BotControl() for _ in range(bsize)]
-        prediction_ctls = [BotControl() for _ in range(bsize)]
+    # def evaluate_accuracy(self, session, winner_memory, max_batches=50):
+    #     bsize = self.batch_size
+    #     n_batches = min(max_batches, int(winner_memory.used_size / bsize))
+    #     states, actions = winner_memory.get_random_sample(bsize * n_batches)
+    #     assert states.shape[0] == n_batches * bsize
+    #     metrics = dict(
+    #         move=AccuracyMetrics([-1, 0, +1]),
+    #         rotate=AccuracyMetrics([-1, 0, +1]),
+    #         tower_rotate=AccuracyMetrics([-1, 0, +1]),
+    #         fire=AccuracyMetrics([0, 1]),
+    #         shield=AccuracyMetrics([0, 1]),
+    #     )
+    #     example_ctls = [BotControl() for _ in range(bsize)]
+    #     prediction_ctls = [BotControl() for _ in range(bsize)]
+    #     for i in range(n_batches):
+    #         slc = slice(i*bsize, (i+1)*bsize)
+    #         predictions = session.run(
+    #             self.win_inference.action_prediction,
+    #             {self.win_state_ph: states[slc]},
+    #         )
+    #         decode_prediction(predictions, ctl_list=prediction_ctls)
+    #         decode_prediction(actions[slc], ctl_list=example_ctls)
+    #         for ctl_e, ctl_p in zip(example_ctls, prediction_ctls):
+    #             for prop, metric in metrics.items():
+    #                 metric.add(getattr(ctl_e, prop), getattr(ctl_p, prop))
+    #     return metrics
+
+    @contextlib.contextmanager
+    def evaluate_policy_change(self, session, memory, n_batches=10):
+        holder = [None, None]
+        bs = self.batch_size
+        n_batches = min(n_batches, memory.used_size // bs)
+        state, action, reward = memory.get_random_sample(n_batches * bs)
+        before = self.compute_dispersion(session, state, action)
+        yield holder
+        after = self.compute_dispersion(session, state, action)
+        holder[:] = before, after
+
+    def compute_dispersion(self, session, states, actions):
+        changes_sum = 0
+        bs = self.batch_size
+        n_batches = states.shape[0] // bs
         for i in range(n_batches):
-            slc = slice(i*bsize, (i+1)*bsize)
-            predictions = session.run(
-                self.win_inference.action_prediction,
-                {self.win_state_ph: states[slc]},
-            )
-            decode_prediction(predictions, ctl_list=prediction_ctls)
-            decode_prediction(actions[slc], ctl_list=example_ctls)
-            for ctl_e, ctl_p in zip(example_ctls, prediction_ctls):
-                for prop, metric in metrics.items():
-                    metric.add(getattr(ctl_e, prop), getattr(ctl_p, prop))
-        return metrics
+            action_same = session.run(self.act_same, {
+                self.state_ph: states[i*bs:(i+1)*bs],
+                self.action_ph: actions[i*bs:(i+1)*bs],
+            })
+            changes_sum += 1 - np.sum(action_same) / np.size(action_same)
+        return changes_sum / n_batches
 
 
 def find_bullets(engine, bots):
@@ -342,42 +391,58 @@ def control_noise(ctl, noise_prob):
         ctl.shield = random.choice([False, True])
 
 
-def memory_keyfunc(state, action):
+def memory_keyfunc(state, action, reward):
     """state and action are 1d vectors"""
-    x0 = state[data.state2vec[0, 'x']]
-    y0 = state[data.state2vec[0, 'y']]
-    x1 = state[data.state2vec[1, 'x']]
-    y1 = state[data.state2vec[1, 'y']]
-    x_flag = x0 > x1
-    y_flag = y0 > y1
-    d_flag = ((x1-x0)**2 + (y1-y0)**2) > 200 ** 2
-    return (*map(int, action), x_flag, y_flag, d_flag)
+    # x0 = state[data.state2vec[0, 'x']]
+    # y0 = state[data.state2vec[0, 'y']]
+    # x1 = state[data.state2vec[1, 'x']]
+    # y1 = state[data.state2vec[1, 'y']]
+    # x_flag = x0 > x1
+    # y_flag = y0 > y1
+    # d_flag = ((x1-x0)**2 + (y1-y0)**2) > 200 ** 2
+    # return tuple([*map(int, action), x_flag, y_flag, d_flag])
+    # return tuple([*map(int, action), d_flag])
+    e_hp_idx = data.state2vec[1, 'hp_ratio']
+    e_hp = state[e_hp_idx]
+    damage_key = int(np.sqrt(e_hp) * 10)
+    reward_key = int(reward)
+    return damage_key, reward_key
+
+
+def reward_function(state_before, action, state_after):
+    b_hp_idx = data.state2vec[0, 'hp_ratio']
+    e_hp_idx = data.state2vec[1, 'hp_ratio']
+    return state_after[..., b_hp_idx] - state_after[..., e_hp_idx] - 0.99
+    # b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
+    # e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
+    # return 100 * (b_hp_delta - e_hp_delta)
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-save', action='store_false', dest='save')
     parser.add_argument('--restart', action='store_true', dest='restart')
+    parser.add_argument('--debug', action='store_true', dest='debug')
     opts = parser.parse_args()
 
-    winner_memory = replay.BalancedMemory(
-        keyfunc=memory_keyfunc,
-        cap_per_class=1000,
-        vector_sizes=[data.state2vec.vector_length, data.action2vec.vector_length]
+    # memory = replay.BalancedMemory(
+    #     keyfunc=memory_keyfunc,
+    #     cap_per_class=1000,
+    #     vector_sizes=[data.state2vec.vector_length, data.action2vec.vector_length, 1]
+    # )
+    memory = replay.ReplayMemory(
+        1000000,
+        # 500,
+        data.state2vec.vector_length,
+        data.action2vec.vector_length,
+        1,
     )
-    winner_data_path = '_data/AIN-data-win'
+    data_path = '_data/AIN-data'
     try:
-        winner_memory.load(winner_data_path, eval)
-    except:
-        pass
-
-    loser_memory = replay.ReplayMemory(
-        500000,
-        data.state2vec.vector_length, data.action2vec.vector_length
-    )
-    loser_data_path = '_data/AIN-data-lose'
-    try:
-        loser_memory.load(loser_data_path)
+        if isinstance(memory, replay.BalancedMemory):
+            memory.load(data_path, eval)
+        else:
+            memory.load(data_path)
     except:
         pass
 
@@ -392,14 +457,22 @@ def main():
     except:
         print("NEW model")
         tf.reset_default_graph()
-        model = modellib.vec2d_fc_v2.ActionInferenceModel(
-            vec_cfg=[(50, 50)] * 5,
-            fc_cfg=[30] * 3,
-        )
+        # model = modellib.vec2d_fc_v2.ActionInferenceModel(
+        #     vec_cfg=[(50, 50)] * 5,
+        #     fc_cfg=[30] * 3,
+        # )
         # model = modellib.handcrafted.ActionInferenceModel()
         # model = modellib.simple.ActionInferenceModel(
         #     cfg=[60] * 6,
         # )
+        # model = modellib.classic.ActionInferenceModel(
+        #     layer_sizes=[50, 30],
+        #     angle_sections=10,
+        # )
+        model = modellib.classic_v2.ActionInferenceModel(
+            layer_sizes=[20],
+            n_angles=10,
+        )
         # model = modellib.residual.ActionInferenceModel(
         #     res_cfg=[(50, 100)] * 6,
         #     sigm_cfg=[150] * 6,
@@ -414,50 +487,65 @@ def main():
     # ]))
     # session.run(tf.assign(model.var_list[1], [[0.0] * 11]))
 
-    training = AINTraining(model, batch_size=500)
+    training = AINTraining(model, batch_size=1000)
     session.run(training.init_op)
 
     ai_func = model_based_function(model, session)
     train_func_shortrange = adopt_handcrafted_function(handcrafted.short_range_attack)
     train_func_longrange = adopt_handcrafted_function(handcrafted.distance_attack)
     ai2_funcs = {
-        'NN': noised(ai_func, 0.01),
-        # 'MA': train_func_shortrange,
+        # 'NN': noised(ai_func, 0.01),
+        'NN': noised(ai_func, -1),
+        'MA': train_func_shortrange,
         # 'DA': train_func_longrange,
     }
 
-    N_GAMES = 1000
+    N_GAMES = 30000
     # N_GAMES = 200
     statstr = ''
+    avg_dmg = 0.0
     for i in range(N_GAMES):
+        if opts.debug:
+            memory.trunc(0)
         # ai1_func_name = random.choice(list(ai2_funcs.keys()))
         ai1_func_name = 'NN'
         # ai2_func_name = random.choice(list(ai2_funcs.keys()))
-        ai2_func_name = 'NN'
+        ai2_func_name = 'MA'
         win, hp1, hp2 = run_one_game(
             ai2_funcs[ai1_func_name],
             ai2_funcs[ai2_func_name],
-            winner_memory,
-            loser_memory,
+            memory,
+            reward_decay=0.995,
+            reward_func=reward_function,
             frequency=4,
             bot_type=BotType.Raider,
-            save_win=(ai2_func_name == 'MA'),
+            self_play=(ai2_func_name == 'NN'),
+            data_dilution=4,
         )
-        print('GAME#{}: {} {}-vs-{}, hp1={:.2f} hp2={:.2f}'.format(
+        avg_dmg = 0.95*avg_dmg + 0.05*(1-hp2)
+        print('GAME#{}: {} {}-vs-{}, hp1={:.2f} hp2={:.2f},  avg_dmg={:.3f}'.format(
             i, 'win' if win else 'lost',
             ai1_func_name,
             ai2_func_name,
             hp1, hp2,
+            avg_dmg,
         ))
+        if opts.debug and hp2 < 0.80:
+            import code
+            code.interact(local=dict(**globals(), **locals()))
         # if winner_memory.used_size >= training.batch_size and loser_memory.used_size >= training.batch_size:
-        if loser_memory.used_size >= training.batch_size:
+        if memory.used_size >= training.batch_size:
             # import pdb; pdb.set_trace()
-            training.train_n_steps(session, winner_memory, loser_memory, 99, print_each_step=33)
+            with training.evaluate_policy_change(session, memory) as change:
+                training.train_n_steps(session, memory, 99, print_each_step=99)
+            before, after = change
+            print('Policy dispersion: {:.4f} -> {:.4f}'.format(before, after))
+
         if i != 0 and i % 10 == 0 or i+1 == N_GAMES:
             if opts.save:
                 mgr.save_vars(session)
                 # winner_memory.save(winner_data_path)
-                loser_memory.save(loser_data_path)
+                memory.save(data_path)
                 print("Save model at step", mgr.step_counter)
     #     if True:
     #         metrics = training.evaluate_accuracy(session, winner_memory, max_batches=10)

@@ -93,6 +93,36 @@ class ResidualV3:
             self.out = x + model.mask * self.resid.out
 
 
+# class LayerChain:
+#
+#     def __init__(self, factory, *args, **kwargs):
+#         self.layers = []
+#         while True:
+#             layer, args, kwargs = factory(*args, **kwargs)
+#             if layer is not None:
+#                 self.layers.append(layer)
+#             else:
+#                 break
+#         if self.layers and hasattr(self.layers[0], 'name'):
+#             self.name = self.layers[0].name
+#
+#     def apply(self, x, *args, **kwargs):
+#         nodes = []
+#         for layer in self.layers:
+#             node = layer.apply(x, *args, **kwargs)
+#             x = node.out
+#             nodes.append(node)
+#         return self._Apply(nodes)
+#
+#     class _Apply:
+#         def __init__(self, nodes):
+#             self.nodes = nodes
+#
+#
+# def simple_chain(layer_cls, name_prefix, param0, other_params):
+#
+
+
 def shape_to_list(shape):
     if hasattr(shape, 'as_list'):
         return shape.as_list()

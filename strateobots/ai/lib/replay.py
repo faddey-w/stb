@@ -49,42 +49,37 @@ class ReplayMemory:
         Equivalent to iterating entries from given buffer and putting them here.
         :type memory: ReplayMemory
         """
-        if memory._used == 0:
+        arrays = memory.get_last_entries(memory.used_size)
+        self.put_many(*arrays)
+
+    def put_many(self, *vector_arrays):
+        assert len({va.shape[0] for va in vector_arrays}) == 1
+        assert len(vector_arrays) == len(self._storages)
+
+        size = vector_arrays[0].shape[0]
+        if size == 0:
             return
-        if memory._used > self._capacity:
-            data = memory.get_last_entries(self._capacity)
+        if size > self._capacity:
             for i, strg in enumerate(self._storages):
-                strg[...] = data[i]
+                strg[...] = vector_arrays[i]
         else:
-            data = [
-                strg[:memory._used]
-                for strg in memory._storages
-            ]
-            if memory._last_insert < memory._used-1:
-                data = [
-                    np.concatenate([
-                        strg[memory._last_insert + 1:memory._used],
-                        strg[:memory._last_insert + 1],
-                    ], 0)
-                    for strg in data
-                ]
-            if memory._used < self._capacity - self._used:
+            if size < self._capacity - self._used:
                 assert self._last_insert == self._used - 1
-                for i, arr in enumerate(data):
-                    self._storages[i][self._used:self._used+memory._used] = arr
-                self._used += memory._used
+                for i, arr in enumerate(vector_arrays):
+                    self._storages[i][self._used:self._used+size] = arr
+                self._used += size
                 self._last_insert = self._used - 1
-            elif memory._used < self._capacity - self._last_insert - 1:
-                for i, arr in enumerate(data):
-                    self._storages[i][self._last_insert + 1:self._last_insert + 1 + memory._used] = arr
-                self._last_insert += memory._used
+            elif size < self._capacity - self._last_insert - 1:
+                for i, arr in enumerate(vector_arrays):
+                    self._storages[i][self._last_insert + 1:self._last_insert + 1 + size] = arr
+                self._last_insert += size
             else:
                 rem = self._capacity - (self._last_insert + 1)
-                for i, arr in enumerate(data):
+                for i, arr in enumerate(vector_arrays):
                     self._storages[i][self._last_insert+1:] = arr[:rem]
-                    self._storages[i][:memory._used-rem] = arr[rem:]
+                    self._storages[i][:size-rem] = arr[rem:]
                 self._used = self._capacity
-                self._last_insert = memory._used - rem - 1
+                self._last_insert = size - rem - 1
 
     def trunc(self, to_size, offset=0):
         assert offset+to_size <= self._used
@@ -92,6 +87,7 @@ class ReplayMemory:
             for i, strg in enumerate(self._storages):
                 strg[:to_size] = strg[offset:offset+to_size]
         self._used = to_size
+        self._last_insert = min(self._last_insert, self._used - 1)
 
     @property
     def used_size(self):
@@ -134,12 +130,15 @@ class ReplayMemory:
             raise ValueError('not enough entries')
         if n <= self._last_insert + 1:
             smpl = slice(self._last_insert+1-n, self._last_insert+1)
+            return [strg[smpl, :] for strg in self._storages]
         else:
-            smpl = (
-                *range(self._used-n+self._last_insert+1, self._used),
-                *range(self._last_insert+1),
-            )
-        return [strg[smpl, :] for strg in self._storages]
+            return [
+                np.concatenate([
+                    strg[self._used-n+self._last_insert+1:self._used],
+                    strg[:self._last_insert+1]
+                ], axis=0)
+                for strg in self._storages
+            ]
 
     def get_random_sample(self, sample_size):
         """
@@ -188,7 +187,10 @@ class BalancedMemory:
 
     def update(self, memory):
         arrays = memory.get_last_entries(memory.used_size)
-        for vectors in zip(*arrays):
+        self.put_many(*arrays)
+
+    def put_many(self, *vector_arrays):
+        for vectors in zip(*vector_arrays):
             self.put_entry(*vectors)
 
     def trunc(self, to_size, offset=0):
