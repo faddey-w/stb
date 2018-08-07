@@ -585,7 +585,7 @@ class ExplosionModel:
 
 
 def absorb_damage_by_shield(bot, damage):
-    absorbed = max(bot.shield, SHIELD_DAMAGE_ABSORPTION * damage)
+    absorbed = min(bot.shield, SHIELD_DAMAGE_ABSORPTION * damage)
     damage -= absorbed
     bot.shield -= absorbed
     bot.shield = max(0.0, bot.shield)

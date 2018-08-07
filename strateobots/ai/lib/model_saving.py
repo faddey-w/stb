@@ -45,8 +45,9 @@ class ModelManager:
     def init_vars(self, session=None):
         session.run(self.initializer)
 
-    def save_vars(self, session):
-        self.step_counter += 1
+    def save_vars(self, session, inc_step=True):
+        if inc_step:
+            self.step_counter += 1
         self.saver.save(session, self.save_path, self.step_counter)
         with open(_get_step_filepath(self.save_path), 'w') as f:
             f.write(str(self.step_counter))

@@ -298,7 +298,11 @@ class ReinforcementLearning:
         e_hp_idx = state2vec[1, 'hp_ratio']
         b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
         e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
-        return 100 * (b_hp_delta - e_hp_delta)
+        activity_punishment = 0.001 * (
+            action[..., action2vec['tower_rotate_left']]
+            + action[..., action2vec['tower_rotate_right']]
+        )
+        return 100 * (b_hp_delta - e_hp_delta) - activity_punishment
         # return 10 * (1 - state_after[..., e_hp_idx])
         # e_hp_before = state_before[..., e_hp_idx]
         # e_hp_after = state_after[..., e_hp_idx]
@@ -394,8 +398,8 @@ class ReinforcementLearning:
 
 def __generate_all_actions():
     opts = [
-        # [-1, 0, +1],  # move
-        [0],  # move
+        [-1, 0, +1],  # move
+        # [0],  # move
 
         [-1, 0, +1],  # rotate
         # [0],  # rotate
@@ -404,8 +408,8 @@ def __generate_all_actions():
 
         [0, 1],  # fire
 
-        # [0, 1],  # shield
-        [0],  # shield
+        [0, 1],  # shield
+        # [0],  # shield
     ]
     for mv, rt, trt, fr, sh in itertools.product(*opts):
         ctl = BotControl(move=mv, rotate=rt, tower_rotate=trt,

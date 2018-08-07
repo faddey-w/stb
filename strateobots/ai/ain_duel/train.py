@@ -5,6 +5,7 @@ import time
 import contextlib
 import numpy as np
 import tensorflow as tf
+import os
 from math import pi
 from strateobots.engine import StbEngine, BotType, BulletModel, BotControl
 from .._base import DuelAI
@@ -153,8 +154,9 @@ def run_one_game(function1, function2, memory, reward_func, reward_decay, freque
     def put_memory_with_reward(mem):
         states, actions, rewards = mem.get_last_entries(mem.used_size)
         rew_cum = np.zeros_like(rewards)
-        total_damage = 1 - states[-1, data.state2vec[1, 'hp_ratio']]
-        rew_cum[-1] = rewards[-1] + total_damage
+        # total_damage = 1 - states[-1, data.state2vec[1, 'hp_ratio']]
+        # rew_cum[-1] = rewards[-1] + total_damage
+        rew_cum[-1] = rewards[-1]
         for i in range(1, rewards.shape[0]):
             rew_cum[-i-1] = rewards[-i-1] + reward_decay * rew_cum[-i]
         if data_dilution > 1:
@@ -163,12 +165,52 @@ def run_one_game(function1, function2, memory, reward_func, reward_decay, freque
             actions = actions[dilution_offset::data_dilution]
             rew_cum = rew_cum[dilution_offset::data_dilution]
         memory.put_many(states, actions, rew_cum)
-    put_memory_with_reward(mem1)
+        return rew_cum
+    rwrd = put_memory_with_reward(mem1)
     if self_play:
         put_memory_with_reward(mem2)
 
-    win = engine.ai1.bot.hp_ratio > engine.ai2.bot.hp_ratio
-    return win, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio
+    return GameStats(
+        engine.ai1.bot.hp_ratio,
+        engine.ai2.bot.hp_ratio,
+        np.sum(rwrd) / np.size(rwrd),
+    )
+
+
+class GameStats:
+    def __init__(self, hp1, hp2, average_reward):
+        self.hp1 = hp1
+        self.hp2 = hp2
+        self.win = hp1 > hp2
+        self.average_reward = average_reward
+
+    @classmethod
+    def SummaryTensors(cls, session, logs_location):
+        hp1 = tf.placeholder(tf.float32, [])
+        hp2 = tf.placeholder(tf.float32, [])
+        avg_rew = tf.placeholder(tf.float32, [])
+        summaries = tf.summary.merge([
+            tf.summary.scalar('hp1', hp1),
+            tf.summary.scalar('hp2', hp2),
+            tf.summary.scalar('avg_rew', avg_rew),
+        ])
+        writer = tf.summary.FileWriter(logs_location, session.graph)
+        self = cls(hp1, hp2, avg_rew)
+        self.summaries = summaries
+        self.session = session
+        self.summary_writer = writer
+        return self
+
+    def write_summaries(self, step, stats):
+        session = getattr(self, 'session')
+        summaries = getattr(self, 'summaries')
+        summary_writer = getattr(self, 'summary_writer')
+        sumry = session.run(summaries, {
+            self.hp1: stats.hp1,
+            self.hp2: stats.hp2,
+            self.average_reward: stats.average_reward
+        })
+        summary_writer.add_summary(sumry, step)
 
 
 class AccuracyMetrics:
@@ -487,6 +529,10 @@ def main():
     # ]))
     # session.run(tf.assign(model.var_list[1], [[0.0] * 11]))
 
+    logs_path = '_data/AIN-logs/{}/'.format(int(time.time()))
+    os.makedirs(logs_path, exist_ok=True)
+    stats_writer = GameStats.SummaryTensors(session, logs_path)
+
     training = AINTraining(model, batch_size=1000)
     session.run(training.init_op)
 
@@ -511,7 +557,7 @@ def main():
         ai1_func_name = 'NN'
         # ai2_func_name = random.choice(list(ai2_funcs.keys()))
         ai2_func_name = 'MA'
-        win, hp1, hp2 = run_one_game(
+        stats = run_one_game(
             ai2_funcs[ai1_func_name],
             ai2_funcs[ai2_func_name],
             memory,
@@ -522,18 +568,20 @@ def main():
             self_play=(ai2_func_name == 'NN'),
             data_dilution=4,
         )
-        avg_dmg = 0.95*avg_dmg + 0.05*(1-hp2)
+        mgr.step_counter += 1
+        stats_writer.write_summaries(mgr.step_counter, stats)
+        avg_dmg = 0.95*avg_dmg + 0.05*(1-stats.hp2)
         print('GAME#{}: {} {}-vs-{}, hp1={:.2f} hp2={:.2f},  avg_dmg={:.3f}'.format(
-            i, 'win' if win else 'lost',
+            mgr.step_counter,
+            'win' if stats.win else 'lost',
             ai1_func_name,
             ai2_func_name,
-            hp1, hp2,
+            stats.hp1, stats.hp2,
             avg_dmg,
         ))
-        if opts.debug and hp2 < 0.80:
+        if opts.debug and stats.hp2 < 0.80:
             import code
             code.interact(local=dict(**globals(), **locals()))
-        # if winner_memory.used_size >= training.batch_size and loser_memory.used_size >= training.batch_size:
         if memory.used_size >= training.batch_size:
             # import pdb; pdb.set_trace()
             with training.evaluate_policy_change(session, memory) as change:
@@ -543,20 +591,9 @@ def main():
 
         if i != 0 and i % 10 == 0 or i+1 == N_GAMES:
             if opts.save:
-                mgr.save_vars(session)
-                # winner_memory.save(winner_data_path)
+                mgr.save_vars(session, inc_step=False)
                 memory.save(data_path)
                 print("Save model at step", mgr.step_counter)
-    #     if True:
-    #         metrics = training.evaluate_accuracy(session, winner_memory, max_batches=10)
-    #         width = max(map(len, metrics.keys()))
-    #         for prop in sorted(metrics.keys()):
-    #             print('  {} : {}'.format(prop.ljust(width), metrics[prop]))
-    #         statstr = '-'.join(
-    #             '{:.0f}'.format(100 * metrics[p].get_overall_accuracy())
-    #             for p in sorted(metrics.keys())
-    #         )
-    # print('STATS:', statstr)
 
 
 if __name__ == '__main__':

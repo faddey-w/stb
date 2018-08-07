@@ -26,9 +26,9 @@ def noised(trainer_function, noise_prob):
 class Config:
     
     memory_capacity = 100000
-    memory_capacity_per_class = 1000
+    memory_capacity_per_class = 3000
 
-    new_model_cls = model.semisparse_fc.QualityFunctionModel
+    new_model_cls = model.classic.QualityFunctionModel
 
     model_params = dict(
         # coord_cfg=[8] * 4,
@@ -54,8 +54,11 @@ class Config:
         # vec2d_cfg=[(7, 11)] * 10,
         # fc_cfg=[23, 17, 13],
 
-        n_parts=30,
-        cfg=[4] * 10,
+        # n_parts=30,
+        # cfg=[4] * 10,
+
+        angle_sections=36,
+        layer_sizes=[45, 40, 1]
     )
 
     batch_size = 120
@@ -65,7 +68,7 @@ class Config:
         n_rnd_entries=100,
         n_last_entries=20
     )
-    reward_prediction = 0.95
+    reward_prediction = 0.995
     select_random_prob_decrease = 0.03
     select_random_max_prob = 0.1
     select_random_min_prob = 0.1
@@ -74,15 +77,15 @@ class Config:
     bot_type = BotType.Raider
         
     modes = [
-        ai.NotMovingMode(),
-        ai.LocateAtCircleMode(),
-        ai.NoShieldMode(),
+        # ai.NotMovingMode(),
+        # ai.LocateAtCircleMode(),
+        # ai.NoShieldMode(),
         # ai.NotBodyRotatingMode(),
         # ai.BackToCenter(),
     ]
-    trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
+    # trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
     # trainer_function = staticmethod(noised(handcrafted.distance_attack, 0.1))
-    # trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
+    trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
 
 
 def memory_keyfunc(state_before, action, state_after):
@@ -189,7 +192,7 @@ def main():
 
             i += 1
             rl.run(
-                frameskip=2,
+                frameskip=1,
                 max_ticks=3000,
                 world_size=1000,
                 replay_memory=replay_memory,

@@ -145,11 +145,11 @@ PATH_PREFIX = os.path.join(REPO_ROOT, '_data', '_overfit', '')
 
 
 def train(cfg, print_each=17):
-    # mdl = model.eventbased.QualityFunctionModel(
-    #     linear_cfg=[(30, 30), (15, 30), (15, 30), (15, 30), (10, 10)],
-    #     logical_cfg=[30, 30, 10],
-    #     values_cfg=[(5, 10), (5, 10), (5, 10)],
-    # )
+    mdl = model.eventbased.QualityFunctionModel(
+        linear_cfg=[(30, 30), (15, 30), (15, 30), (15, 30), (10, 10)],
+        logical_cfg=[30, 30, 10],
+        values_cfg=[(5, 10), (5, 10), (5, 10)],
+    )
     # mdl = model.vec2d_v2.QualityFunctionModel(
     #     vec2d_cfg=[(17, 17)] * 6,
     #     fc_cfg=[11] * 6,
@@ -158,11 +158,15 @@ def train(cfg, print_each=17):
     #     vec2d_cfg=[(11, 19)] * 2,
     #     fc_cfg=[31, 23, 17, 13, 7],
     # )
-    mdl = model.vec2d_v3.QualityFunctionModel(
-        vec2d_cfg=[(9, 17)] * 6,
-        fc_n_parts=20,
-        fc_cfg=[3] * 20,
-    )
+    # mdl = model.vec2d_v3.QualityFunctionModel(
+    #     vec2d_cfg=[(9, 17)] * 6,
+    #     fc_n_parts=20,
+    #     fc_cfg=[3] * 20,
+    # )
+    # mdl = model.classic.QualityFunctionModel(
+    #     angle_sections=10,
+    #     layer_sizes=[200, 100]
+    # )
     sess = core.get_session()
     run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
     mem = replay.ReplayMemory(
@@ -174,16 +178,16 @@ def train(cfg, print_each=17):
     rl = core.ReinforcementLearning(
         model=mdl,
         batch_size=cfg.batch_size,
-        reward_prediction=0.95,
+        reward_prediction=0.995,
         self_play=False,
     )
 
     ai1_factory = ai.DQNDuelAI.parametrize(
         bot_type=BotType.Raider,
         modes=[
-            # ai.NotMovingMode(),
-            # ai.LocateAtCircleMode(),
-            # ai.NoShieldMode(),
+            ai.NotMovingMode(),
+            ai.LocateAtCircleMode(),
+            ai.NoShieldMode(),
             # ai.NotBodyRotatingMode(),
             # ai.BackToCenter(),
         ]
@@ -191,9 +195,9 @@ def train(cfg, print_each=17):
     ai2_factory = ai.DQNDuelAI.parametrize(
         bot_type=BotType.Raider,
         modes=[
-            # ai.NotMovingMode(),
-            # ai.LocateAtCircleMode(),
-            # ai.NoShieldMode(),
+            ai.NotMovingMode(),
+            ai.LocateAtCircleMode(),
+            ai.NoShieldMode(),
             # ai.NotBodyRotatingMode(),
             # ai.BackToCenter(),
         ],
