@@ -1,4 +1,5 @@
 import tensorflow as tf
+import contextlib
 
 from strateobots.ai.lib import layers
 from strateobots.ai.lib.data import action2vec, state2vec
@@ -40,41 +41,13 @@ class ActionInference:
         :type model: ActionInferenceModel
         :param state: [..., state_vector_len]
         """
-        normalizer = tf.one_hot([
-            state2vec[0, 'x'],
-            state2vec[0, 'y'],
-            state2vec[1, 'x'],
-            state2vec[1, 'y'],
-            state2vec[2, 'x'],
-            state2vec[2, 'y'],
-            state2vec[3, 'x'],
-            state2vec[3, 'y'],
-        ], depth=state2vec.vector_length, on_value=1.0 / 1000, off_value=1.0)
-        normalizer = tf.reduce_min(normalizer, 0)
-        state *= normalizer
-
-        normalizer = tf.one_hot([
-            state2vec[0, 'vx'],
-            state2vec[0, 'vy'],
-            state2vec[1, 'vx'],
-            state2vec[1, 'vy'],
-        ], depth=state2vec.vector_length, on_value=1.0 / 10, off_value=1.0)
-        normalizer = tf.reduce_min(normalizer, 0)
-        state *= normalizer
+        state = normalize_state(state)
 
         self.model = model  # type: BaseActionInferenceModel
         self.state = state  # type: tf.Tensor
 
         self.features = create_inference(self, state)
-        finite_assert = tf.Assert(
-            tf.reduce_all(tf.is_finite(self.features)),
-            [
-                op
-                for v in model.var_list
-                for op in [v.name, tf.reduce_all(tf.is_finite(v))]
-            ],
-        )
-        with tf.control_dependencies([finite_assert]):
+        with finite_assert(self.features, model.var_list):
             self.action_evidences = model.out_layer.apply(self.features, tf.identity)
             vec = self.action_evidences.out
             move_prediction = tf.nn.softmax(vec[..., 0:3], -1)
@@ -83,10 +56,157 @@ class ActionInference:
             fire_prediction = tf.sigmoid(vec[..., 9:10])
             shield_prediction = tf.sigmoid(vec[..., 10:11])
 
-            self.action_prediction = tf.concat([
-                move_prediction,
-                rotate_prediction,
-                tower_rotate_prediction,
-                fire_prediction,
-                shield_prediction,
-            ], -1)
+            self.action_prediction = combine_predictions(
+                move=move_prediction,
+                rotate=rotate_prediction,
+                tower_rotate=tower_rotate_prediction,
+                fire=fire_prediction,
+                shield=shield_prediction,
+            )
+
+
+def normalize_state(state_t):
+    normalizer = tf.one_hot([
+        state2vec[0, 'x'],
+        state2vec[0, 'y'],
+        state2vec[1, 'x'],
+        state2vec[1, 'y'],
+        state2vec[2, 'x'],
+        state2vec[2, 'y'],
+        state2vec[3, 'x'],
+        state2vec[3, 'y'],
+    ], depth=state2vec.vector_length, on_value=1.0 / 1000, off_value=1.0)
+    normalizer = tf.reduce_min(normalizer, 0)
+    state_t *= normalizer
+
+    normalizer = tf.one_hot([
+        state2vec[0, 'vx'],
+        state2vec[0, 'vy'],
+        state2vec[1, 'vx'],
+        state2vec[1, 'vy'],
+    ], depth=state2vec.vector_length, on_value=1.0 / 10, off_value=1.0)
+    normalizer = tf.reduce_min(normalizer, 0)
+    state_t *= normalizer
+    return state_t
+
+
+@contextlib.contextmanager
+def finite_assert(tensor, var_list):
+    assert_op = tf.Assert(
+        tf.reduce_all(tf.is_finite(tensor)),
+        [
+            op
+            for v in var_list
+            for op in [v.name, tf.reduce_all(tf.is_finite(v))]
+        ],
+    )
+    with tf.control_dependencies([assert_op]) as ctx:
+        yield ctx
+
+
+def combine_predictions(*, move, rotate, tower_rotate, fire, shield):
+    return tf.concat([move, rotate, tower_rotate, fire, shield], -1)
+
+
+class BaseActionInferenceModelV2:
+
+    def __new__(cls, **kwargs):
+        self = super().__new__(cls)
+        self.construct_params = kwargs
+        return self
+
+    def __init__(self,
+                 move,
+                 rotate,
+                 tower_rotate,
+                 fire,
+                 shield,
+                 common=None):
+        self.name = 'AIN'
+
+        with tf.variable_scope(self.name):
+            if hasattr(self, '_create_common_net'):
+                self.has_common = True
+                self.common_net = self._create_common_net(**(common or {}))
+            else:
+                self.has_common = False
+            self.move_net = self._create_move_net(**move)
+            self.rotate_net = self._create_rotate_net(**rotate)
+            self.tower_rotate_net = self._create_tower_rotate_net(**tower_rotate)
+            self.fire_net = self._create_fire_net(**fire)
+            self.shield_net = self._create_shield_net(**shield)
+
+            self.move_last = layers.Linear('move_last', self.move_net.n_features, 3)
+            self.rotate_last = layers.Linear('rotate_last', self.rotate_net.n_features, 3)
+            self.tower_rotate_last = layers.Linear('tower_rotate_last', self.tower_rotate_net.n_features, 3)
+            self.fire_last = layers.Linear('fire_last', self.fire_net.n_features, 1)
+            self.shield_last = layers.Linear('shield_last', self.shield_net.n_features, 1)
+
+        self.var_list = [
+            *(self.common_net.var_list if self.has_common else []),
+
+            *self.move_net.var_list,
+            *self.rotate_net.var_list,
+            *self.tower_rotate_net.var_list,
+            *self.fire_net.var_list,
+            *self.shield_net.var_list,
+
+            *self.move_last.var_list,
+            *self.rotate_last.var_list,
+            *self.tower_rotate_last.var_list,
+            *self.fire_last.var_list,
+            *self.shield_last.var_list,
+        ]
+
+    def _create_move_net(self, **kwargs):
+        raise NotImplementedError
+
+    def _create_rotate_net(self, **kwargs):
+        raise NotImplementedError
+
+    def _create_tower_rotate_net(self, **kwargs):
+        raise NotImplementedError
+
+    def _create_fire_net(self, **kwargs):
+        raise NotImplementedError
+
+    def _create_shield_net(self, **kwargs):
+        raise NotImplementedError
+
+    def apply(self, state):
+        state = normalize_state(state)
+        classify = lambda x: tf.nn.softmax(x, -1)
+        inference = ActionInferenceV2()
+        inference.model = self
+        inference.state = state
+
+        if self.has_common:
+            inference.common = self.common_net.apply(state)
+            state = inference.common
+
+        inference.move = self.move_net.apply(state)
+        inference.rotate = self.rotate_net.apply(state)
+        inference.tower_rotate = self.tower_rotate_net.apply(state)
+        inference.fire = self.fire_net.apply(state)
+        inference.shield = self.shield_net.apply(state)
+        inference.classify_nodes = dict(
+            move=self.move_last.apply(inference.move.features, classify),
+            rotate=self.rotate_last.apply(inference.rotate.features, classify),
+            tower_rotate=self.tower_rotate_last.apply(inference.tower_rotate.features, classify),
+            fire=self.fire_last.apply(inference.fire.features, tf.sigmoid),
+            shield=self.shield_last.apply(inference.shield.features, tf.sigmoid),
+        )
+        action_prediction = combine_predictions(
+            move=inference.classify_nodes['move'].out,
+            rotate=inference.classify_nodes['rotate'].out,
+            tower_rotate=inference.classify_nodes['tower_rotate'].out,
+            fire=inference.classify_nodes['fire'].out,
+            shield=inference.classify_nodes['shield'].out,
+        )
+        with finite_assert(action_prediction, self.var_list):
+            inference.action_prediction = tf.identity(action_prediction)
+        return inference
+
+
+class ActionInferenceV2:
+    pass

@@ -160,6 +160,7 @@ bot2vec = Mapper(
     Field('hp_ratio'),
     Field('load'),
     Field('shield_ratio'),
+    Field('shield_warmup'),
     Field('orientation', lambda bot: _norm_angle(bot.orientation)),
     Field('tower_orientation', lambda bot: _norm_angle(bot.tower_orientation)),
 )

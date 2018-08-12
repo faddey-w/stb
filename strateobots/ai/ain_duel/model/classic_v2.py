@@ -3,7 +3,7 @@ from math import pi
 
 from strateobots.ai.lib import layers
 from strateobots.ai.lib.data import state2vec
-from strateobots.ai.ain_duel.model.base import BaseActionInferenceModel
+from strateobots.ai.ain_duel.model.base import BaseActionInferenceModelV2
 
 ANGLE_FEATURES = (
     (0, 'orientation'),
@@ -33,37 +33,79 @@ OTHER_FEATURES = (
 )
 
 
-class ActionInferenceModel(BaseActionInferenceModel):
+class ActionInferenceModel(BaseActionInferenceModelV2):
 
-    def _create_layers(self, layer_sizes, n_angles):
+    def _create_common_net(self):
+        return _DataTransform
 
+    def _create_rotate_net(self, layer_sizes, n_angles):
+        return ClassicV2Net('Rotate', layer_sizes, n_angles)
+
+    def _create_tower_rotate_net(self, layer_sizes, n_angles):
+        return ClassicV2Net('TowerRotate', layer_sizes, n_angles)
+
+    def _create_fire_net(self, layer_sizes, n_angles):
+        return ClassicV2Net('Fire', layer_sizes, n_angles)
+
+    def _create_shield_net(self, layer_sizes, n_angles):
+        return ClassicV2Net('Shield', layer_sizes, n_angles)
+
+    def _create_move_net(self, layer_sizes, n_angles):
+        return ClassicV2Net('Move', layer_sizes, n_angles)
+
+
+Model = ActionInferenceModel
+
+
+def selector(tensor):
+    def select(*feature_name):
+        if len(feature_name) == 1 and isinstance(feature_name[0], tuple):
+            feature_name = feature_name[0]
+        idx = state2vec[feature_name]
+        return tensor[..., idx:idx+1]
+    return select
+
+
+def tf_vec_length(x, y):
+    return tf.sqrt(tf.square(x) + tf.square(y))
+
+
+def tf_normed_angle(x, y, rel_a=None):
+    a = tf.atan2(y, x)
+    if rel_a is not None:
+        a -= rel_a
+    return a % (2 * pi)
+
+
+class LinearFFChain:
+    def __init__(self, name, in_size, layer_sizes):
+        self.name = name
         self.layers = []
-        angles = (
-            + 1  # vector from bot to enemy
-            + 1  # vector from enemy to our bullet
-            + 1  # vector from bot to enemy's bullet
-            + 2  # bot velocity vectors
-            + len(ANGLE_FEATURES)
-        )
-        self.angle_func = layers.Linear('Angles', angles, n_angles)
-        in_dim = (
-            + 1  # vector from bot to enemy
-            + 1  # vector from enemy to our bullet
-            + 1  # vector from bot to enemy's bullet
-            + 2  # bot velocity vectors
-            + n_angles
-            + len(RANGE_FEATURES)
-            + len(OTHER_FEATURES)
-        )
-        for i, out_dim in enumerate(layer_sizes):
-            node = layers.Linear('Lin{}'.format(i), in_dim, out_dim)
-            self.layers.append(node)
-            in_dim = out_dim
+        with tf.variable_scope(name):
+            for i, out_size in enumerate(layer_sizes, 1):
+                fc = layers.Linear(str(i), in_size, out_size)
+                self.layers.append(fc)
+                in_size = out_size
+        self.out_size = in_size
 
-        return in_dim, self.layers + [self.angle_func]
+    @property
+    def var_list(self):
+        return [v for layer in self.layers for v in layer.var_list]
 
-    def create_inference(self, inference, state):
+    def apply(self, vector, activation):
         nodes = []
+        for layer in self.layers:
+            node = layer.apply(vector, activation)
+            nodes.append(node)
+            vector = node.out
+        return nodes, vector
+
+
+class _DataTransform:
+    var_list = []
+
+    def __init__(self, state):
+
         f = selector(state)
 
         bmx = f(0, 'x')
@@ -105,9 +147,9 @@ class ActionInferenceModel(BaseActionInferenceModel):
             tf_vec_length(evx, evy),
             *map(f, RANGE_FEATURES),
         ]
-        ranges_tensor = tf.concat(ranges, -1) / 500.0
+        self.ranges_tensor = tf.concat(ranges, -1) / 500.0
 
-        angles_in = tf.concat([
+        self.angles_in = tf.concat([
             b2e_ma,
             e2b_ba,
             b2e_ba,
@@ -115,40 +157,54 @@ class ActionInferenceModel(BaseActionInferenceModel):
             tf_normed_angle(evx, evy, emo),
             *map(f, ANGLE_FEATURES),
         ], -1)
-        angles_node = self.angle_func.apply(angles_in, tf.identity)
+        self.other_features = list(map(f, OTHER_FEATURES))
 
-        inference.input_tensor = tf.concat([
-            ranges_tensor,
+    @classmethod
+    def apply(cls, state):
+        return cls(state)
+
+
+class Node:
+    pass
+
+
+class ClassicV2Net:
+
+    def __init__(self, name, layer_sizes, n_angles):
+        self.name = name
+        angles = (
+            + 1  # vector from bot to enemy
+            + 1  # vector from enemy to our bullet
+            + 1  # vector from bot to enemy's bullet
+            + 2  # bot velocity vectors
+            + len(ANGLE_FEATURES)
+        )
+        in_dim = (
+            + 1  # vector from bot to enemy
+            + 1  # vector from enemy to our bullet
+            + 1  # vector from bot to enemy's bullet
+            + 2  # bot velocity vectors
+            + n_angles
+            + len(RANGE_FEATURES)
+            + len(OTHER_FEATURES)
+        )
+        with tf.variable_scope(name):
+            self.angle_func = layers.Linear('Angles', angles, n_angles)
+            self.ff_chain = LinearFFChain('FC', in_dim, layer_sizes)
+        self.var_list = self.angle_func.var_list + self.ff_chain.var_list
+        self.n_features = self.ff_chain.out_size
+
+    def apply(self, data):
+        angles_node = self.angle_func.apply(data.angles_in, tf.identity)
+
+        inference = Node()
+        vector = tf.concat([
+            data.ranges_tensor,
             tf.cos(angles_node.out),
-            *map(f, OTHER_FEATURES),
+            *data.other_features,
         ], -1)
+        inference.input_tensor = vector
 
-        vector = inference.input_tensor
-        for layer in self.layers:
-            node = layer.apply(vector, tf.sigmoid)
-            vector = node.out
-            nodes.append(node)
-        inference.nodes = nodes
-        return vector
+        inference.fc, inference.features = self.ff_chain.apply(vector, tf.sigmoid)
+        return inference
 
-Model = ActionInferenceModel
-
-
-def selector(tensor):
-    def select(*feature_name):
-        if len(feature_name) == 1 and isinstance(feature_name[0], tuple):
-            feature_name = feature_name[0]
-        idx = state2vec[feature_name]
-        return tensor[..., idx:idx+1]
-    return select
-
-
-def tf_vec_length(x, y):
-    return tf.sqrt(tf.square(x) + tf.square(y))
-
-
-def tf_normed_angle(x, y, rel_a=None):
-    a = tf.atan2(y, x)
-    if rel_a is not None:
-        a -= rel_a
-    return a % (2 * pi)

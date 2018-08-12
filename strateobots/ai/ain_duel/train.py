@@ -264,6 +264,7 @@ class AINTraining:
         self.state_ph = tf.placeholder(tf.float32, [batch_size, data.state2vec.vector_length])
         self.action_ph = tf.placeholder(tf.float32, [batch_size, data.action2vec.vector_length])
         self.reward_ph = tf.placeholder(tf.float32, [batch_size, 1])
+        self.reward_threshold_ph = tf.placeholder(tf.float32, [])
 
         self.model = model
         self.inference = model.apply(self.state_ph)
@@ -286,14 +287,15 @@ class AINTraining:
 
         # reward is negative!
         # so training will lead to avoiding too negative rewards
-        self.entropy = self.reward_ph * tf.log(eps + (1-eps) * act_diff)
+        reward = self.reward_ph - self.reward_threshold_ph
+        self.entropy = reward * tf.log(eps + (1-eps) * act_diff)
 
         # self.loss_vector = self.entropy
         self.loss_vector = self.entropy * self.act_same
         self.loss = tf.reduce_mean(self.loss_vector)
 
-        # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
-        self.optimizer = tf.train.AdamOptimizer(0.001)
+        self.optimizer = tf.train.GradientDescentOptimizer(0.001)
+        # self.optimizer = tf.train.AdamOptimizer(0.001)
         # self.optimizer = tf.train.RMSPropOptimizer(0.0001)
         self.train_op = self.optimizer.minimize(self.loss, var_list=model.var_list)
 
@@ -301,7 +303,8 @@ class AINTraining:
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
-    def train_n_steps(self, session, memory, n_steps, print_each_step=10):
+    def train_n_steps(self, session, memory, n_steps, print_each_step=10,
+                      reward_threshold=0):
         loss_avg = util.Average()
         rew_avg = util.Average()
         started = time.time()
@@ -317,22 +320,21 @@ class AINTraining:
                     self.avg_reward
                 ],
                 memory, session,
+                reward_threshold=reward_threshold,
             )
             loss_avg.add(loss)
             rew_avg.add(rew)
-            if i % print_each_step == 0:
-                print('#{}: loss={:.4f}; rew={:.4f}; time={:.2f}sec'.format(
-                    i, loss_avg.get(), rew_avg.get(), time.time()-started))
-                started = time.time()
-                loss_avg.reset()
-                rew_avg.reset()
+        log_entry = 'loss={:.4f}; rew={:.4f}; time={:.2f}sec'.format(
+            loss_avg.get(), rew_avg.get(), time.time()-started)
+        return log_entry
 
-    def run_on_sample(self, tensors, memory, session):
+    def run_on_sample(self, tensors, memory, session, reward_threshold=0):
         states, actions, cum_rewards = memory.get_random_sample(self.batch_size)
         return session.run(tensors, {
             self.state_ph: states,
             self.reward_ph: cum_rewards,
             self.action_ph: actions,
+            self.reward_threshold_ph: reward_threshold,
         })
 
     # def evaluate_accuracy(self, session, winner_memory, max_batches=50):
@@ -454,14 +456,15 @@ def memory_keyfunc(state, action, reward):
 def reward_function(state_before, action, state_after):
     b_hp_idx = data.state2vec[0, 'hp_ratio']
     e_hp_idx = data.state2vec[1, 'hp_ratio']
-    return state_after[..., b_hp_idx] - state_after[..., e_hp_idx] - 0.99
-    # b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
-    # e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
-    # return 100 * (b_hp_delta - e_hp_delta)
+    # return state_after[..., b_hp_idx] - state_after[..., e_hp_idx] - 0.99
+    b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
+    e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
+    return 100 * (b_hp_delta - e_hp_delta)
 
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('name')
     parser.add_argument('--no-save', action='store_false', dest='save')
     parser.add_argument('--restart', action='store_true', dest='restart')
     parser.add_argument('--debug', action='store_true', dest='debug')
@@ -473,13 +476,17 @@ def main():
     #     vector_sizes=[data.state2vec.vector_length, data.action2vec.vector_length, 1]
     # )
     memory = replay.ReplayMemory(
-        1000000,
+        100000,
         # 500,
         data.state2vec.vector_length,
         data.action2vec.vector_length,
         1,
     )
-    data_path = '_data/AIN-data'
+    data_path = '_data/AIN-data/' + opts.name
+    model_path = '_data/AIN/' + opts.name
+    if opts.restart:
+        shutil.rmtree(model_path)
+        shutil.rmtree(data_path)
     try:
         if isinstance(memory, replay.BalancedMemory):
             memory.load(data_path, eval)
@@ -488,20 +495,30 @@ def main():
     except:
         pass
 
+    REWARD_THRESHOLD_SIGMA = +2
+
     try:
-        if opts.restart:
-            shutil.rmtree('_data/AIN')
-        mgr = model_saving.ModelManager.load_existing_model('_data/AIN')
+        mgr = model_saving.ModelManager.load_existing_model(model_path)
         session = tf.Session()
         mgr.load_vars(session)
         model = mgr.model
         print("model loaded at step ", mgr.step_counter)
     except:
         print("NEW model")
+        os.makedirs(data_path, exist_ok=False)
+        os.makedirs(model_path, exist_ok=False)
         tf.reset_default_graph()
         # model = modellib.vec2d_fc_v2.ActionInferenceModel(
-        #     vec_cfg=[(50, 50)] * 5,
-        #     fc_cfg=[30] * 3,
+        #     move_vec=[(5, 5)] * 3,
+        #     move_fc=[],
+        #     rotate_vec=[(5, 5)] * 3,
+        #     rotate_fc=[],
+        #     tower_rotate_vec=[(5, 5)] * 3,
+        #     tower_rotate_fc=[],
+        #     shield_vec=[(5, 5)] * 3,
+        #     shield_fc=[10] * 1,
+        #     fire_vec=[(5, 5)] * 3,
+        #     fire_fc=[10] * 2,
         # )
         # model = modellib.handcrafted.ActionInferenceModel()
         # model = modellib.simple.ActionInferenceModel(
@@ -512,24 +529,21 @@ def main():
         #     angle_sections=10,
         # )
         model = modellib.classic_v2.ActionInferenceModel(
-            layer_sizes=[20],
-            n_angles=10,
+            move=dict(layer_sizes=[5, 5], n_angles=10),
+            rotate=dict(layer_sizes=[], n_angles=5),
+            tower_rotate=dict(layer_sizes=[], n_angles=5),
+            fire=dict(layer_sizes=[5, 5], n_angles=5),
+            shield=dict(layer_sizes=[5, 5], n_angles=5),
         )
         # model = modellib.residual.ActionInferenceModel(
         #     res_cfg=[(50, 100)] * 6,
         #     sigm_cfg=[150] * 6,
         # )
-        mgr = model_saving.ModelManager(model, '_data/AIN', opts.save)
+        mgr = model_saving.ModelManager(model, model_path, opts.save)
         session = tf.Session()
         mgr.init_vars(session)
-    # import code; code.interact(local=dict(**globals(), **locals()))
-    # session.run(tf.assign(model.var_list[0], [
-    #     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0],
-    #     [0.0, 0.0, 0.0, 0.0, 0.0, 0.0,  0.0, 1.0, 0.0, 0.0, 0.0],
-    # ]))
-    # session.run(tf.assign(model.var_list[1], [[0.0] * 11]))
 
-    logs_path = '_data/AIN-logs/{}/'.format(int(time.time()))
+    logs_path = '_data/AIN-logs/{}/'.format(opts.name)
     os.makedirs(logs_path, exist_ok=True)
     stats_writer = GameStats.SummaryTensors(session, logs_path)
 
@@ -541,7 +555,7 @@ def main():
     train_func_longrange = adopt_handcrafted_function(handcrafted.distance_attack)
     ai2_funcs = {
         # 'NN': noised(ai_func, 0.01),
-        'NN': noised(ai_func, -1),
+        'NN': ai_func,
         'MA': train_func_shortrange,
         # 'DA': train_func_longrange,
     }
@@ -550,6 +564,7 @@ def main():
     # N_GAMES = 200
     statstr = ''
     avg_dmg = 0.0
+    reward_threshold = 0
     for i in range(N_GAMES):
         if opts.debug:
             memory.trunc(0)
@@ -571,25 +586,46 @@ def main():
         mgr.step_counter += 1
         stats_writer.write_summaries(mgr.step_counter, stats)
         avg_dmg = 0.95*avg_dmg + 0.05*(1-stats.hp2)
-        print('GAME#{}: {} {}-vs-{}, hp1={:.2f} hp2={:.2f},  avg_dmg={:.3f}'.format(
-            mgr.step_counter,
-            'win' if stats.win else 'lost',
-            ai1_func_name,
-            ai2_func_name,
-            stats.hp1, stats.hp2,
-            avg_dmg,
-        ))
+        logentry = 'GAME#{}: {} {}-vs-{}, ' \
+                   'hp1={:.2f} hp2={:.2f},  ' \
+                   'avg_dmg={:.3f}'.format(
+                        mgr.step_counter,
+                        'win' if stats.win else 'lost',
+                        ai1_func_name,
+                        ai2_func_name,
+                        stats.hp1, stats.hp2,
+                        avg_dmg,
+                    )
+
+        if i % 20 == 0:
+            _, _, all_rewards = memory.get_last_entries(memory.used_size)
+            n_entries = np.size(all_rewards)
+            mean = np.sum(all_rewards) / n_entries
+            square_mean = np.sum(np.square(all_rewards)) / n_entries
+            sigma = np.sqrt(square_mean - np.square(mean))
+            reward_threshold = mean + REWARD_THRESHOLD_SIGMA * sigma
+            higher_ratio = np.sum(all_rewards > reward_threshold) / n_entries
+            print("Set reward threshold: {} ({:.1f}%)"
+                  .format(reward_threshold, higher_ratio * 100))
+
         if opts.debug and stats.hp2 < 0.80:
             import code
             code.interact(local=dict(**globals(), **locals()))
-        if memory.used_size >= training.batch_size:
+
+        can_train = memory.used_size >= 2 * training.batch_size
+
+        if can_train:
             # import pdb; pdb.set_trace()
             with training.evaluate_policy_change(session, memory) as change:
-                training.train_n_steps(session, memory, 99, print_each_step=99)
+                train_log = training.train_n_steps(
+                    session, memory, 99, reward_threshold=reward_threshold)
             before, after = change
-            print('Policy dispersion: {:.4f} -> {:.4f}'.format(before, after))
+            dispersion_log = 'D: {:.5f} -> {:.5f}'.format(before, after)
+            logentry = '{}   {}   {}'.format(logentry, train_log, dispersion_log)
 
-        if i != 0 and i % 10 == 0 or i+1 == N_GAMES:
+        print(logentry)
+
+        if can_train and i != 0 and i % 10 == 0 or i+1 == N_GAMES:
             if opts.save:
                 mgr.save_vars(session, inc_step=False)
                 memory.save(data_path)

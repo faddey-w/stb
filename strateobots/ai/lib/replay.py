@@ -22,8 +22,9 @@ class ReplayMemory:
         :param save_dir: directory path where to save data
         """
         os.makedirs(save_dir, exist_ok=True)
-        for i, strg in enumerate(self._storages):
-            np.save(os.path.join(save_dir, '{}.npy'.format(i)), strg[:self._used])
+        arrays = self.get_last_entries(self.used_size)
+        for i, arr in enumerate(arrays):
+            np.save(os.path.join(save_dir, '{}.npy'.format(i)), arr)
 
     def load(self, save_dir):
         """
