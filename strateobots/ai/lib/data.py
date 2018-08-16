@@ -189,8 +189,11 @@ action2vec = Mapper(
     Field('tower_rotate_no', categorical=0, attr='tower_rotate'),
     Field('tower_rotate_right', categorical=+1, attr='tower_rotate'),
 
-    Field('fire'),
-    Field('shield'),
+    Field('fire_yes', categorical=True),
+    Field('fire_no', categorical=False),
+
+    Field('shield_yes', categorical=True),
+    Field('shield_no', categorical=False),
 )
 
 
