@@ -17,25 +17,57 @@ from .._base import BaseAI
 
 class QualityFunction:
 
-    def __init__(self, model, state, action):
-        self.model = model
-        self.state = state
-        self.action = action
+    def __init__(self, move, rotate, tower_rotate,
+                 fire, shield):
+        self.move = move
+        self.rotate = rotate
+        self.tower_rotate = tower_rotate
+        self.fire = fire
+        self.shield = shield
+        self.quality = tf.add_n([
+            self.move.get_quality(),
+            self.rotate.get_quality(),
+            self.tower_rotate.get_quality(),
+            self.fire.get_quality(),
+            self.shield.get_quality(),
+        ])
 
     def get_quality(self):
         raise NotImplementedError
 
 
-class SelectAction:
+class QualityFunctionModelset:
+
+    def __init__(self, move, rotate, tower_rotate,
+                 fire, shield):
+        self.move = move
+        self.rotate = rotate
+        self.tower_rotate = tower_rotate
+        self.fire = fire
+        self.shield = shield
+
+    def apply(self, state, action):
+        move_action = action[..., 0:3]
+        rotate_action = action[..., 3:6]
+        tower_rotate_action = action[..., 6:9]
+        fire_action = action[..., 9:11]
+        shield_action = action[..., 11:13]
+
+
+class SelectOneAction:
 
     def __init__(self, qfunc_model, state):
-        n_all_actions = all_actions.shape[0]
-        batch_shape = layers.shape_to_list(state.shape[:-1])
+        n_actions = qfunc_model.n_actions
+        all_actions = [
+            [1.0 if i == j else 0.0 for j in range(n_actions)]
+            for i in range(n_actions)
+        ]
 
+        batch_shape = layers.shape_to_list(state.shape[:-1])
         batched_all_actions = np.reshape(
             all_actions,
-            [n_all_actions] + [1] * len(batch_shape) + [action2vec.vector_length]
-        ) + np.zeros([n_all_actions, *batch_shape, action2vec.vector_length])
+            [n_actions] + [1] * len(batch_shape) + [n_actions]
+        ) + np.zeros([n_actions, *batch_shape, n_actions])
 
         self.all_actions = tf.constant(all_actions, dtype=tf.float32)
         self.batched_all_actions = tf.constant(batched_all_actions, dtype=tf.float32)
@@ -50,29 +82,56 @@ class SelectAction:
             tf.expand_dims(self.max_idx, -1),
         )
 
-    def call(self, feed_dict, session=None):
-        session = session or get_session()
-        return session.run(self.action, feed_dict=feed_dict)
+
+class SelectAction:
+
+    def __init__(self, qfunc_modelset, state):
+        """
+        :type qfunc_modelset: QualityFunctionModelset
+        :type state:
+        """
+        self.modelset = qfunc_modelset
+        self.state = state
+        self.select_move = SelectOneAction(qfunc_modelset.move, state)
+        self.select_rotate = SelectOneAction(qfunc_modelset.rotate, state)
+        self.select_tower_rotate = SelectOneAction(qfunc_modelset.tower_rotate, state)
+        self.select_shield = SelectOneAction(qfunc_modelset.shield, state)
+        self.select_fire = SelectOneAction(qfunc_modelset.fire, state)
+
+        self.action = tf.concat([
+            self.select_move.action,
+            self.select_rotate.action,
+            self.select_tower_rotate.action,
+            self.select_fire.action,
+            self.select_shield.action,
+        ], -1)
+        self.max_q = tf.add_n([
+            self.select_move.max_q,
+            self.select_rotate.max_q,
+            self.select_tower_rotate.max_q,
+            self.select_shield.max_q,
+            self.select_fire.max_q,
+        ]) / 5
 
 
 class ReinforcementLearning:
 
-    def __init__(self, model, batch_size=10,
+    def __init__(self, modelset, batch_size=10,
                  reward_prediction=0.97, self_play=True):
-        self.model = model
+        self.modelset = modelset
         self.batch_size = batch_size
         self.self_play = self_play
 
         emu_items = 2 if self_play else 1
         self.emu_state_ph = tf.placeholder(tf.float32, [emu_items, state2vec.vector_length])
-        self.emu_selector = SelectAction(self.model, self.emu_state_ph)
+        self.emu_selector = SelectAction(self.modelset, self.emu_state_ph)
 
         self.train_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
         self.train_next_state_ph = tf.placeholder(tf.float32, [batch_size, state2vec.vector_length])
         self.train_action_ph = tf.placeholder(tf.float32, [batch_size, action2vec.vector_length])
         self.train_reward_ph = tf.placeholder(tf.float32, [batch_size])
-        self.train_selector = SelectAction(self.model, self.train_next_state_ph)
-        self.train_qfunc = self.model.apply(self.train_state_ph, self.train_action_ph)
+        self.train_selector = SelectAction(self.modelset, self.train_next_state_ph)
+        self.train_qfunc = self.modelset.apply(self.train_state_ph, self.train_action_ph)
 
         # self.optimizer = tf.train.RMSPropOptimizer(0.001)
         self.optimizer = tf.train.AdamOptimizer()
@@ -263,15 +322,17 @@ class ReinforcementLearning:
             actions.append(act)
             states_after.append(st_after)
 
-        st_before, act, st_after = replay_memory.get_random_sample(n_rnd_entries)
-        states_before.append(st_before)
-        actions.append(act)
-        states_after.append(st_after)
+        if n_rnd_entries > 0:
+            st_before, act, st_after = replay_memory.get_random_sample(n_rnd_entries)
+            states_before.append(st_before)
+            actions.append(act)
+            states_after.append(st_after)
 
-        st_before, act, st_after = replay_memory.get_last_entries(n_last_entries)
-        states_before.append(st_before)
-        actions.append(act)
-        states_after.append(st_after)
+        if n_last_entries > 0:
+            st_before, act, st_after = replay_memory.get_last_entries(n_last_entries)
+            states_before.append(st_before)
+            actions.append(act)
+            states_after.append(st_after)
 
         states_before_sample = np.concatenate(states_before, axis=0)
         actions_sample = np.concatenate(actions, axis=0)
@@ -291,18 +352,19 @@ class ReinforcementLearning:
         })
 
     def get_emu_stats(self):
-        return self.emu_selector.max_q
+        return self.emu_selector.max_q, self.emu_selector.action
 
     def compute_reward(self, state_before, action, state_after):
         b_hp_idx = state2vec[0, 'hp_ratio']
         e_hp_idx = state2vec[1, 'hp_ratio']
         b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
         e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
-        activity_punishment = 0.001 * (
-            action[..., action2vec['tower_rotate_left']]
-            + action[..., action2vec['tower_rotate_right']]
-        )
-        return 100 * (b_hp_delta - e_hp_delta) - activity_punishment
+        # activity_punishment = 0.001 * (
+        #     action[..., action2vec['tower_rotate_left']]
+        #     + action[..., action2vec['tower_rotate_right']]
+        # )
+        # return 100 * (b_hp_delta - e_hp_delta) - activity_punishment
+        return 100 * (b_hp_delta - e_hp_delta)
         # return 10 * (1 - state_after[..., e_hp_idx])
         # e_hp_before = state_before[..., e_hp_idx]
         # e_hp_after = state_after[..., e_hp_idx]
@@ -318,7 +380,7 @@ class ReinforcementLearning:
         # return e_hp <= 0
 
     def add_emu_stats(self, stat_store, stat_values, reward):
-        max_q = stat_values
+        max_q, action = stat_values
         stat_store['reward'] += reward
         stat_store['emu_max_q'] += np.sum(max_q) / np.size(max_q)
         stat_store['n_emu'] += 1
@@ -394,28 +456,6 @@ class ReinforcementLearning:
             for key, val in averages.items():
                 print('{} = {:.3f}'.format(key, val / len(games_dict)))
             print()
-
-
-def __generate_all_actions():
-    opts = [
-        [-1, 0, +1],  # move
-        # [0],  # move
-
-        [-1, 0, +1],  # rotate
-        # [0],  # rotate
-
-        [-1, 0, +1],  # tower rotate
-
-        [0, 1],  # fire
-
-        [0, 1],  # shield
-        # [0],  # shield
-    ]
-    for mv, rt, trt, fr, sh in itertools.product(*opts):
-        ctl = BotControl(move=mv, rotate=rt, tower_rotate=trt,
-                         fire=fr, shield=sh)
-        yield action2vec(ctl)
-all_actions = np.array(list(__generate_all_actions()))
 
 
 def control_noise(ctl, noise_prob):

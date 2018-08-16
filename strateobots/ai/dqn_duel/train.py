@@ -6,7 +6,7 @@ import os
 import tensorflow as tf
 
 from strateobots import REPO_ROOT
-from strateobots.engine import BotType
+from strateobots.engine import BotType, BotControl
 from .core import get_session, ReinforcementLearning, control_noise
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
@@ -26,7 +26,7 @@ def noised(trainer_function, noise_prob):
 class Config:
     
     memory_capacity = 100000
-    memory_capacity_per_class = 3000
+    memory_capacity_per_class = 5000
 
     new_model_cls = model.classic.QualityFunctionModel
 
@@ -51,11 +51,13 @@ class Config:
         # logical_cfg=[40, 40, 20],
         # values_cfg=[(10, 20)],
 
-        # vec2d_cfg=[(7, 11)] * 10,
-        # fc_cfg=[23, 17, 13],
+        # vec2d_cfg=[(7, 11)] * 3,
+        # fc_cfg=[40, 60],
 
         # n_parts=30,
         # cfg=[4] * 10,
+
+        # cfg=[5],
 
         angle_sections=36,
         layer_sizes=[45, 40, 1]
@@ -65,13 +67,13 @@ class Config:
     sampling = dict(
         n_seq_samples=0,
         seq_sample_size=0,
-        n_rnd_entries=100,
-        n_last_entries=20
+        n_rnd_entries=120,
+        n_last_entries=0,
     )
     reward_prediction = 0.995
-    select_random_prob_decrease = 0.03
-    select_random_max_prob = 0.1
-    select_random_min_prob = 0.1
+    select_random_prob_decrease = 0.08
+    select_random_max_prob = 1
+    select_random_min_prob = -0.1
     self_play = False
 
     bot_type = BotType.Raider
@@ -86,6 +88,16 @@ class Config:
     # trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
     # trainer_function = staticmethod(noised(handcrafted.distance_attack, 0.1))
     trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
+
+
+def copy_behavior(function, fields):
+    _ctl = BotControl()
+
+    def wrapper_function(bot, enemy, ctl):
+        function(bot, enemy, _ctl)
+        for f in fields:
+            setattr(ctl, f, getattr(_ctl, f))
+    return wrapper_function
 
 
 def memory_keyfunc(state_before, action, state_after):
@@ -111,7 +123,7 @@ def main():
 
     if opts.save_dir is None:
         run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        opts.save_dir = os.path.join(REPO_ROOT, '_data', run_name)
+        opts.save_dir = os.path.join(REPO_ROOT, '_data', 'DQN', run_name)
     logs_dir = os.path.join(opts.save_dir, 'logs')
     model_dir = os.path.join(opts.save_dir, 'model', '')
     replay_dir = os.path.join(opts.save_dir, 'replay')
@@ -182,7 +194,11 @@ def main():
             )
             ai1_factory = ai.DQNDuelAI.parametrize(
                 bot_type=cfg.bot_type,
-                modes=cfg.modes
+                modes=cfg.modes,
+                trainer_function=copy_behavior(
+                    handcrafted.distance_attack,
+                    ['move', 'rotate', 'shield']
+                )
             )
             ai2_factory = ai.DQNDuelAI.parametrize(
                 bot_type=cfg.bot_type,
@@ -192,7 +208,7 @@ def main():
 
             i += 1
             rl.run(
-                frameskip=1,
+                frameskip=0,
                 max_ticks=3000,
                 world_size=1000,
                 replay_memory=replay_memory,
