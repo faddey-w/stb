@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 import contextlib
 
 from strateobots.ai.lib import layers
@@ -139,8 +140,8 @@ class BaseActionInferenceModelV2:
             self.move_last = layers.Linear('move_last', self.move_net.n_features, 3)
             self.rotate_last = layers.Linear('rotate_last', self.rotate_net.n_features, 3)
             self.tower_rotate_last = layers.Linear('tower_rotate_last', self.tower_rotate_net.n_features, 3)
-            self.fire_last = layers.Linear('fire_last', self.fire_net.n_features, 1)
-            self.shield_last = layers.Linear('shield_last', self.shield_net.n_features, 1)
+            self.fire_last = layers.Linear('fire_last', self.fire_net.n_features, 2)
+            self.shield_last = layers.Linear('shield_last', self.shield_net.n_features, 2)
 
         self.var_list = [
             *(self.common_net.var_list if self.has_common else []),
@@ -173,7 +174,7 @@ class BaseActionInferenceModelV2:
     def _create_shield_net(self, **kwargs):
         raise NotImplementedError
 
-    def apply(self, state):
+    def apply(self, state, with_exploration=False):
         state = normalize_state(state)
         classify = lambda x: tf.nn.softmax(x, -1)
         inference = ActionInferenceV2()
@@ -189,12 +190,33 @@ class BaseActionInferenceModelV2:
         inference.tower_rotate = self.tower_rotate_net.apply(state)
         inference.fire = self.fire_net.apply(state)
         inference.shield = self.shield_net.apply(state)
+
+        if with_exploration:
+            inference.explore_move = tf.placeholder(tf.float32, [self.move_net.n_features] * 2)
+            inference.explore_rotate = tf.placeholder(tf.float32, [self.rotate_net.n_features] * 2)
+            inference.explore_tower_rotate = tf.placeholder(tf.float32, [self.tower_rotate_net.n_features] * 2)
+            inference.explore_fire = tf.placeholder(tf.float32, [self.fire_net.n_features] * 2)
+            inference.explore_shield = tf.placeholder(tf.float32, [self.shield_net.n_features] * 2)
+
+            def apply_explore(control_name):
+                control_node = getattr(inference, control_name)
+                control_net = getattr(self, control_name + '_net')
+                explore_mat = getattr(inference, 'explore_' + control_name)
+                explore_mat += tf.eye(control_net.n_features)
+                control_node.optimal_features = control_node.features
+                control_node.features = layers.batch_matmul(control_node.features, explore_mat)
+            apply_explore('move')
+            apply_explore('rotate')
+            apply_explore('tower_rotate')
+            apply_explore('fire')
+            apply_explore('shield')
+
         inference.classify_nodes = dict(
             move=self.move_last.apply(inference.move.features, classify),
             rotate=self.rotate_last.apply(inference.rotate.features, classify),
             tower_rotate=self.tower_rotate_last.apply(inference.tower_rotate.features, classify),
-            fire=self.fire_last.apply(inference.fire.features, tf.sigmoid),
-            shield=self.shield_last.apply(inference.shield.features, tf.sigmoid),
+            fire=self.fire_last.apply(inference.fire.features, classify),
+            shield=self.shield_last.apply(inference.shield.features, classify),
         )
         action_prediction = combine_predictions(
             move=inference.classify_nodes['move'].out,
@@ -206,6 +228,14 @@ class BaseActionInferenceModelV2:
         with finite_assert(action_prediction, self.var_list):
             inference.action_prediction = tf.identity(action_prediction)
         return inference
+
+    def generate_exploration_feed(self, inference, strength):
+        return {
+            getattr(inference, 'explore_' + name): strength * np.random.standard_normal([
+                getattr(self, name + '_net').n_features
+            ] * 2)
+            for name in ['move', 'rotate', 'tower_rotate', 'shield', 'fire']
+        }
 
 
 class ActionInferenceV2:

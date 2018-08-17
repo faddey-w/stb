@@ -96,6 +96,10 @@ class ReplayMemory:
         :return: number of stored entries
         """
         return self._used
+    
+    @property
+    def capacity(self):
+        return self._capacity
 
     def put_entry(self, *vectors):
         """

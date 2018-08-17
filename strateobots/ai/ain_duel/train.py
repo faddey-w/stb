@@ -6,6 +6,7 @@ import contextlib
 import numpy as np
 import tensorflow as tf
 import os
+import itertools
 from math import pi
 from strateobots.engine import StbEngine, BotType, BulletModel, BotControl
 from .._base import DuelAI
@@ -63,7 +64,9 @@ def random_bot_type():
     ])
 
 
-def decode_prediction(prediction, ctl=None, ctl_list=None):
+def decode_prediction(prediction, ctl=None, ctl_list=None,
+                      move_alt=0, rotate_alt=0, tower_rotate_alt=0,
+                      shield_alt=0, fire_alt=0):
     assert prediction.ndim <= 2
     was_1d = prediction.ndim == 1
     if was_1d:
@@ -71,35 +74,45 @@ def decode_prediction(prediction, ctl=None, ctl_list=None):
         prediction = np.reshape(prediction, (1, prediction.shape[-1]))
     elif ctl_list is None:
         ctl_list = [BotControl() for _ in range(prediction.shape[0])]
-    move = -(np.argmax(prediction[..., 0:3], -1) - 1)
-    rotate = np.argmax(prediction[..., 3:6], -1) - 1
-    tower_rotate = np.argmax(prediction[..., 6:9], -1) - 1
-    fire = prediction[..., 9] > 0.5
-    shield = prediction[..., 10] > 0.5
+
+    def get_action(pred_entry, actions, alternative):
+        idx = sorted(
+            range(len(actions)),
+            key=pred_entry.__getitem__,
+            reverse=True
+        )[alternative]
+        return actions[idx]
+
     for i in range(prediction.shape[0]):
         ctl = ctl_list[i]
-        ctl.move = move[i]
-        ctl.rotate = rotate[i]
-        ctl.tower_rotate = tower_rotate[i]
-        ctl.fire = fire[i]
-        ctl.shield = shield[i]
+        pred = prediction[i]
+        ctl.move = get_action(pred[0:3], (+1, 0, -1), move_alt)
+        ctl.rotate = get_action(pred[3:6], (-1, 0, +1), rotate_alt)
+        ctl.tower_rotate = get_action(pred[6:9], (-1, 0, +1), tower_rotate_alt)
+        ctl.fire = get_action(pred[9:11], (True, False), fire_alt)
+        ctl.shield = get_action(pred[11:13], (True, False), shield_alt)
     if was_1d:
         return ctl_list[0]
     else:
         return ctl_list
 
 
-def model_based_function(model, session):
+def model_based_function(model, session, alt_dict=None, exploration_feed=None):
     state_ph = tf.placeholder(tf.float32, [1, data.state2vec.vector_length])
-    inference = model.apply(state_ph)
+    inference = model.apply(state_ph, with_exploration=exploration_feed is not None)
+    if alt_dict is None:
+        alt_dict = {}
 
     def function(engine, bot, enemy, ctl):
         bullet_b, bullet_e = find_bullets(engine, [bot, enemy])
         state = data.state2vec((bot, enemy, bullet_b, bullet_e))
-        prediction = session.run(inference.action_prediction, {state_ph: [state]})[0]
-        decode_prediction(prediction, ctl)
+        feeds = {state_ph: [state]}
+        if exploration_feed is not None:
+            feeds.update(exploration_feed)
+        prediction = session.run(inference.action_prediction, feeds)[0]
+        decode_prediction(prediction, ctl, **alt_dict)
 
-    return function
+    return function, inference
 
 
 def adopt_handcrafted_function(ai_function):
@@ -108,7 +121,7 @@ def adopt_handcrafted_function(ai_function):
     return function
 
 
-def run_one_game(function1, function2, memory, reward_func, reward_decay, frequency=1,
+def run_one_game(function1, function2, memories, reward_func, reward_decay, frequency=1,
                  self_play=False, data_dilution=1, **params):
     ai1_factory = AINDuelAI.parametrize(function=function1, **params)
     ai2_factory = AINDuelAI.parametrize(function=function2, **params)
@@ -164,10 +177,11 @@ def run_one_game(function1, function2, memory, reward_func, reward_decay, freque
             states = states[dilution_offset::data_dilution]
             actions = actions[dilution_offset::data_dilution]
             rew_cum = rew_cum[dilution_offset::data_dilution]
-        memory.put_many(states, actions, rew_cum)
+        for memory in memories:
+            memory.put_many(states, actions, rew_cum)
         return rew_cum
     rwrd = put_memory_with_reward(mem1)
-    if self_play:
+    if self_play and memories:
         put_memory_with_reward(mem2)
 
     return GameStats(
@@ -273,6 +287,7 @@ class AINTraining:
         act_diff = tf.abs(act - self.action_ph)
         self.act_same = 1 - act_diff
         eps = 0.001
+        clip = 0.15
         # self.entropy = - self.act_same * (
         # act *= act_diff
         # punishment = tf.reduce_max(self.reward_ph) - self.reward_ph
@@ -288,13 +303,15 @@ class AINTraining:
         # reward is negative!
         # so training will lead to avoiding too negative rewards
         reward = self.reward_ph - self.reward_threshold_ph
-        self.entropy = reward * tf.log(eps + (1-eps) * act_diff)
+        clipped_act_same = tf.clip_by_value(self.act_same, clip, 1-clip)
+        # self.entropy = - reward * tf.log(eps + (1-eps) * self.act_same)
+        self.entropy = - reward * tf.log(clipped_act_same)
 
-        # self.loss_vector = self.entropy
-        self.loss_vector = self.entropy * self.act_same
+        self.loss_vector = self.entropy
+        # self.loss_vector = self.entropy * self.act_same
         self.loss = tf.reduce_mean(self.loss_vector)
 
-        self.optimizer = tf.train.GradientDescentOptimizer(0.001)
+        self.optimizer = tf.train.GradientDescentOptimizer(0.003)
         # self.optimizer = tf.train.AdamOptimizer(0.001)
         # self.optimizer = tf.train.RMSPropOptimizer(0.0001)
         self.train_op = self.optimizer.minimize(self.loss, var_list=model.var_list)
@@ -366,14 +383,17 @@ class AINTraining:
 
     @contextlib.contextmanager
     def evaluate_policy_change(self, session, memory, n_batches=10):
-        holder = [None, None]
         bs = self.batch_size
         n_batches = min(n_batches, memory.used_size // bs)
-        state, action, reward = memory.get_random_sample(n_batches * bs)
-        before = self.compute_dispersion(session, state, action)
-        yield holder
-        after = self.compute_dispersion(session, state, action)
-        holder[:] = before, after
+        if n_batches > 0:
+            holder = [None, None]
+            state, action, reward = memory.get_random_sample(n_batches * bs)
+            before = self.compute_dispersion(session, state, action)
+            yield holder
+            after = self.compute_dispersion(session, state, action)
+            holder[:] = before, after
+        else:
+            yield [0.0, 0.0]
 
     def compute_dispersion(self, session, states, actions):
         changes_sum = 0
@@ -456,7 +476,7 @@ def memory_keyfunc(state, action, reward):
 def reward_function(state_before, action, state_after):
     b_hp_idx = data.state2vec[0, 'hp_ratio']
     e_hp_idx = data.state2vec[1, 'hp_ratio']
-    # return state_after[..., b_hp_idx] - state_after[..., e_hp_idx] - 0.99
+    # return state_after[..., b_hp_idx] - state_after[..., e_hp_idx]
     b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
     e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
     return 100 * (b_hp_delta - e_hp_delta)
@@ -468,6 +488,8 @@ def main():
     parser.add_argument('--no-save', action='store_false', dest='save')
     parser.add_argument('--restart', action='store_true', dest='restart')
     parser.add_argument('--debug', action='store_true', dest='debug')
+    parser.add_argument('--explore-strength', type=float, required=True)
+    parser.add_argument('--alt-prob', type=float, default=-1)
     opts = parser.parse_args()
 
     # memory = replay.BalancedMemory(
@@ -477,25 +499,37 @@ def main():
     # )
     memory = replay.ReplayMemory(
         100000,
+        # 10000,
         # 500,
         data.state2vec.vector_length,
         data.action2vec.vector_length,
         1,
     )
+    eval_memory = replay.ReplayMemory(
+        100000,
+        data.state2vec.vector_length,
+        data.action2vec.vector_length,
+        1,
+    )
     data_path = '_data/AIN-data/' + opts.name
+    eval_data_path = data_path + '/eval'
     model_path = '_data/AIN/' + opts.name
+    logs_path = '_data/AIN-logs/{}/'.format(opts.name)
     if opts.restart:
         shutil.rmtree(model_path)
         shutil.rmtree(data_path)
+        shutil.rmtree(logs_path)
     try:
         if isinstance(memory, replay.BalancedMemory):
             memory.load(data_path, eval)
         else:
             memory.load(data_path)
+        eval_memory.load(eval_data_path)
     except:
         pass
 
-    REWARD_THRESHOLD_SIGMA = +2
+    REWARD_THRESHOLD_SIGMA = 0
+    enable_reward_threshold = True
 
     try:
         mgr = model_saving.ModelManager.load_existing_model(model_path)
@@ -506,6 +540,7 @@ def main():
     except:
         print("NEW model")
         os.makedirs(data_path, exist_ok=False)
+        os.makedirs(eval_data_path, exist_ok=False)
         os.makedirs(model_path, exist_ok=False)
         tf.reset_default_graph()
         # model = modellib.vec2d_fc_v2.ActionInferenceModel(
@@ -529,11 +564,11 @@ def main():
         #     angle_sections=10,
         # )
         model = modellib.classic_v2.ActionInferenceModel(
-            move=dict(layer_sizes=[5, 5], n_angles=10),
-            rotate=dict(layer_sizes=[], n_angles=5),
-            tower_rotate=dict(layer_sizes=[], n_angles=5),
-            fire=dict(layer_sizes=[5, 5], n_angles=5),
-            shield=dict(layer_sizes=[5, 5], n_angles=5),
+            move=dict(layer_sizes=[15, 5], n_angles=30),
+            rotate=dict(layer_sizes=[15], n_angles=30),
+            tower_rotate=dict(layer_sizes=[15], n_angles=30),
+            fire=dict(layer_sizes=[15, 5], n_angles=30),
+            shield=dict(layer_sizes=[5, 5], n_angles=30),
         )
         # model = modellib.residual.ActionInferenceModel(
         #     res_cfg=[(50, 100)] * 6,
@@ -543,61 +578,86 @@ def main():
         session = tf.Session()
         mgr.init_vars(session)
 
-    logs_path = '_data/AIN-logs/{}/'.format(opts.name)
     os.makedirs(logs_path, exist_ok=True)
     stats_writer = GameStats.SummaryTensors(session, logs_path)
 
     training = AINTraining(model, batch_size=1000)
     session.run(training.init_op)
 
-    ai_func = model_based_function(model, session)
     train_func_shortrange = adopt_handcrafted_function(handcrafted.short_range_attack)
     train_func_longrange = adopt_handcrafted_function(handcrafted.distance_attack)
     ai2_funcs = {
         # 'NN': noised(ai_func, 0.01),
-        'NN': ai_func,
+        'NN': model_based_function(model, session)[0],
         'MA': train_func_shortrange,
-        # 'DA': train_func_longrange,
+        'DA': train_func_longrange,
     }
+
+    _alt_keys = [slot + '_alt' for slot in BotControl.__slots__]
+    alternatives = [
+        dict(zip(_alt_keys, alt_indices))
+        for alt_indices in itertools.product(*map(range, [3, 3, 3, 2, 2]))
+    ]
+    normal_ai_func = model_based_function(model, session)[0]
+    altdict = {}
+    alt_ai_func = model_based_function(model, session, altdict)[0]
+    explore_feed = {}
+    explore_ai_func, explore_inference = model_based_function(model, session, exploration_feed=explore_feed)
 
     N_GAMES = 30000
     # N_GAMES = 200
     statstr = ''
     avg_dmg = 0.0
     reward_threshold = 0
+
     for i in range(N_GAMES):
         if opts.debug:
             memory.trunc(0)
-        # ai1_func_name = random.choice(list(ai2_funcs.keys()))
-        ai1_func_name = 'NN'
-        # ai2_func_name = random.choice(list(ai2_funcs.keys()))
-        ai2_func_name = 'MA'
+
+        if i % 5 > 0:
+            if random.random() < opts.alt_prob:
+                altdict.clear()
+                idx = random.choice(range(len(alternatives)))
+                altdict.update(alternatives[idx])
+                ai_func = alt_ai_func
+                mode_name = 'alt_{:02d}'.format(idx)
+            else:
+                explore_feed.clear()
+                explore_feed.update(model.generate_exploration_feed(
+                    explore_inference,
+                    opts.explore_strength
+                ))
+                ai_func = explore_ai_func
+                mode_name = 'explor'
+            evaluation = False
+        else:
+            evaluation = True
+            mode_name = ' EVAL '
+            ai_func = normal_ai_func
+
         stats = run_one_game(
-            ai2_funcs[ai1_func_name],
-            ai2_funcs[ai2_func_name],
-            memory,
-            reward_decay=0.995,
+            ai_func,
+            ai2_funcs['MA'],
+            [memory, eval_memory] if evaluation else [memory],
+            reward_decay=0.97,
             reward_func=reward_function,
-            frequency=4,
+            frequency=2,
             bot_type=BotType.Raider,
-            self_play=(ai2_func_name == 'NN'),
-            data_dilution=4,
+            self_play=False,
+            data_dilution=1,
         )
         mgr.step_counter += 1
-        stats_writer.write_summaries(mgr.step_counter, stats)
-        avg_dmg = 0.95*avg_dmg + 0.05*(1-stats.hp2)
-        logentry = 'GAME#{}: {} {}-vs-{}, ' \
-                   'hp1={:.2f} hp2={:.2f},  ' \
-                   'avg_dmg={:.3f}'.format(
-                        mgr.step_counter,
-                        'win' if stats.win else 'lost',
-                        ai1_func_name,
-                        ai2_func_name,
-                        stats.hp1, stats.hp2,
-                        avg_dmg,
-                    )
+        if evaluation:
+            stats_writer.write_summaries(mgr.step_counter, stats)
+            avg_dmg = 0.9*avg_dmg + 0.1*(1-stats.hp2)
+        logentry = 'GAME#{}: {}{}, hp1={:.2f} hp2={:.2f}'.format(
+            mgr.step_counter,
+            ' win' if stats.win else 'lost',
+            ' ({})'.format(mode_name),
+            stats.hp1, stats.hp2,
+        )
 
-        if i % 20 == 0:
+        if enable_reward_threshold and i % 20 == 0:
             _, _, all_rewards = memory.get_last_entries(memory.used_size)
             n_entries = np.size(all_rewards)
             mean = np.sum(all_rewards) / n_entries
@@ -612,16 +672,19 @@ def main():
             import code
             code.interact(local=dict(**globals(), **locals()))
 
-        can_train = memory.used_size >= 2 * training.batch_size
+        can_train = memory.used_size >= 5 * training.batch_size
 
         if can_train:
             # import pdb; pdb.set_trace()
-            with training.evaluate_policy_change(session, memory) as change:
+            with training.evaluate_policy_change(session, eval_memory) as change:
                 train_log = training.train_n_steps(
-                    session, memory, 99, reward_threshold=reward_threshold)
+                    session, memory, 25, reward_threshold=reward_threshold)
             before, after = change
-            dispersion_log = 'D: {:.5f} -> {:.5f}'.format(before, after)
+            sign = '>' if before > after else '<'
+            dispersion_log = 'D: {:.5f} -{} {:.5f}'.format(before, sign, after)
             logentry = '{}   {}   {}'.format(logentry, train_log, dispersion_log)
+        if evaluation:
+            logentry += ',  avg_dmg={:.3f}'.format(avg_dmg)
 
         print(logentry)
 
@@ -629,6 +692,7 @@ def main():
             if opts.save:
                 mgr.save_vars(session, inc_step=False)
                 memory.save(data_path)
+                eval_memory.save(eval_data_path)
                 print("Save model at step", mgr.step_counter)
 
 

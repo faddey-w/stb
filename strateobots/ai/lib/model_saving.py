@@ -29,6 +29,7 @@ class ModelManager:
             model.var_list,
             pad_step_number=True,
             save_relative_paths=True,
+            keep_checkpoint_every_n_hours=0.5
         )
         self.step_counter = 0
 

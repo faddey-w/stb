@@ -386,6 +386,7 @@ class StbEngine:
                 self._explosions.append(
                     ExplosionModel(bot.x, bot.y, tps, 2*bot_radius))
                 self._n_bots[bot.team] -= 1
+                bot.hp = 0
         self._bots = next_bots
 
         # update explosions
