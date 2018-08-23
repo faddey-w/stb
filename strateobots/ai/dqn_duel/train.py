@@ -6,29 +6,22 @@ import os
 import tensorflow as tf
 
 from strateobots import REPO_ROOT
-from strateobots.engine import BotType, BotControl
-from .core import get_session, ReinforcementLearning, control_noise
+from strateobots.engine import BotType
+from .core import ReinforcementLearning, ModelbasedFunction
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
-from . import ai, model
+from . import ai, model, runner
 
 tf.reset_default_graph()
 log = logging.getLogger(__name__)
 
 
-def noised(trainer_function, noise_prob):
-    def function(bot, enemy, ctl):
-        trainer_function(bot, enemy, ctl)
-        control_noise(ctl, noise_prob)
-    return function
-
-
 class Config:
     
     memory_capacity = 100000
-    memory_capacity_per_class = 5000
 
-    new_model_cls = model.classic.QualityFunctionModel
+    new_model_cls = model.classic.QualityFunctionModelset.AllTheSame
+    # new_model_cls = model.eventbased.QualityFunctionModelset.AllTheSame
 
     model_params = dict(
         # coord_cfg=[8] * 4,
@@ -49,7 +42,7 @@ class Config:
         # linear_cfg=[(30, 50), (30, 50), (20, 20)],
         # linear_cfg=[(30, 50), (30, 50), (30, 50), (30, 50), (20, 20)],
         # logical_cfg=[40, 40, 20],
-        # values_cfg=[(10, 20)],
+        # values_cfg=[(10, 20), (10, 20)],
 
         # vec2d_cfg=[(7, 11)] * 3,
         # fc_cfg=[40, 60],
@@ -59,8 +52,8 @@ class Config:
 
         # cfg=[5],
 
-        angle_sections=36,
-        layer_sizes=[45, 40, 1]
+        angle_sections=20,
+        layer_sizes=[50, 50, 50, 1]
     )
 
     batch_size = 120
@@ -70,47 +63,42 @@ class Config:
         n_rnd_entries=120,
         n_last_entries=0,
     )
-    reward_prediction = 0.995
-    select_random_prob_decrease = 0.08
-    select_random_max_prob = 1
-    select_random_min_prob = -0.1
-    self_play = False
+    reward_prediction = 0.97
+    steps_between_games = 100
 
     bot_type = BotType.Raider
-        
-    modes = [
-        # ai.NotMovingMode(),
-        # ai.LocateAtCircleMode(),
-        # ai.NoShieldMode(),
-        # ai.NotBodyRotatingMode(),
-        # ai.BackToCenter(),
-    ]
-    # trainer_function = staticmethod(noised(handcrafted.turret_behavior, 0.1))
-    # trainer_function = staticmethod(noised(handcrafted.distance_attack, 0.1))
-    trainer_function = staticmethod(noised(handcrafted.short_range_attack, 0.1))
 
 
-def copy_behavior(function, fields):
-    _ctl = BotControl()
+class GameReporter:
 
-    def wrapper_function(bot, enemy, ctl):
-        function(bot, enemy, _ctl)
-        for f in fields:
-            setattr(ctl, f, getattr(_ctl, f))
-    return wrapper_function
+    def __init__(self):
+        self.step = 0
+        self.last_loss = 0
+        self.final_hp1 = None
+        self.final_hp2 = None
 
+        self.final_hp1_ph = tf.placeholder(tf.float32)
+        self.final_hp2_ph = tf.placeholder(tf.float32)
+        self.summaries = tf.summary.merge([
+            tf.summary.scalar('hp1', self.final_hp1_ph),
+            tf.summary.scalar('hp2', self.final_hp2_ph),
+        ])
 
-def memory_keyfunc(state_before, action, state_after):
-    x0 = state_before[state2vec[0, 'x']]
-    y0 = state_before[state2vec[0, 'y']]
-    x1 = state_before[state2vec[1, 'x']]
-    y1 = state_before[state2vec[1, 'y']]
-    x_flag = x0 > x1
-    y_flag = y0 > y1
-    d_flag = ((x1 - x0) ** 2 + (y1 - y0) ** 2) > 200 ** 2
-    e_dmg = state_before[state2vec[1, 'hp_ratio']] - state_after[state2vec[1, 'hp_ratio']]
-    b_dmg = state_before[state2vec[0, 'hp_ratio']] - state_after[state2vec[0, 'hp_ratio']]
-    return x_flag, y_flag, d_flag, e_dmg > 0.001, b_dmg > 0.001
+    def __call__(self, engine):
+        if engine.is_finished:
+            print('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
+                self.step, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio,
+                self.last_loss,
+            ))
+            self.final_hp1 = engine.ai1.bot.hp_ratio
+            self.final_hp2 = engine.ai2.bot.hp_ratio
+
+    def write_summaries(self, session, writer):
+        sumry = session.run(self.summaries, {
+            self.final_hp1_ph: self.final_hp1,
+            self.final_hp2_ph: self.final_hp2,
+        })
+        writer.add_summary(sumry, self.step)
 
 
 def main():
@@ -133,7 +121,7 @@ def main():
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
 
-    sess = get_session()
+    sess = tf.Session()
     try:
         model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
         model_mgr.load_vars(sess)
@@ -143,92 +131,79 @@ def main():
         model = cfg.new_model_cls(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
-    # replay_memory = replay.ReplayMemory(
-    #     cfg.memory_capacity,
-    #     state2vec.vector_length,
-    #     action2vec.vector_length,
-    #     state2vec.vector_length,
-    # )
-    replay_memory = replay.BalancedMemory(
-        memory_keyfunc,
-        cfg.memory_capacity_per_class,
-        [state2vec.vector_length,
-         action2vec.vector_length,
-         state2vec.vector_length]
+    replay_memory = replay.ReplayMemory(
+        cfg.memory_capacity,
+        state2vec.vector_length,
+        action2vec.vector_length,
+        state2vec.vector_length,
     )
-    rl = ReinforcementLearning(
-        model,
-        batch_size=cfg.batch_size,
-        reward_prediction=cfg.reward_prediction,
-        self_play=cfg.self_play,
-    )
-    sess.run(rl.init_op)
     try:
         replay_memory.load(replay_dir)
         log.info('replay memory buffer loaded from %s', replay_dir)
     except FileNotFoundError:
-        log.info('collecting new replay memory buffer')
+        log.info('collect new replay memory buffer')
 
+    log.info('construct computation graphs')
+    rl = ReinforcementLearning(
+        model,
+        batch_size=cfg.batch_size,
+        reward_prediction=cfg.reward_prediction,
+    )
+    nn_func = ModelbasedFunction(model, sess)
+
+    log.info('initialize model variables')
+    sess.run(rl.init_op)
+
+    log.info('start training')
     try:
         i = model_mgr.step_counter
 
         if opts.save:
-            emu_writer = tf.summary.FileWriter(
-                os.path.join(logs_dir, 'emu'),
-                sess.graph
-            )
-            train_writer = tf.summary.FileWriter(
+            log_writer = tf.summary.FileWriter(
                 os.path.join(logs_dir, 'train'),
                 sess.graph
             )
         else:
-            emu_writer = None
-            train_writer = None
+            log_writer = None
+
+        reporter = GameReporter()
 
         while True:
-            for mode in cfg.modes:
-                mode.reset()
-            select_random_prob = max(
-                cfg.select_random_min_prob,
-                cfg.select_random_max_prob - cfg.select_random_prob_decrease * model_mgr.step_counter
-            )
-            ai1_factory = ai.DQNDuelAI.parametrize(
-                bot_type=cfg.bot_type,
-                modes=cfg.modes,
-                trainer_function=copy_behavior(
-                    handcrafted.distance_attack,
-                    ['move', 'rotate', 'shield']
-                )
-            )
-            ai2_factory = ai.DQNDuelAI.parametrize(
-                bot_type=cfg.bot_type,
-                modes=cfg.modes,
-                trainer_function=cfg.trainer_function if not cfg.self_play else None,
-            )
 
-            i += 1
-            rl.run(
-                frameskip=0,
-                max_ticks=3000,
-                world_size=1000,
+            reporter.step = i
+            runner.run_one_game(
                 replay_memory=replay_memory,
-                ai1_cls=ai1_factory,
-                ai2_cls=ai2_factory,
-                n_games=1,
-                select_random_prob=select_random_prob,
-                emu_writer=emu_writer,
-                train_writer=train_writer,
-                **cfg.sampling
+                ai1_func=nn_func,
+                ai2_func=handcrafted.short_range_attack,
+                report=reporter,
+                frames_per_action=3,
             )
+            reporter.last_loss = 0
             if opts.save:
+                reporter.write_summaries(sess, log_writer)
+
+            for _ in range(cfg.steps_between_games):
+                i += 1
+                [loss, sumry] = rl.do_train_step(
+                    sess, replay_memory,
+                    extra_tensors=[
+                        rl.total_loss,
+                        rl.summaries,
+                    ],
+                    **cfg.sampling,
+                )
+                log_writer.add_summary(sumry, i)
+                reporter.last_loss += loss
+            reporter.last_loss /= cfg.steps_between_games
+
+            if opts.save:
+                model_mgr.step_counter = i
                 model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
             if opts.max_games is not None and i >= opts.max_games:
                 break
     except KeyboardInterrupt:
-        if opts.save:
-            model_mgr.save_vars(sess)
-            replay_memory.save(replay_dir)
+        pass
 
 
 if __name__ == '__main__':

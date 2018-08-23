@@ -404,10 +404,9 @@ class StbEngine:
             win_reached = sum(1 for n in self._n_bots.values() if n > 0) <= 1
             if win_reached:
                 self._win_reached_at = self.nticks
-            return self.nticks >= self.max_ticks or self.error
-        else:
-            return self.nticks >= self._win_reached_at + self._wait_after_win \
-                   or self.nticks >= self.max_ticks or self.error
+        return self._win_reached_at is not None \
+               and self.nticks >= self._win_reached_at + self._wait_after_win \
+               or self.nticks >= self.max_ticks or self.error
 
     @property
     def time(self):

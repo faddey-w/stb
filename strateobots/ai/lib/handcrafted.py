@@ -3,7 +3,7 @@ from math import pi, acos, sqrt, asin, copysign, cos, sin
 from strateobots.engine import dist_points, vec_len, dist_line, BOT_RADIUS, vec_dot
 
 
-def short_range_attack(bot, enemy, ctl):
+def short_range_attack(bot, enemy, ctl, engine=None):
     if None in (bot, enemy):
         return
 
@@ -45,7 +45,7 @@ def short_range_attack(bot, enemy, ctl):
     ctl.fire = should_fire(bot, enemy, dist)
 
 
-def distance_attack(bot, enemy, ctl):
+def distance_attack(bot, enemy, ctl, engine=None):
     if None in (bot, enemy):
         return
     max_ahead_v = 100
@@ -77,7 +77,7 @@ def distance_attack(bot, enemy, ctl):
     ctl.fire = should_fire(bot, enemy, dist) and not enemy.has_shield
 
 
-def turret_behavior(bot, enemy, ctl):
+def turret_behavior(bot, enemy, ctl, engine=None):
     angl = get_angle(bot, enemy)
     rot = navigate_shortest(bot, angl, with_gun=True)
     ctl.tower_rotate = rot

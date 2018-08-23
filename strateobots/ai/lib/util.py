@@ -1,4 +1,5 @@
 import tensorflow as tf
+from strateobots.engine import BulletModel
 from .data import state2vec
 
 
@@ -43,3 +44,39 @@ def normalize_state(state):
     normalizer = tf.reduce_min(normalizer, 0)
     state *= normalizer
     return state
+
+
+def find_bullets(engine, bots):
+    bullets = {
+        bullet.origin_id: bullet
+        for bullet in engine.iter_bullets()
+    }
+    return [
+        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0))
+        for bot in bots
+    ]
+
+
+def shape_to_list(shape):
+    if hasattr(shape, 'as_list'):
+        return shape.as_list()
+    else:
+        return list(shape)
+
+
+def add_batch_shape(x, batch_shape):
+    if hasattr(batch_shape, 'as_list'):
+        batch_shape = batch_shape.as_list()
+    tail_shape = x.get_shape().as_list()
+    newshape = [1] * len(batch_shape) + tail_shape
+    x = tf.reshape(x, newshape)
+    newshape = batch_shape + tail_shape
+    return x * tf.ones(newshape)
+
+
+def select_features(tensor, mapper, *feature_names):
+    feature_tensors = []
+    for ftr_name in feature_names:
+        idx = mapper[ftr_name]
+        feature_tensors.append(tensor[..., idx:idx+1])
+    return tf.concat(feature_tensors, -1)

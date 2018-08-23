@@ -2,7 +2,8 @@ import tensorflow as tf
 from math import pi
 
 from strateobots.ai.lib import layers
-from strateobots.ai.lib.data import state2vec, action2vec
+from strateobots.ai.lib.data import state2vec
+from strateobots.ai.dqn_duel import core
 
 ANGLE_FEATURES = (
     (0, 'orientation'),
@@ -32,33 +33,27 @@ OTHER_FEATURES = (
 )
 
 
-class QualityFunctionModel:
+class ClassicModel:
 
-    def __new__(cls, **kwargs):
-        self = super().__new__(cls)
-        self.construct_params = kwargs
-        return self
-
-    def __init__(self, layer_sizes, angle_sections):
-        self.name = 'QFuncClassic'
+    def __init__(self, n_actions, layer_sizes, angle_sections):
         self.var_list = []
+        self.n_actions = n_actions
 
-        with tf.variable_scope(self.name):
-            self.layers = []
-            in_dim = (
-                + (angle_sections + 1 + 1)  # vector from bot to enemy
-                + (angle_sections + 1 + 1)  # vector from enemy to our bullet
-                + (angle_sections + 1 + 1)  # vector from bot to enemy's bullet
-                + 2 * (angle_sections + 1 + 1)  # 2 bot velocity vectors
-                + (angle_sections + 1) * len(ANGLE_FEATURES)
-                + len(RANGE_FEATURES)
-                + len(OTHER_FEATURES)
-                + action2vec.vector_length
-            )
-            for i, out_dim in enumerate(layer_sizes):
-                node = layers.ResidualV2('L{}'.format(i), in_dim, out_dim, out_dim)
-                self.layers.append(node)
-                in_dim = out_dim
+        self.layers = []
+        in_dim = (
+            + (angle_sections + 1 + 1)  # vector from bot to enemy
+            + (angle_sections + 1 + 1)  # vector from enemy to our bullet
+            + (angle_sections + 1 + 1)  # vector from bot to enemy's bullet
+            + 2 * (angle_sections + 1 + 1)  # 2 bot velocity vectors
+            + (angle_sections + 1) * len(ANGLE_FEATURES)
+            + len(RANGE_FEATURES)
+            + len(OTHER_FEATURES)
+            + n_actions
+        )
+        for i, out_dim in enumerate(layer_sizes):
+            node = layers.ResidualV2('L{}'.format(i), in_dim, out_dim, out_dim)
+            self.layers.append(node)
+            in_dim = out_dim
 
         self.angle_sections = angle_sections
 
@@ -75,11 +70,11 @@ class QualityFunctionModel:
 class QualityFunction:
     def __init__(self, model, state, action):
         """
-        :type model: QualityFunctionModel
+        :type model: ClassicModel
         :param state: [..., state_vector_len]
         :param action: [..., action_vector_len]
         """
-        self.model = model  # type: QualityFunctionModel
+        self.model = model  # type: ClassicModel
         self.state = state  # type: tf.Tensor
         self.action = action
         nodes = []
@@ -175,13 +170,12 @@ class QualityFunction:
     def get_quality(self):
         return self.quality
 
-    def call(self, state, action, session):
-        return session.run(self.quality, feed_dict={
-            self.state: state,
-            self.action: action,
-        })
 
-Model = QualityFunctionModel
+class QualityFunctionModelset(core.QualityFunctionModelset):
+
+    node_cls = ClassicModel
+    name = 'QFuncClassic'
+Model = QualityFunctionModelset
 
 
 def selector(tensor):

@@ -1,54 +1,44 @@
-import logging
 
 import tensorflow as tf
-from math import pi
 
-from strateobots.ai.lib import layers
-from strateobots.ai.lib.data import action2vec, state2vec
-
-log = logging.getLogger(__name__)
+from strateobots.ai.lib import layers, util
+from strateobots.ai.lib.data import state2vec
+from strateobots.ai.dqn_duel import core
 
 
-class QualityFunctionModel:
+class EventbasedModel:
 
-    def __new__(cls, **kwargs):
-        self = super().__new__(cls)
-        self.construct_params = kwargs
-        return self
-
-    def __init__(self, linear_cfg, logical_cfg, values_cfg):
+    def __init__(self, n_actions, linear_cfg, logical_cfg, values_cfg):
         assert linear_cfg[-1][1] == logical_cfg[-1] == values_cfg[-1][1]
-        self.name = 'QFuncEB'
+        self.n_actions = n_actions
         self.var_list = []
 
-        with tf.variable_scope(self.name):
-            n_lin0 = state2vec.vector_length + action2vec.vector_length + 2
-            # n_lin0 = state2vec.vector_length + action2vec.vector_length + 1
+        n_lin0 = state2vec.vector_length + n_actions + 2
 
-            self.linear = []
-            in_dim = n_lin0
-            for i, (hidden_dim, out_dim) in enumerate(linear_cfg):
-                node = layers.ResidualV2('Lin{}'.format(i), in_dim,
-                                         hidden_dim, out_dim)
-                self.linear.append(node)
-                in_dim = out_dim
+        self.linear = []
+        in_dim = n_lin0
+        for i, (hidden_dim, out_dim) in enumerate(linear_cfg):
+            node = layers.ResidualV2('Lin{}'.format(i), in_dim,
+                                     hidden_dim, out_dim)
+            self.linear.append(node)
+            in_dim = out_dim
 
-            self.logical = []
-            in_dim = n_lin0
-            for i, out_dim in enumerate(logical_cfg):
-                node = layers.Linear('Log{}'.format(i), in_dim, out_dim)
-                self.logical.append(node)
-                in_dim = out_dim
+        self.logical = []
+        in_dim = n_lin0
+        for i, out_dim in enumerate(logical_cfg):
+            node = layers.Linear('Log{}'.format(i), in_dim, out_dim)
+            self.logical.append(node)
+            in_dim = out_dim
 
-            self.values = []
-            in_dim = n_lin0
-            for i, (hidden_dim, out_dim) in enumerate(values_cfg):
-                node = layers.ResidualV2('Val{}'.format(i), in_dim,
-                                         hidden_dim, out_dim)
-                self.values.append(node)
-                in_dim = out_dim
+        self.values = []
+        in_dim = n_lin0
+        for i, (hidden_dim, out_dim) in enumerate(values_cfg):
+            node = layers.ResidualV2('Val{}'.format(i), in_dim,
+                                     hidden_dim, out_dim)
+            self.values.append(node)
+            in_dim = out_dim
 
-            self.event_weight = layers.Linear('EvtW', values_cfg[-1][1], 1)
+        self.event_weight = layers.Linear('EvtW', values_cfg[-1][1], 1)
 
         self.var_list.extend(
             var
@@ -69,7 +59,7 @@ class QualityFunctionModel:
 class QualityFunction:
     def __init__(self, model, state, action):
         """
-        :type model: QualityFunctionModel
+        :type model: EventbasedModel
         :param state: [..., state_vector_len]
         :param action: [..., action_vector_len]
         """
@@ -88,16 +78,16 @@ class QualityFunction:
         # import pdb; pdb.set_trace()
         state *= normalizer
         state += tf.zeros_like(action[..., :1])
-        self.model = model  # type: QualityFunctionModel
+        self.model = model  # type: EventbasedModel
         self.state = state  # type: tf.Tensor
         self.action = action
 
-        x0 = select_features(state, state2vec, (0, 'x'))
-        y0 = select_features(state, state2vec, (0, 'y'))
-        x1 = select_features(state, state2vec, (1, 'x'))
-        y1 = select_features(state, state2vec, (1, 'y'))
+        x0 = util.select_features(state, state2vec, (0, 'x'))
+        y0 = util.select_features(state, state2vec, (0, 'y'))
+        x1 = util.select_features(state, state2vec, (1, 'x'))
+        y1 = util.select_features(state, state2vec, (1, 'y'))
         to_enemy = tf.atan2(y1 - y0, x1-x0)
-        load = select_features(state, state2vec, (0, 'load'))
+        load = util.select_features(state, state2vec, (0, 'load'))
         shot_ready = tf.cast(load > 0.99, tf.float32)
 
         self.vector0 = tf.concat([
@@ -144,17 +134,9 @@ class QualityFunction:
     def get_quality(self):
         return self.quality
 
-    def call(self, state, action, session):
-        return session.run(self.quality, feed_dict={
-            self.state: state,
-            self.action: action,
-        })
-Model = QualityFunctionModel
 
+class QualityFunctionModelset(core.QualityFunctionModelset):
 
-def select_features(tensor, mapper, *feature_names):
-    feature_tensors = []
-    for ftr_name in feature_names:
-        idx = mapper[ftr_name]
-        feature_tensors.append(tensor[..., idx:idx+1])
-    return tf.concat(feature_tensors, -1)
+    node_cls = EventbasedModel
+    name = 'QFuncEB'
+Model = QualityFunctionModelset

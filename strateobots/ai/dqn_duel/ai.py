@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType, BulletModel
-from .core import SelectAction, get_session
+from .core import SelectAction
 from .._base import DuelAI
 from ..lib import model_saving
 from ..lib.data import state2vec, action2vec
@@ -176,7 +176,8 @@ class RunAI(DQNDuelAI):
         def __init__(self):
             self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
             self.model_mgr = model_saving.ModelManager.load_existing_model(self.model_path)
-            self.model_mgr.load_vars(get_session())
+            self.session = tf.Session()
+            self.model_mgr.load_vars(self.session)
             self.selector = SelectAction(
                 self.model_mgr.model,
                 self.state_ph,

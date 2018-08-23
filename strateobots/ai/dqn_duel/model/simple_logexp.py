@@ -3,31 +3,26 @@ import logging
 import tensorflow as tf
 
 from strateobots.ai.lib import layers
-from strateobots.ai.lib.data import action2vec, state2vec
+from strateobots.ai.lib.data import state2vec
+from .. import core
 
 log = logging.getLogger(__name__)
 
 
-class QualityFunctionModel:
+class SimpleLogExpModel:
 
-    def __new__(cls, **kwargs):
-        self = super().__new__(cls)
-        self.construct_params = kwargs
-        return self
-
-    def __init__(self, cfg):
-        self.name = 'QFuncSimpleLogExp'
+    def __init__(self, n_actions, cfg):
         self.var_list = []
+        self.n_actions = n_actions
 
-        with tf.variable_scope(self.name):
-            self.nodes = []
-            in_dim = 2 * state2vec.vector_length + action2vec.vector_length + 1
-            for i, out_dim in enumerate(cfg):
-                node = layers.Linear('Lin{}'.format(i), in_dim, out_dim)
-                self.nodes.append(node)
-                in_dim = out_dim
+        self.nodes = []
+        in_dim = 2 * state2vec.vector_length + n_actions + 1
+        for i, out_dim in enumerate(cfg):
+            node = layers.Linear('Lin{}'.format(i), in_dim, out_dim)
+            self.nodes.append(node)
+            in_dim = out_dim
 
-            self.regress = layers.Linear('Regress', in_dim, 1)
+        self.regress = layers.Linear('Regress', in_dim, 1)
 
         self.var_list.extend(
             var
@@ -42,7 +37,7 @@ class QualityFunctionModel:
 class QualityFunction:
     def __init__(self, model, state, action):
         """
-        :type model: QualityFunctionModel
+        :type model: SimpleLogExpModel
         :param state: [..., state_vector_len]
         :param action: [..., action_vector_len]
         """
@@ -60,7 +55,7 @@ class QualityFunction:
         normalizer = tf.reduce_min(normalizer, 0)
         state *= normalizer
         state += tf.zeros_like(action[..., :1])
-        self.model = model  # type: QualityFunctionModel
+        self.model = model  # type: SimpleLogExpModel
         self.state = state  # type: tf.Tensor
         self.action = action
         self.state_log = tf.log(0.1 + tf.abs(state))
@@ -92,12 +87,6 @@ class QualityFunction:
     def get_quality(self):
         return self.quality
 
-    def call(self, state, action, session):
-        return session.run(self.quality, feed_dict={
-            self.state: state,
-            self.action: action,
-        })
-
 
 def select_features(tensor, mapper, *feature_names):
     feature_tensors = []
@@ -105,3 +94,9 @@ def select_features(tensor, mapper, *feature_names):
         idx = mapper[ftr_name]
         feature_tensors.append(tensor[..., idx:idx+1])
     return tf.concat(feature_tensors, -1)
+
+
+class QualityFunctionModelset(core.QualityFunctionModelset):
+
+    node_cls = SimpleLogExpModel
+    name = 'QFuncSimpleLogExp'
