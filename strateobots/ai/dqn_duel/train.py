@@ -103,11 +103,15 @@ class GameReporter:
 
 
 def main():
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
+
     try:
         with open("run-cmdline.txt") as f:
             cmdline = shlex.split(f.read().strip(), comments=True)
-    except:
+        log.info("Loaded cmdline: %s", cmdline)
+    except Exception as exc:
         cmdline = None
+        log.info("Using passed cmdline due to: %r", exc)
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-save', action='store_false', dest='save')
@@ -122,8 +126,6 @@ def main():
     logs_dir = os.path.join(opts.save_dir, 'logs')
     model_dir = os.path.join(opts.save_dir, 'model', '')
     replay_dir = os.path.join(opts.save_dir, 'replay')
-
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
