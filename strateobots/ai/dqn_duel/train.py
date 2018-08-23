@@ -2,6 +2,7 @@ import argparse
 import datetime
 import logging
 import os
+import shlex
 
 import tensorflow as tf
 
@@ -86,7 +87,7 @@ class GameReporter:
 
     def __call__(self, engine):
         if engine.is_finished:
-            print('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
+            log.info('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
                 self.step, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio,
                 self.last_loss,
             ))
@@ -102,11 +103,17 @@ class GameReporter:
 
 
 def main():
+    try:
+        with open("run-cmdline.txt") as f:
+            cmdline = shlex.split(f.read().strip(), comments=True)
+    except:
+        cmdline = None
+
     parser = argparse.ArgumentParser()
     parser.add_argument('--no-save', action='store_false', dest='save')
     parser.add_argument('--save-dir', default=None)
     parser.add_argument('--max-games', default=None, type=int)
-    opts = parser.parse_args()
+    opts = parser.parse_args(cmdline)
     cfg = Config()
 
     if opts.save_dir is None:
@@ -116,7 +123,7 @@ def main():
     model_dir = os.path.join(opts.save_dir, 'model', '')
     replay_dir = os.path.join(opts.save_dir, 'replay')
 
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
