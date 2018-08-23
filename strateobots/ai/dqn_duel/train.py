@@ -102,30 +102,16 @@ class GameReporter:
         writer.add_summary(sumry, self.step)
 
 
-def main():
+def entrypoint(save_model, save_logs, save_dir, max_games):
     logging.basicConfig(level=logging.INFO, format='%(message)s')
-
-    try:
-        with open("run-cmdline.txt") as f:
-            cmdline = shlex.split(f.read().strip(), comments=True)
-        log.info("Loaded cmdline: %s", cmdline)
-    except Exception as exc:
-        cmdline = None
-        log.info("Using passed cmdline due to: %r", exc)
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--no-save', action='store_false', dest='save')
-    parser.add_argument('--save-dir', default=None)
-    parser.add_argument('--max-games', default=None, type=int)
-    opts = parser.parse_args(cmdline)
     cfg = Config()
 
-    if opts.save_dir is None:
+    if save_dir is None:
         run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        opts.save_dir = os.path.join(REPO_ROOT, '_data', 'DQN', run_name)
-    logs_dir = os.path.join(opts.save_dir, 'logs')
-    model_dir = os.path.join(opts.save_dir, 'model', '')
-    replay_dir = os.path.join(opts.save_dir, 'replay')
+        save_dir = os.path.join(REPO_ROOT, '_data', 'DQN', run_name)
+    logs_dir = os.path.join(save_dir, 'logs')
+    model_dir = os.path.join(save_dir, 'model', '')
+    replay_dir = os.path.join(save_dir, 'replay')
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
@@ -167,7 +153,7 @@ def main():
     try:
         i = model_mgr.step_counter
 
-        if opts.save:
+        if save_logs:
             log_writer = tf.summary.FileWriter(
                 os.path.join(logs_dir, 'train'),
                 sess.graph
@@ -188,7 +174,7 @@ def main():
                 frames_per_action=3,
             )
             reporter.last_loss = 0
-            if opts.save:
+            if save_logs:
                 reporter.write_summaries(sess, log_writer)
 
             for _ in range(cfg.steps_between_games):
@@ -201,19 +187,35 @@ def main():
                     ],
                     **cfg.sampling,
                 )
-                log_writer.add_summary(sumry, i)
+                if save_logs:
+                    log_writer.add_summary(sumry, i)
                 reporter.last_loss += loss
             reporter.last_loss /= cfg.steps_between_games
 
-            if opts.save:
+            if save_model:
                 model_mgr.step_counter = i
                 model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
-            if opts.max_games is not None and i >= opts.max_games:
+            if max_games is not None and i >= max_games:
                 break
     except KeyboardInterrupt:
         pass
 
 
+def main(cmdline=None):
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--no-save', action='store_false', dest='save')
+    parser.add_argument('--save-dir', default=None)
+    parser.add_argument('--max-games', default=None, type=int)
+    opts = parser.parse_args(cmdline)
+    entrypoint(
+        save_model=opts.save,
+        save_logs=opts.save,
+        save_dir=opts.save_dir,
+        max_games=opts.max_games,
+    )
+
+
 if __name__ == '__main__':
     main()
+
