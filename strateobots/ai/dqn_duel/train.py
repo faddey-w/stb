@@ -2,16 +2,15 @@ import argparse
 import datetime
 import logging
 import os
-import shlex
 
 import tensorflow as tf
 
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType
-from .core import ReinforcementLearning, ModelbasedFunction
+from .core import ReinforcementLearning, ModelbasedFunction, compute_reward_from_engine
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
-from . import ai, model, runner
+from . import model, runner
 
 tf.reset_default_graph()
 log = logging.getLogger(__name__)
@@ -72,34 +71,84 @@ class Config:
 
 class GameReporter:
 
-    def __init__(self):
+    def __init__(self, reward_prediction):
         self.step = 0
-        self.last_loss = 0
+
+        self.loss_sum = 0.0
+        self.loss_n = 0
+
+        self.reward_prediction = reward_prediction
+        self._rewards = []
+        self._rew_comp = None
+        self._q_values = []
+
         self.final_hp1 = None
         self.final_hp2 = None
 
         self.final_hp1_ph = tf.placeholder(tf.float32)
         self.final_hp2_ph = tf.placeholder(tf.float32)
+        self.loss_ph = tf.placeholder(tf.float32)
+        self.q_dev_ph = tf.placeholder(tf.float32)
         self.summaries = tf.summary.merge([
             tf.summary.scalar('hp1', self.final_hp1_ph),
             tf.summary.scalar('hp2', self.final_hp2_ph),
+            tf.summary.scalar('loss', self.loss_ph),
+            tf.summary.scalar('Q_dev', self.q_dev_ph),
         ])
 
     def __call__(self, engine):
+        if self._rew_comp is None:
+            self._rew_comp = compute_reward_from_engine(engine)
+        else:
+            self._rewards.append(self._rew_comp.get_next(engine))
+
+        self._q_values.append(engine.ai1.function.max_q)
+
         if engine.is_finished:
-            log.info('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
-                self.step, engine.ai1.bot.hp_ratio, engine.ai2.bot.hp_ratio,
-                self.last_loss,
-            ))
             self.final_hp1 = engine.ai1.bot.hp_ratio
             self.final_hp2 = engine.ai2.bot.hp_ratio
 
     def write_summaries(self, session, writer):
+
+        q_target_sum = 0.0
+        full_rew = 0.0
+        rp = self.reward_prediction
+        for rew in self._rewards[::-1]:
+            full_rew *= rp
+            full_rew += rew
+            q_target_sum += full_rew
+        q_target_avg = q_target_sum / len(self._rewards)
+        q_nn_avg = sum(self._q_values) / len(self._q_values)
+
         sumry = session.run(self.summaries, {
             self.final_hp1_ph: self.final_hp1,
             self.final_hp2_ph: self.final_hp2,
+            self.loss_ph: self.loss,
+            self.q_dev_ph: q_nn_avg - q_target_avg,
         })
         writer.add_summary(sumry, self.step)
+
+    def add_loss(self, value):
+        self.loss_sum += value
+        self.loss_n += 1
+
+    @property
+    def loss(self):
+        return self.loss_sum / max(1, self.loss_n)
+
+    def reset(self):
+        self.loss_sum = 0.0
+        self.loss_n = 0
+        self._rewards[:] = []
+        self._q_values[:] = []
+
+    def print_report(self):
+        log.info('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
+            self.step,
+            self.final_hp1,
+            self.final_hp2,
+            self.loss,
+        ))
 
 
 def entrypoint(save_model, save_logs, save_dir, max_games):
@@ -151,8 +200,6 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
 
     log.info('start training')
     try:
-        i = model_mgr.step_counter
-
         if save_logs:
             log_writer = tf.summary.FileWriter(
                 os.path.join(logs_dir, 'train'),
@@ -161,11 +208,13 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
         else:
             log_writer = None
 
-        reporter = GameReporter()
+        reporter = GameReporter(cfg.reward_prediction)
+        reporter.step = model_mgr.step_counter
 
         while True:
+            reporter.reset()
 
-            reporter.step = i
+            reporter.step += 1
             runner.run_one_game(
                 replay_memory=replay_memory,
                 ai1_func=nn_func,
@@ -173,30 +222,24 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
                 report=reporter,
                 frames_per_action=3,
             )
-            reporter.last_loss = 0
-            if save_logs:
-                reporter.write_summaries(sess, log_writer)
 
             for _ in range(cfg.steps_between_games):
-                i += 1
-                [loss, sumry] = rl.do_train_step(
+                [loss] = rl.do_train_step(
                     sess, replay_memory,
                     extra_tensors=[
                         rl.total_loss,
-                        rl.summaries,
                     ],
                     **cfg.sampling,
                 )
-                if save_logs:
-                    log_writer.add_summary(sumry, i)
-                reporter.last_loss += loss
-            reporter.last_loss /= cfg.steps_between_games
+                reporter.add_loss(loss)
+            if save_logs:
+                reporter.write_summaries(sess, log_writer)
+            reporter.print_report()
 
             if save_model:
-                model_mgr.step_counter = i
                 model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
-            if max_games is not None and i >= max_games:
+            if max_games is not None and model_mgr.step_counter >= max_games:
                 break
     except KeyboardInterrupt:
         pass

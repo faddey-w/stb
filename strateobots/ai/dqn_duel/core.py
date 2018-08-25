@@ -150,17 +150,23 @@ class ModelbasedFunction:
         self.modelset = modelset
         self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
         self.selector = SelectAction(self.modelset, self.state_ph)
-        self._state_vector = None
+        self.state_vector = None
+        self.action = None
+        self.max_q = None
         self.session = session
 
     def set_state_vector(self, state_vector):
-        self._state_vector = state_vector
+        self.state_vector = state_vector
 
     def __call__(self, bot, enemy, control, engine):
-        assert self._state_vector is not None
-        actions = self.session.run(self.selector.action,
-                                   {self.state_ph: [self._state_vector]})
-        action2vec.restore(actions[0], control)
+        assert self.state_vector is not None
+        max_qs, actions = self.session.run(
+            [self.selector.max_q, self.selector.action],
+            {self.state_ph: [self.state_vector]},
+        )
+        self.max_q = max_qs[0]
+        self.action = actions[0]
+        action2vec.restore(self.action, control)
 
 
 class ExplorationFunction:
@@ -232,10 +238,6 @@ class ReinforcementLearning:
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
-        self.summaries = tf.summary.merge([
-            tf.summary.scalar('loss', self.total_loss),
-        ])
-
     def do_train_step(self, session, replay_memory, extra_tensors=(),
                       **sampling_kwargs):
         _, extra_results = self.compute_on_sample(
@@ -276,7 +278,7 @@ class ReinforcementLearning:
         states_before_sample = np.concatenate(states_before, axis=0)
         actions_sample = np.concatenate(actions, axis=0)
         states_after_sample = np.concatenate(states_after, axis=0)
-        reward_sample = self.compute_reward(
+        reward_sample = compute_reward_from_vectors(
             states_before_sample,
             actions_sample,
             states_after_sample
@@ -290,30 +292,54 @@ class ReinforcementLearning:
             self.is_terminal_ph: self.compute_is_terminal(states_after_sample)
         })
 
-    def compute_reward(self, state_before, action, state_after):
-        b_hp_idx = state2vec[0, 'hp_ratio']
-        e_hp_idx = state2vec[1, 'hp_ratio']
-        b_hp_delta = state_after[..., b_hp_idx] - state_before[..., b_hp_idx]
-        e_hp_delta = state_after[..., e_hp_idx] - state_before[..., e_hp_idx]
-        # activity_punishment = 0.001 * (
-        #     action[..., action2vec['tower_rotate_left']]
-        #     + action[..., action2vec['tower_rotate_right']]
-        # )
-        # return 100 * (b_hp_delta - e_hp_delta) - activity_punishment
-        return 100 * (b_hp_delta - e_hp_delta)
-        # return 10 * (1 - state_after[..., e_hp_idx])
-        # e_hp_before = state_before[..., e_hp_idx]
-        # e_hp_after = state_after[..., e_hp_idx]
-        # return 100 * (e_hp_before - e_hp_after)
-        # return 100 * (1 - e_hp_after)
-        # reward_flag = e_hp_after + 0.01 < e_hp_before
-        # return np.cast[np.float32](reward_flag)
-
     def compute_is_terminal(self, state):
         b_hp = state[..., state2vec[0, 'hp_ratio']]
         e_hp = state[..., state2vec[1, 'hp_ratio']]
         return (b_hp <= 0) | (e_hp <= 0)
         # return e_hp <= 0
+
+
+def _compute_reward__core(hp1_before, hp1_after, hp2_before, hp2_after):
+    # activity_punishment = 0.001 * (
+    #     action[..., action2vec['tower_rotate_left']]
+    #     + action[..., action2vec['tower_rotate_right']]
+    # )
+    # return 100 * (b_hp_delta - e_hp_delta) - activity_punishment
+
+    # return 10 * (1 - state_after[..., e_hp_idx])
+    # e_hp_before = state_before[..., e_hp_idx]
+    # e_hp_after = state_after[..., e_hp_idx]
+    # return 100 * (e_hp_before - e_hp_after)
+    # return 100 * (1 - e_hp_after)
+    # reward_flag = e_hp_after + 0.01 < e_hp_before
+    # return np.cast[np.float32](reward_flag)
+    return 100 * ((hp1_after-hp1_before) - (hp2_before-hp2_after))
+
+
+def compute_reward_from_vectors(state_before, action, state_after):
+    b_hp_idx = state2vec[0, 'hp_ratio']
+    e_hp_idx = state2vec[1, 'hp_ratio']
+    return _compute_reward__core(
+        hp1_before=state_before[..., b_hp_idx],
+        hp1_after=state_after[..., b_hp_idx],
+        hp2_before=state_before[..., e_hp_idx],
+        hp2_after=state_after[..., e_hp_idx]
+    )
+
+
+class compute_reward_from_engine:
+
+    def __init__(self, engine):
+        self.hp1b = engine.ai1.bot.hp_ratio
+        self.hp2b = engine.ai2.bot.hp_ratio
+
+    def get_next(self, engine):
+        hp1a = engine.ai1.bot.hp_ratio
+        hp2a = engine.ai2.bot.hp_ratio
+        rew = _compute_reward__core(self.hp1b, hp1a, self.hp2b, hp2a)
+        self.hp1b = hp1a
+        self.hp2b = hp2a
+        return rew
 
 
 def control_noise(ctl, noise_prob):
