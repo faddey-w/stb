@@ -313,7 +313,7 @@ def _compute_reward__core(hp1_before, hp1_after, hp2_before, hp2_after):
     # return 100 * (1 - e_hp_after)
     # reward_flag = e_hp_after + 0.01 < e_hp_before
     # return np.cast[np.float32](reward_flag)
-    return 100 * ((hp1_after-hp1_before) - (hp2_before-hp2_after))
+    return 100 * ((hp1_after-hp1_before) - (hp2_after-hp2_before))
 
 
 def compute_reward_from_vectors(state_before, action, state_after):
