@@ -7,7 +7,8 @@ import tensorflow as tf
 
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType
-from .core import ReinforcementLearning, ModelbasedFunction, compute_reward_from_engine
+from .core import ReinforcementLearning, ModelbasedFunction
+from .core import noised_ai_func, compute_reward_from_engine
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
 from . import model, runner
@@ -151,7 +152,7 @@ class GameReporter:
         ))
 
 
-def entrypoint(save_model, save_logs, save_dir, max_games):
+def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio):
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     cfg = Config()
 
@@ -193,20 +194,27 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
         batch_size=cfg.batch_size,
         reward_prediction=cfg.reward_prediction,
     )
-    nn_func = ModelbasedFunction(model, sess)
+    bot_func = ModelbasedFunction(model, sess)
+    noised_bot_func = noised_ai_func(bot_func, 0.1)
 
     log.info('initialize model variables')
     sess.run(rl.init_op)
 
     log.info('start training')
+    n_evals, n_total_cycle = eval_train_ratio
     try:
         if save_logs:
-            log_writer = tf.summary.FileWriter(
+            train_log_writer = tf.summary.FileWriter(
                 os.path.join(logs_dir, 'train'),
                 sess.graph
             )
+            eval_log_writer = tf.summary.FileWriter(
+                os.path.join(logs_dir, 'eval'),
+                sess.graph
+            )
         else:
-            log_writer = None
+            train_log_writer = None
+            eval_log_writer = None
 
         reporter = GameReporter(cfg.reward_prediction)
         reporter.step = model_mgr.step_counter
@@ -214,10 +222,16 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
         while True:
             reporter.reset()
 
-            reporter.step += 1
+            if reporter.step % n_total_cycle < n_evals:
+                log_writer = eval_log_writer
+                run_func = bot_func
+            else:
+                log_writer = train_log_writer
+                run_func = noised_bot_func
+
             runner.run_one_game(
                 replay_memory=replay_memory,
-                ai1_func=nn_func,
+                ai1_func=run_func,
                 ai2_func=handcrafted.short_range_attack,
                 report=reporter,
                 frames_per_action=3,
@@ -239,6 +253,7 @@ def entrypoint(save_model, save_logs, save_dir, max_games):
             if save_model:
                 model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
+            reporter.step += 1
             if max_games is not None and model_mgr.step_counter >= max_games:
                 break
     except KeyboardInterrupt:

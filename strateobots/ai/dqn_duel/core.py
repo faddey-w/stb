@@ -1,4 +1,5 @@
 import random
+import logging
 
 import numpy as np
 import tensorflow as tf
@@ -6,6 +7,9 @@ import tensorflow as tf
 from ..lib import layers
 from ..lib.data import state2vec, action2vec
 from ..lib.util import add_batch_shape
+
+
+log = logging.getLogger(__name__)
 
 
 class QualityFunction:
@@ -354,3 +358,22 @@ def control_noise(ctl, noise_prob):
     if random.random() < noise_prob:
         ctl.shield = random.choice([False, True])
 
+
+class noised_ai_func:
+    def __init__(self, function, noise_prob):
+        self.wrapped_function = function
+        self.noise_prob = noise_prob
+
+    def __call__(self, bot, enemy, control, engine):
+        self.wrapped_function(bot, enemy, control, engine)
+        if log.isEnabledFor(logging.DEBUG):
+            before = str(control)
+            control_noise(control, self.noise_prob)
+            after = str(control)
+            if before != after:
+                log.debug('Noise was added: {} -> {}'.format(before, after))
+        else:
+            control_noise(control, self.noise_prob)
+
+    def __getattr__(self, item):
+        return getattr(self.wrapped_function, item)

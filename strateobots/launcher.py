@@ -3,6 +3,7 @@ import configparser
 import subprocess
 import os
 import sys
+import signal
 
 
 def main():
@@ -33,12 +34,16 @@ def run_dqn(config, opts):
     save_logs = config.getboolean('dqn', 'save_logs', fallback=True)
     save_dir = config.get('dqn', 'save_directory', fallback=None)
     max_games = config.getint('dqn', 'max_games', fallback=None)
+    eval_train_ratio_str = config.getint('dqn', 'eval_train_ratio', fallback='1:0')
+
+    n_evals, n_trains = map(int, eval_train_ratio_str.split(':'))
+    eval_train_ratio = n_evals, n_evals + n_trains
 
     if opts.new:
         save_dir = None
 
     from strateobots.ai.dqn_duel.train import entrypoint
-    entrypoint(save_model, save_logs, save_dir, max_games)
+    entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio)
 
 
 def run_tensorboard(config, opts):
@@ -52,12 +57,19 @@ def run_tensorboard(config, opts):
         runs = [x for x in os.listdir(logs_root) if not x.startswith('_')]
         last_run = max(runs)
         save_dir = os.path.join(logs_root, last_run)
+        print("detected save_dir:", save_dir, file=sys.stderr)
     else:
         save_dir = config.get(section, 'save_directory')
 
     save_dir = os.path.abspath(save_dir)
-    subprocess.call('tensorboard --logdir ' + save_dir, shell=True,
-                    stdout=sys.stdout, stderr=sys.stderr)
+    proc = subprocess.Popen('tensorboard --logdir ' + save_dir, shell=True,
+                            stdout=sys.stdout, stderr=sys.stderr)
+    try:
+        proc.wait()
+    except KeyboardInterrupt:
+        proc.send_signal(signal.SIGINT)
+        proc.wait()
+        raise
 
 
 PROGRAMS = {
