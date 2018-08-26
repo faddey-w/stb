@@ -34,7 +34,7 @@ def run_dqn(config, opts):
     save_logs = config.getboolean('dqn', 'save_logs', fallback=True)
     save_dir = config.get('dqn', 'save_directory', fallback=None)
     max_games = config.getint('dqn', 'max_games', fallback=None)
-    eval_train_ratio_str = config.getint('dqn', 'eval_train_ratio', fallback='1:0')
+    eval_train_ratio_str = config.get('dqn', 'eval_train_ratio', fallback='1:0')
 
     n_evals, n_trains = map(int, eval_train_ratio_str.split(':'))
     eval_train_ratio = n_evals, n_evals + n_trains
