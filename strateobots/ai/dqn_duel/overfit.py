@@ -75,6 +75,7 @@ def train():
 
     model_saving.ModelManager(mdl, model_dir)  # just save model source code
     writer = tf.summary.FileWriter(logs_dir)
+    summary_op = tf.summary.scalar('loss', rl.loss)
     sess.run(tf.variables_initializer(mdl.var_list))
     sess.run(rl.init_op)
 
@@ -104,7 +105,7 @@ def train():
             n_rnd_entries=batch_size,
             extra_tensors=[
                 rl.loss,
-                rl.summaries,
+                summary_op,
             ],
         )
         writer.add_summary(sumry, i)

@@ -35,6 +35,8 @@ def run_dqn(config, opts):
     save_dir = config.get('dqn', 'save_directory', fallback=None)
     max_games = config.getint('dqn', 'max_games', fallback=None)
     eval_train_ratio_str = config.get('dqn', 'eval_train_ratio', fallback='1:0')
+    n_full_explore = config.getint('dqn', 'n_full_explore', fallback=0)
+    n_decreasing_explore = config.getint('dqn', 'n_decreasing_explore', fallback=0)
 
     n_evals, n_trains = map(int, eval_train_ratio_str.split(':'))
     eval_train_ratio = n_evals, n_evals + n_trains
@@ -43,7 +45,9 @@ def run_dqn(config, opts):
         save_dir = None
 
     from strateobots.ai.dqn_duel.train import entrypoint
-    entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio)
+    entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
+               n_full_explore=n_full_explore,
+               n_decreasing_explore=n_decreasing_explore)
 
 
 def run_tensorboard(config, opts):

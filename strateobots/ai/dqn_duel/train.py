@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 class Config:
     
-    memory_capacity = 100000
+    memory_capacity = 1000000
 
     new_model_cls = model.classic.QualityFunctionModelset.AllTheSame
     # new_model_cls = model.eventbased.QualityFunctionModelset.AllTheSame
@@ -53,15 +53,15 @@ class Config:
 
         # cfg=[5],
 
-        angle_sections=20,
-        layer_sizes=[50, 50, 50, 1]
+        angle_sections=30,
+        layer_sizes=[60, 60, 60, 1]
     )
 
-    batch_size = 120
+    batch_size = 100
     sampling = dict(
         n_seq_samples=0,
         seq_sample_size=0,
-        n_rnd_entries=120,
+        n_rnd_entries=100,
         n_last_entries=0,
     )
     reward_prediction = 0.97
@@ -152,7 +152,8 @@ class GameReporter:
         ))
 
 
-def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio):
+def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
+               n_full_explore, n_decreasing_explore):
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     cfg = Config()
 
@@ -226,6 +227,8 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio):
                 log_writer = eval_log_writer
                 run_func = bot_func
             else:
+                prob = 1.0 - (model_mgr.step_counter - n_full_explore) / n_decreasing_explore
+                noised_bot_func.noise_prob = max(0.1, min(1.0, prob))
                 log_writer = train_log_writer
                 run_func = noised_bot_func
 
