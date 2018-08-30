@@ -4,7 +4,7 @@ import tensorflow as tf
 
 from strateobots.ai.lib import layers
 from strateobots.ai.lib.data import state2vec
-from .. import core
+from .. import functions
 
 log = logging.getLogger(__name__)
 
@@ -96,7 +96,7 @@ def select_features(tensor, mapper, *feature_names):
     return tf.concat(feature_tensors, -1)
 
 
-class QualityFunctionModelset(core.QualityFunctionModelset):
+class QualityFunctionModelset(functions.all.QualityFunctionModelset):
 
     node_cls = SimpleLogExpModel
     name = 'QFuncSimpleLogExp'

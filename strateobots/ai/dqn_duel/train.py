@@ -7,7 +7,7 @@ import tensorflow as tf
 
 from strateobots import REPO_ROOT
 from strateobots.engine import BotType
-from .core import ReinforcementLearning, ModelbasedFunction
+from .core import ReinforcementLearning
 from .core import noised_ai_func, compute_reward_from_engine
 from ..lib import replay, model_saving, handcrafted
 from ..lib.data import state2vec, action2vec
@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 class Config:
     
-    memory_capacity = 1000000
+    memory_capacity = 20000
 
     new_model_cls = model.classic.QualityFunctionModelset.AllTheSame
     # new_model_cls = model.eventbased.QualityFunctionModelset.AllTheSame
@@ -53,15 +53,15 @@ class Config:
 
         # cfg=[5],
 
-        angle_sections=30,
-        layer_sizes=[60, 60, 60, 1]
+        angle_sections=36,
+        layer_sizes=[75, 75, 75, 1]
     )
 
-    batch_size = 100
+    batch_size = 50
     sampling = dict(
         n_seq_samples=0,
         seq_sample_size=0,
-        n_rnd_entries=100,
+        n_rnd_entries=50,
         n_last_entries=0,
     )
     reward_prediction = 0.97
@@ -195,7 +195,7 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
         batch_size=cfg.batch_size,
         reward_prediction=cfg.reward_prediction,
     )
-    bot_func = ModelbasedFunction(model, sess)
+    bot_func = model.make_function(sess)
     noised_bot_func = noised_ai_func(bot_func, 0.1)
 
     log.info('initialize model variables')
@@ -254,8 +254,8 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
             reporter.print_report()
 
             if save_model:
-                model_mgr.save_vars(sess)
                 replay_memory.save(replay_dir)
+                model_mgr.save_vars(sess)
             reporter.step += 1
             if max_games is not None and model_mgr.step_counter >= max_games:
                 break

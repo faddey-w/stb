@@ -3,7 +3,7 @@ from math import pi
 
 from strateobots.ai.lib import layers
 from strateobots.ai.lib.data import state2vec
-from strateobots.ai.dqn_duel import core
+from strateobots.ai.dqn_duel import functions
 
 ANGLE_FEATURES = (
     (0, 'orientation'),
@@ -171,7 +171,7 @@ class QualityFunction:
         return self.quality
 
 
-class QualityFunctionModelset(core.QualityFunctionModelset):
+class QualityFunctionModelset(functions.nnmove.QualityFunctionModelset):
 
     node_cls = ClassicModel
     name = 'QFuncClassic'

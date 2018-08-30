@@ -66,7 +66,7 @@ def train():
     )
 
     print('Initialization')
-    ai1_function = core.ModelbasedFunction(mdl, sess)
+    ai1_function = mdl.make_function(sess)
     ai2_function = handcrafted.short_range_attack
 
     data_dir = PATH_PREFIX + 'replay'

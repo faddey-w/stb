@@ -3,7 +3,7 @@ import tensorflow as tf
 
 from strateobots.ai.lib import layers, util
 from strateobots.ai.lib.data import state2vec
-from strateobots.ai.dqn_duel import core
+from strateobots.ai.dqn_duel import functions
 
 
 class EventbasedModel:
@@ -135,7 +135,7 @@ class QualityFunction:
         return self.quality
 
 
-class QualityFunctionModelset(core.QualityFunctionModelset):
+class QualityFunctionModelset(functions.all.QualityFunctionModelset):
 
     node_cls = EventbasedModel
     name = 'QFuncEB'

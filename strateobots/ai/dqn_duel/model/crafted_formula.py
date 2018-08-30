@@ -2,7 +2,7 @@ import tensorflow as tf
 from math import pi
 from strateobots.engine import BotType
 from strateobots.ai.lib.data import state2vec, action2vec
-from strateobots.ai.dqn_duel import core
+from strateobots.ai.dqn_duel import functions
 
 
 class QualityFunctionModel:
@@ -16,7 +16,7 @@ class QualityFunctionModel:
         return QualityFunction(self, state, action)
 
 
-class QualityFunction(core.QualityFunction):
+class QualityFunction(functions.all.QualityFunction):
     def __init__(self, model, state, action):
         """
         :param model: QualityFunctionModel

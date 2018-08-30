@@ -48,6 +48,15 @@ class Mapper:
     def field_names(self):
         return [f.name for f in self._fields]
 
+    @classmethod
+    def concat(cls, *mappers):
+        all_fields = [
+            field
+            for mapper in mappers
+            for field in mapper._fields
+        ]
+        return cls(*all_fields)
+
 
 class CombinedMapper:
 
@@ -176,24 +185,37 @@ bullet2vec = Mapper(
 )
 
 
-action2vec = Mapper(
+move2vec = Mapper(
     Field('move_ahead', categorical=+1, attr='move'),
     Field('move_no', categorical=0, attr='move'),
     Field('move_back', categorical=-1, attr='move'),
-
+)
+rotate2vec = Mapper(
     Field('rotate_left', categorical=-1, attr='rotate'),
     Field('rotate_no', categorical=0, attr='rotate'),
     Field('rotate_right', categorical=+1, attr='rotate'),
-
+)
+tower_rotate2vec = Mapper(
     Field('tower_rotate_left', categorical=-1, attr='tower_rotate'),
     Field('tower_rotate_no', categorical=0, attr='tower_rotate'),
     Field('tower_rotate_right', categorical=+1, attr='tower_rotate'),
-
+)
+fire2vec = Mapper(
     Field('fire_yes', categorical=True, attr='fire'),
     Field('fire_no', categorical=False, attr='fire'),
-
+)
+shield2vec = Mapper(
     Field('shield_yes', categorical=True, attr='fire'),
     Field('shield_no', categorical=False, attr='fire'),
+)
+
+
+action2vec = Mapper.concat(
+    move2vec,
+    rotate2vec,
+    tower_rotate2vec,
+    fire2vec,
+    shield2vec,
 )
 
 
