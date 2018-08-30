@@ -198,7 +198,7 @@ class StbEngine:
             bot.tower_rot_speed = (rotation_smoothness * bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / (1 + rotation_smoothness)
             bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
-        # firing and shield
+        # shield
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
@@ -208,33 +208,38 @@ class StbEngine:
             else:
                 bot.shield_warmup = 0.0
                 bot.shield += typ.shield_regen / tps
-                if ctl.fire and not typ.shots_ray and bot.shot_ready:
-                    angle = random.gauss(
-                        mu=bot.orientation + bot.tower_orientation,
-                        sigma=typ.fire_scatter
-                    )
+
+        # firing
+        for b_id, bot in self._bots.items():
+            ctl = self._controls[bot.id]  # type: BotControl
+            typ = bot.type  # type: BotTypeProperties
+            if ctl.fire and not typ.shots_ray and bot.shot_ready:
+                angle = random.gauss(
+                    mu=bot.orientation + bot.tower_orientation,
+                    sigma=typ.fire_scatter
+                )
+                bullet = BulletModel(
+                    typ, b_id, angle,
+                    bot.x, bot.y, typ.shot_range
+                )
+                next_bullets.append(bullet)
+                bot.load = 0
+                bot.is_firing = True
+            elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick and bot.is_firing:
+                # ray should already be in rays dict
+                pass
+            elif ctl.fire and typ.shots_ray and bot.load > RAY_MIN_LOAD_REQUIRED:
+                if bot.id not in self._rays:
                     bullet = BulletModel(
-                        typ, b_id, angle,
+                        typ, b_id, bot.orientation + bot.tower_orientation,
                         bot.x, bot.y, typ.shot_range
                     )
-                    next_bullets.append(bullet)
-                    bot.load = 0
-                    bot.is_firing = True
-                elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick and bot.is_firing:
-                    # ray should already be in rays dict
-                    pass
-                elif ctl.fire and typ.shots_ray and bot.load > RAY_MIN_LOAD_REQUIRED:
-                    if bot.id not in self._rays:
-                        bullet = BulletModel(
-                            typ, b_id, bot.orientation + bot.tower_orientation,
-                            bot.x, bot.y, typ.shot_range
-                        )
-                        self._rays[bot.id] = bullet
-                    bot.is_firing = True
-                else:
-                    if bot.load < 1:
-                        bot.load += 1 / (typ.cd_period * tps)
-                    bot.is_firing = False
+                    self._rays[bot.id] = bullet
+                bot.is_firing = True
+            else:
+                if bot.load < 1:
+                    bot.load += 1 / (typ.cd_period * tps)
+                bot.is_firing = False
 
         # update rays
         for ray in self._rays.values():
