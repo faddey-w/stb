@@ -157,6 +157,7 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     cfg = Config()
 
+    save_dir_was_none = save_dir is None
     if save_dir is None:
         run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
         save_dir = os.path.join(REPO_ROOT, '_data', 'DQN', run_name)
@@ -172,8 +173,11 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
         model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
         model_mgr.load_vars(sess)
         model = model_mgr.model  # type: model.QualityFunctionModel
-    except Exception as exc:
-        log.info("Cannot load model (%r), so creating a new one", exc)
+    except Exception:
+        if save_dir_was_none:
+            log.info("Creating new model at %s", save_dir)
+        else:
+            log.exception("Cannot load model, so creating a new one")
         model = cfg.new_model_cls(**cfg.model_params)
         model_mgr = model_saving.ModelManager(model, model_dir)
         model_mgr.init_vars(sess)
