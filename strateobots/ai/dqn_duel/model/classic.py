@@ -171,7 +171,7 @@ class QualityFunction:
         return self.quality
 
 
-class QualityFunctionModelset(functions.nnmove.QualityFunctionModelset):
+class QualityFunctionModelset(functions.all.QualityFunctionModelset):
 
     node_cls = ClassicModel
     name = 'QFuncClassic'
