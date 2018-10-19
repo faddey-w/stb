@@ -57,6 +57,14 @@ def find_bullets(engine, bots):
     ]
 
 
+def make_states(engine):
+    bot1, bot2 = engine.ai1.bot, engine.ai2.bot
+    bullet1, bullet2 = find_bullets(engine, [bot1, bot2])
+    state1 = state2vec((bot1, bot2, bullet1, bullet2))
+    state2 = state2vec((bot2, bot1, bullet2, bullet1))
+    return state1, state2
+
+
 def shape_to_list(shape):
     if hasattr(shape, 'as_list'):
         return shape.as_list()

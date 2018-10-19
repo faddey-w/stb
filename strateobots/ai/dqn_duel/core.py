@@ -25,8 +25,8 @@ class ReinforcementLearning:
         self.qfunc = self.modelset.apply(self.state_ph, self.action_ph)
 
         # self.optimizer = tf.train.RMSPropOptimizer(0.001)
-        self.optimizer = tf.train.AdamOptimizer()
-        # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
+        # self.optimizer = tf.train.AdamOptimizer()
+        self.optimizer = tf.train.GradientDescentOptimizer(0.001)
 
         self.is_terminal_ph = tf.placeholder(tf.bool, [batch_size])
         self.y_predict_part = tf.where(

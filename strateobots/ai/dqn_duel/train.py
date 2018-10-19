@@ -64,7 +64,7 @@ class Config:
         n_rnd_entries=50,
         n_last_entries=0,
     )
-    reward_prediction = 0.97
+    reward_prediction = 0.90
     steps_between_games = 100
 
     bot_type = BotType.Raider

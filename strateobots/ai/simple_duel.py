@@ -6,8 +6,8 @@ from .lib import handcrafted
 
 def AI(team, engine):
     if team == engine.teams[0]:
-        return SniperVsRaider(team, engine)
-        # return RaiderVsSniper(team, engine)
+        # return SniperVsRaider(team, engine)
+        return RaiderVsSniper(team, engine)
     else:
         return SniperVsRaider(team, engine)
 

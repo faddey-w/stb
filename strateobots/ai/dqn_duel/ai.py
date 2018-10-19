@@ -161,7 +161,7 @@ class RunAI(DQNDuelAI):
 
     class Shared:
         instance = None  # type: RunAI.Shared
-        model_path = os.path.join(REPO_ROOT, '_data/2018-07-10_02-19-22/model/')
+        model_path = os.path.join(REPO_ROOT, '_data/DQN/2018-09-01_00-56-31/model/')
         self_play = False
         bot_type = BotType.Raider
         modes = [
