@@ -9,7 +9,7 @@ from tornado import web, gen, ioloop
 from strateobots.engine import StbEngine
 
 
-log = logging.getLogger('strateobots.engine_server')
+log = logging.getLogger(__name__)
 
 # pre-import it to speed-up launch of AIs
 import tensorflow
