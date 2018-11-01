@@ -7,7 +7,7 @@ from strateobots.ai.lib.bot_initializers import random_bot_initializer, duel_bot
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
-from strateobots.ai import base, physics_demo
+from strateobots.ai import base, physics_demo, simple_duel
 
 
 log = logging.getLogger(__name__)
@@ -45,6 +45,7 @@ def main(argv=None):
     state = ServerState([
         default_module,
         physics_demo.AIModule(),
+        simple_duel.AIModule(),
     ], storage)
     initargs = dict(serverstate=state, auth_handler=handlers.noop_auth_handler)
     fileserver_args = dict(path=args.static_dir, default_filename='index.html')

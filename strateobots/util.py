@@ -59,3 +59,26 @@ def replay_descriptor_from_storage(storage, key):
         **storage.load_metadata(key)
     }
 
+
+class DictWithAttrAccess(dict):
+
+    def __getattr__(self, item):
+        return _dwaa_wrap_nested(self[item])
+
+    def __setattr__(self, key, value):
+        self[key] = value
+
+
+def _dwaa_wrap_nested(value):
+    typ = type(value)
+    if typ is dict:
+        value = DictWithAttrAccess(value)
+    elif typ in (list, tuple, set, frozenset):
+        value = typ(map(_dwaa_wrap_flat, value))
+    return value
+
+
+def _dwaa_wrap_flat(value):
+    if type(value) is dict:
+        value = DictWithAttrAccess(value)
+    return value

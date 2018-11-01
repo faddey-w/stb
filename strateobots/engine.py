@@ -25,9 +25,10 @@ class StbEngine:
     TEAMS = 0x00DD00, 0x0000FF
 
     def __init__(self, world_width, world_height, ai1, ai2, initialize_bots,
-                 max_ticks=1000, wait_after_win=1, teams=None):
+                 max_ticks=1000, wait_after_win=1, teams=None, stop_all_after_finish=False):
         self.world_width = world_width
         self.world_height = world_height
+        self.stop_all_after_finish = stop_all_after_finish
         self.teams = self.team1, self.team2 = teams or self.TEAMS
         self._bots = {}
         self._rays = {}
@@ -451,6 +452,13 @@ class StbEngine:
 
     def _communicate_with_ai(self, ai, friendly_bots, enemy_bots, bullets, rays):
         if self.win_condition_reached:
+            if self.stop_all_after_finish:
+                for ctl in self._controls.values():
+                    ctl.fire = False
+                    ctl.shield = False
+                    ctl.move = 0
+                    ctl.rotate = 0
+                    ctl.tower_rotate = 0
             return None
         controls = ai({
             'tick': self.nticks,
@@ -485,6 +493,7 @@ class StbEngine:
                 'tower_orientation': bot.tower_orientation,
                 'shield': bot.shield_ratio,
                 'has_shield': bot.has_shield,
+                'is_firing': bot.is_firing,
             }
             team_bots_visible_data[bot.team].append(visible_fields)
             all_fields = visible_fields.copy()
@@ -564,11 +573,11 @@ class BotType(BotTypeProperties, enum.Enum):
         max_ahead_speed=55,
         max_back_speed=50,
         rot_speed=pi / 4,
-        gun_rot_speed=2 * pi / 3,
+        gun_rot_speed=1.1 * 2 * pi / 3,
         shots_ray=False,
         shot_range=250,
         fire_scatter=2 * pi / 180,
-        damage=120,
+        damage=130,
         shield_warmup_period=0.5,
         shield_energy=1200,
         shield_regen=50,
@@ -609,6 +618,13 @@ class BotType(BotTypeProperties, enum.Enum):
         shield_energy=500,
         shield_regen=75,
     )
+
+    @classmethod
+    def by_code(cls, code):
+        for name, bt in cls.__members__.items():
+            if bt.code == code:
+                return bt
+        raise ValueError
 
 
 class BotModel:

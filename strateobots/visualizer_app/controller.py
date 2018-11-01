@@ -62,6 +62,7 @@ class ServerState:
                 initialize_bots=bot_init,
                 max_ticks=config.GAME_MAX_TICKS,
                 wait_after_win=1,
+                stop_all_after_finish=True,
             ),
         )
         log.info('ENQUEUE simulation bot_init=%s ai1=%s ai2=%s -> %r',
