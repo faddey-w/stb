@@ -1,17 +1,44 @@
 from math import pi, atan
+from functools import partial
 from strateobots.engine import BotType
+from . import base
 
 
-class AI:
+class AIModule(base.AIModule):
 
-    def __init__(self, team, engine):
+    def __init__(self):
+        self.controller = None
+
+    def list_ai_function_descriptions(self):
+        return [
+            ('Physics demo AI', None),
+        ]
+
+    def list_bot_initializers(self):
+        return [
+            ('Physics demo', self._bot_initializer),
+        ]
+
+    def construct_ai_function(self, team, parameters):
+        return partial(self._ai_function, team)
+
+    def _bot_initializer(self, engine):
+        self.controller = PhysicsDemoController(engine)
+        self.controller.initialize()
+
+    def _ai_function(self, team, state):
+        return self.controller.do_control(team)
+
+
+class PhysicsDemoController:
+
+    def __init__(self, engine):
         """
         :type team: int
         :type engine: strateobots.engine.StbEngine
         """
-        self.team = team
         self.engine = engine
-        self._triggers = []
+        self._triggers = {}
 
     def initialize(self):
         team1, team2 = self.engine.teams
@@ -19,8 +46,6 @@ class AI:
         east, north, west, south = 0, pi/2, pi, -pi/2
 
         def mkbot(bottype, team, x, y, orientation, tower_orientation=ahead, hp=1.0):
-            if team != self.team:
-                return
             x *= self.engine.world_width / 10
             y *= self.engine.world_height / 10
             return self.engine.add_bot(
@@ -34,13 +59,9 @@ class AI:
             )
 
         def trig(bot, sec, **attrs):
-            if bot is None:
-                return
             tick = int(sec * self.engine.ticks_per_sec)
-            self._triggers.extend(
-                (tick, bot, attr, val)
-                for attr, val in attrs.items()
-            )
+            triglist = self._triggers.setdefault(bot.id, [])
+            triglist.append((tick, dict(attrs), bot.team))
 
         # head-on collisions
         b1 = mkbot(BotType.Raider, team1, 1, 1, east)
@@ -69,14 +90,19 @@ class AI:
         mkbot(BotType.Raider, team2, 4.5, 5.0, west, hp=0.1)
         mkbot(BotType.Raider, team2, 3.5, 4.5, west, hp=0.1)
         mkbot(BotType.Raider, team2, 3.5, 5.0, west, hp=0.1)
-        mkbot(BotType.Raider, team2, 4.0, 5.0, west, hp=0.1)
+        b = mkbot(BotType.Raider, team2, 4.0, 5.0, west, hp=0.1)
+        trig(b, 0, shield=True)
 
         b1 = mkbot(BotType.Sniper, team1, 1, 4, east)
+        scene_delay = 1
+        rot_delay = 0.07
         when = atan(1 / 2) / BotType.Sniper.gun_rot_speed
-        trig(b1, 0, fire=True, tower_rotate=1)
-        trig(b1, 1 * when, tower_rotate=-1)
-        trig(b1, 2 * when, tower_rotate=0)
-        trig(b1, 2 * when + 0.1, fire=False)
+        trig(b1, scene_delay, fire=True)
+        trig(b1, scene_delay + rot_delay, tower_rotate=1)
+        trig(b1, scene_delay + rot_delay + 1 * when, tower_rotate=-1)
+        trig(b1, scene_delay + rot_delay + 2 * when, tower_rotate=0)
+        trig(b1, scene_delay + rot_delay + 2 * when + 0.1, fire=False)
+        trig(b, scene_delay + rot_delay + 3 * when, shield=False)
 
         # raider firing
         mkbot(BotType.Sniper, team1, 2, 7, north)
@@ -90,25 +116,31 @@ class AI:
         trig(b1, 0.0, move=1, fire=True)
         b1 = mkbot(BotType.Raider, team2, 2.0, 6, east, (ahead + left) / 2, hp=0.1)
         trig(b1, 0.0, move=1, fire=True)
-        mkbot(BotType.Heavy, team1, 7, 6, east)
+        b1 = mkbot(BotType.Heavy, team1, 7, 6, east)
+        trig(b1, 0, shield=True)
+        trig(b1, 6, shield=False)
 
         # drifting
         b1 = mkbot(BotType.Raider, team1, 5, 8, west)
-        if b1:
-            b1.vx = b1.type.max_ahead_speed / 2
-            b1.vy = b1.type.max_ahead_speed / 2
+        b1.vx = b1.type.max_ahead_speed / 2
+        b1.vy = b1.type.max_ahead_speed / 2
         trig(b1, 0, move=1)
 
         # sort by tick
-        self._triggers.sort(key=lambda tick_and_etc: tick_and_etc[0])
+        for triglist in self._triggers.values():
+            triglist.sort(key=lambda tick_and_etc: tick_and_etc[0])
 
-    def tick(self):
-        next_triggers = []
-        for trig in self._triggers:
-            tick, bot, attr, val = trig
-            if tick <= self.engine.nticks:
-                setattr(self.engine.get_control(bot), attr, val)
-            else:
-                next_triggers.append(trig)
+    def do_control(self, control_team):
+        next_triggers = {}
+        result = []
+        for bot_id, triglist in self._triggers.items():
+            new_triglist = []
+            for trigger in triglist:
+                tick, attrs, team = trigger
+                if tick <= self.engine.nticks and control_team == team:
+                    result.append({'id': bot_id, **attrs})
+                else:
+                    new_triglist.append(trigger)
+            next_triggers[bot_id] = new_triglist
         self._triggers = next_triggers
-
+        return result

@@ -71,11 +71,15 @@ function Renderer(container) {
             botObj.setCD(bot.load);
             botObj.setOrientation(bot.orientation);
             botObj.setTowerOrientation(bot.tower_orientation);
+            botObj.setShieldEnergy(bot.shield);
+            botObj.setShieldWarmup(bot.shield_warmup);
             botObj.getThreeJsObject().visible = true;
             if (bot.has_shield) {
                 botObj.shield.position.z = 200;
+//                botObj.shieldWarmup.position.z = 200;
             } else {
                 botObj.shield.position.z = camera.position.z + 100;
+//                botObj.shieldWarmup.position.z = camera.position.z + 100;
             }
 
         }
@@ -131,7 +135,7 @@ function Renderer(container) {
             }
             explosionCounter++;
             expl.setPosition(explosion.x, explosion.y);
-            expl.setState(explosion.s, explosion.t);
+            expl.setState(explosion.size, explosion.t / explosion.duration);
             expl.getThreeJsObject().visible = true;
         });
 
@@ -255,14 +259,18 @@ function Animator(renderer, fps) {
     this.update = update;
 
     function animateOnce() {
-        _animating = true;
-        _frameToRender = calcFrameByTime();
-        update();
-        if (_frameToRender >= _nframes) {
-            _running = false;
-        }
         if (_running) {
-            requestAnimationFrame(animateOnce);
+            _animating = true;
+            _frameToRender = calcFrameByTime();
+            update();
+            if (_frameToRender >= _nframes) {
+                _running = false;
+            }
+            if (_running) {
+                requestAnimationFrame(animateOnce);
+            } else {
+                _animating = false;
+            }
         } else {
             _animating = false;
         }
@@ -339,38 +347,53 @@ function Tank(color) {
     tank.add(colorMarker);
     tank.add(tower);
 
+    var shieldBar = new THREE.Mesh(this._healthBarGeometry, this._material.shieldBar);
+    shieldBar.position.y = 205;
+    shieldBar.position.z = 101;
+    var shieldBarBackground = new THREE.Mesh(this._healthBarGeometry, this._material.barBackground);
+    shieldBarBackground.position.y = 205;
+    shieldBarBackground.position.z = 100;
+
     var health = new THREE.Mesh(this._healthBarGeometry, this._material.health);
     health.position.y = 190;
     health.position.z = 101;
+    var healthBarBackground = new THREE.Mesh(this._healthBarGeometry, this._material.barBackground);
+    healthBarBackground.position.y = 190;
+    healthBarBackground.position.z = 100;
 
     var cooldown = new THREE.Mesh(this._healthBarGeometry, this._material.cooldown);
     cooldown.position.y = 175;
     cooldown.position.z = 101;
-
-    var barBackground = new THREE.Mesh(this._healthBarGeometry, this._material.barBackground);
-    barBackground.position.y = 182;
-    barBackground.scale.y = 2;
-    barBackground.position.z = 100;
+    var cooldownBarBackground = new THREE.Mesh(this._healthBarGeometry, this._material.barBackground);
+    cooldownBarBackground.position.y = 175;
+    cooldownBarBackground.position.z = 100;
 
     var shield = new THREE.Mesh(this._shieldGeometry, this._material.shield);
     shield.position.z = 200;
-    // shield.visible = false;
+    var shieldWarmup = new THREE.Mesh(this._shieldEdgeGeometry, this._material.shieldWarmup);
+    shieldWarmup.position.z = 200;
 
     var unit = new THREE.Group();
     unit.add(tank);
-    unit.add(barBackground);
+    unit.add(healthBarBackground);
+    unit.add(cooldownBarBackground);
+    unit.add(shieldBarBackground);
+    unit.add(shieldBar);
     unit.add(health);
     unit.add(cooldown);
     unit.add(shield);
+    unit.add(shieldWarmup);
     unit.scale.x = 0.2;
     unit.scale.y = 0.2;
 
     this.unit = unit;
     this.health = health;
     this.cooldown = cooldown;
+    this.shieldBar = shieldBar;
     this.machine = tank;
     this.tower = tower;
     this.shield = shield;
+    this.shieldWarmup = shieldWarmup;
 }
 
 Tank.prototype = {
@@ -379,9 +402,11 @@ Tank.prototype = {
         body: new THREE.MeshBasicMaterial({color: 0x909090}),
         edge: new THREE.LineBasicMaterial({color: 0x000000}),
         health: new THREE.MeshBasicMaterial({color: 0xEF1010}),
-        cooldown: new THREE.MeshBasicMaterial({color: 0x7777FF}),
+        cooldown: new THREE.MeshBasicMaterial({color: 0xDFDF44}),
+        shieldBar: new THREE.MeshBasicMaterial({color: 0x42c5f4}),
         barBackground: new THREE.MeshBasicMaterial({color: 0x202020}),
         shield: new THREE.MeshBasicMaterial({color: 0x42c5f4, opacity: 0.5, transparent: true}),
+        shieldWarmup: new THREE.MeshBasicMaterial({color: 0x42c5f4, opacity: 0.7, transparent: true}),
         markers: {}
     },
     _edgePoints: [
@@ -396,6 +421,7 @@ Tank.prototype = {
     ],
     _healthBarGeometry: new THREE.PlaneBufferGeometry(250, 15),
     _shieldGeometry: new THREE.CircleBufferGeometry(150, 32),
+    _shieldEdgeGeometry: new THREE.RingBufferGeometry(140, 150, 32),
     _geometry: {
         initialized: false,
         edge: new THREE.BufferGeometry(),
@@ -426,6 +452,16 @@ Tank.prototype = {
         var totalWidth = 250; // this._healthBarGeometry.width;
         this.cooldown.scale.x = value0to1;
         this.cooldown.position.x = totalWidth * (value0to1 - 1) / 2;
+    },
+    setShieldWarmup: function(value0to1) {
+        var scale = value0to1 > 0.01 ? 0.2 + value0to1 * 0.8 : 0;
+        this.shieldWarmup.scale.x = scale;
+        this.shieldWarmup.scale.y = scale;
+    },
+    setShieldEnergy: function(value0to1) {
+        var totalWidth = 250; // this._healthBarGeometry.width;
+        this.shieldBar.scale.x = value0to1;
+        this.shieldBar.position.x = totalWidth * (value0to1 - 1) / 2;
     },
     getThreeJsObject: function () {
         return this.unit;

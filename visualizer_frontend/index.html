@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" ng-app="StrateobotsApp" class="full-height">
 <head>
-    <title>Strateobots Demo</title>
-    <meta charset="utf-8">
+    <title>Strateobots dashboard</title>
+    <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
     <style>
         body {
@@ -10,16 +10,145 @@
             background-color: #f0f0f0;
             margin: 0px;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .full-height {
+            height: 100vh;
+        }
+        .main-area-box {
+            flex: 1;
+        }
+        .main-area-box > div {
+            height: 100%;
+        }
+        #render_field {
+            /*border: 1px solid black;*/
+            /*padding-top: 100%;*/
+            /*width: 100%;*/
+            position: relative;
+            /*padding: 30%;*/
+        }
+        #render_field > canvas {
+            position: absolute;
+            /*top: 0;*/
+            /*left: 0;*/
+            /*bottom: 0;*/
+            /*right: 0;*/
+        }
+        .replay-bar {
+            width: 100%;
+            min-height: 10px;
+            background-color: #6b809e;
+        }
+        .replay-bar .progress {
+            height: 100%;
+            min-height: 10px;
+            background-color: #5bc0de;
+        }
+        .border1px {
+            border: 1px solid black;
+        }
+        .grey-out {
+            background-color: grey;
         }
     </style>
+    <script src="js/vendor/angular.min.js"></script>
+    <script src="js/vendor/ngStorage.min.js"></script>
+    <script src="js/vendor/three.js"></script>
+    <link href="css/vendor/bootstrap.css" rel="stylesheet" />
 </head>
-<body>
+<body ng-controller="StrateobotsController">
 
-<script src="js/vendor/three.js"></script>
+    <div class="container">
+        <div class="row" ng-show="isAdminEnabled()">
+            <select ng-model="newGameParams.botInitializerId"
+                    ng-options="idx as bi.name for (idx, bi) in botInitializers">
 
-<script>
+            </select>
+            <select ng-model="newGameParams.ai1FunctionId"
+                    ng-options="idx as (af.name + ' (' + af.module + ')') for (idx, af) in aiFunctions">
 
-</script>
+            </select>
+            <select ng-model="newGameParams.ai2FunctionId"
+                    ng-options="idx as (af.name + ' (' + af.module + ')') for (idx, af) in aiFunctions">
 
+            </select>
+            <button ng-disabled="newGameParams.botInitializerId === null || newGameParams.ai1FunctionId === null || newGameParams.ai2FunctionId === null"
+                    ng-click="startNewGame()">
+                Run
+            </button>
+        </div>
+        <div class="row">
+            <div class="col-md-4">
+                <button ng-click="refresh()">
+                    refresh
+                </button>
+            </div>
+            <div class="col-md-6">
+                <span ng-if="status.is_currently_loading">
+                    loading: {{ currentSim.n_loaded }} / {{ currentSim.nticks }}
+                </span>
+                <div ng-if="!!currentSim && !status.is_currently_loading" class="replay-bar"
+                    ng-click="onProgressClick($event)">
+                    <div class="progress" ng-style="{ width: (100 * status.getCurrentFrame() / status.getFramesCount()) + '%' }"></div>
+                    <!--replaying: {{ status.getCurrentFrame() }} / {{ status.getFramesCount() }}-->
+                    <!--and {{ (100 * status.getCurrentFrame() / status.getFramesCount()) }}-->
+                </div>
+            </div>
+            <div class="col-md-2">
+                <button ng-click="toggleAnimation()" ng-disabled="!currentSim || status.is_currently_loading">
+                    {{ status.isAnimRunning() ? "pause" : "play" }}
+                </button>
+                <button ng-click="goToFrameRel(+1)" ng-disabled="!currentSim || status.is_currently_loading">
+                    +
+                </button>
+                <button ng-click="goToFrameRel(-1)" ng-disabled="!currentSim || status.is_currently_loading">
+                    -
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="container main-area-box">
+        <div class="col-md-4" ng-class="{'grey-out': status.is_currently_loading}">
+            <div class="row border1px" ng-repeat="sim in simulations">
+                <div class="col-md-5"  ng-click="setCurrentSimulation(sim)">
+                    <div class="row">{{sim.init_name}}</div>
+                    <div class="row">{{sim.ai1_name}}</div>
+                    <div class="row">{{sim.ai2_name}}</div>
+                </div>
+                <div class="col-md-7">
+                    <div class="row">
+                        <div class="col-md-1">{{ sim.finished ? 'F' : 'R' }}</div>
+                        <div class="col-md-10">
+                            {{ sim.has_error? sim.error : "ticks: " + sim.n_loaded + " / " + sim.nticks }}
+                        </div>
+                    </div>
+                    <div class="row">
+                        id: {{sim.id}}
+                    </div>
+                    <div class="row">
+                        <div class="col-md-9">
+                            <span ng-if="!!currentSim && sim.id == currentSim.id">
+                                current
+                            </span>
+                        </div>
+                        <div class="col-md-3">
+                            <button ng-click="removeGame(sim)"
+                                    ng-show="isAdminEnabled()">del</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-8 main-area-box">
+            <div id="render_field" class="row"></div>
+        </div>
+    </div>
+
+    <script src="js/dashboard.js"></script>
+    <script src="js/rendering.js"></script>
 </body>
 </html>
