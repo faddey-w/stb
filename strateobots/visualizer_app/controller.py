@@ -127,7 +127,8 @@ class ServerState:
         while not simul.engine.is_finished and not simul.cancelled:
             yield
             simul.engine.tick()
-            log.debug('TICK %r: %s', simul.sim_id, simul.engine.nticks)
+            if simul.engine.nticks % 100 == 0:
+                log.debug('TICK %r: %s', simul.sim_id, simul.engine.nticks)
         yield
         simul.metadata['nticks'] = simul.engine.nticks
         log.info('FINISH simulation %r', simul.sim_id)

@@ -14,7 +14,7 @@ class ReplayDataStorage:
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=4)
         with open(replay_path, 'w') as f:
-            json.dump(replay_data, f, indent=4)
+            json.dump(replay_data, f, separators=(',', ':'))
 
     def list_keys(self):
         keys = os.listdir(self.storage_directory)

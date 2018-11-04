@@ -508,6 +508,7 @@ class StbEngine:
 
         for bullet in self.iter_bullets():
             bullets.append({
+                'origin_id': bullet.origin_id,
                 'type': bullet.type.code,
                 'x': bullet.x,
                 'y': bullet.y,

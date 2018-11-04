@@ -3,8 +3,7 @@ import numpy as np
 import contextlib
 import copy
 
-from strateobots.ai.lib import layers
-from strateobots.ai.lib.data import action2vec, state2vec
+from strateobots.ai.lib import nn, data
 
 
 class BaseModel:

@@ -1,222 +1,119 @@
 import numpy as np
-from strateobots.engine import BotType
 
 
-class Mapper:
-
-    def __init__(self, *fields):
-        self._fields = []
-        self._names = {}
-        self._indices = {}
-        for i, field in enumerate(fields):
-            self._fields.append(field)
-            if field.name is not None:
-                self._names[i] = field.name
-                self._indices[field.name] = i
-        self.vector_length = len(self._fields)
-
-    def map(self, obj):
-        v = np.empty((self.vector_length, ), np.float32)
-        for i, field in enumerate(self._fields):
-            v[i] = field.convert(obj)
-        return v
-
-    def restore(self, vector, obj):
-        for i, field in enumerate(self._fields):
-            field.restore(obj, vector[i])
-
-    def __call__(self, obj):
-        return self.map(obj)
-
-    def __getitem__(self, item):
-        if isinstance(item, int):
-            if item < 0:
-                item += self.vector_length
-            return self._names[item]
-        elif isinstance(item, str):
-            return self._indices[item]
-        elif isinstance(item, (tuple, list)):
-            return item.__class__(self[x] for x in item)
-        else:
-            raise TypeError(type(item))
-
-    def get(self, vector, field_name):
-        idx = self._indices[field_name]
-        return vector[idx]
-
-    @property
-    def field_names(self):
-        return [f.name for f in self._fields]
-
-    @classmethod
-    def concat(cls, *mappers):
-        all_fields = [
-            field
-            for mapper in mappers
-            for field in mapper._fields
-        ]
-        return cls(*all_fields)
+def _try_int(x):
+    try:
+        x = int(x)
+    except:
+        pass
+    return x
 
 
-class CombinedMapper:
+class Feature:
 
-    def __init__(self, *mappers):
-        self.mappers = mappers
-        self.vector_length = sum(m.vector_length for m in mappers)
+    dtype = np.float32
 
-    def map(self, obj_tuple):
-        if len(obj_tuple) != len(self.mappers):
-            raise ValueError
-        outs = [
-            mapper.map(obj)
-            for obj, mapper in zip(obj_tuple, self.mappers)
-        ]
-        return np.concatenate(outs, 0)
+    def __init__(self, path, converter=None):
+        if isinstance(path, str):
+            path = map(_try_int, path.split('.'))
+        self.path = tuple(path)
+        self.dimension = 1
+        self.converter = converter
 
-    def restore(self, vector, obj_tuple):
-        if len(obj_tuple) != len(self.mappers):
-            raise ValueError
-        offs = 0
-        for obj, mapper in zip(obj_tuple, self.mappers):
-            vlen = mapper.vector_length
-            mapper.restore(obj, vector[offs:offs+vlen])
-            offs += vlen
+    def _get_value(self, value, variable_keys):
+        for item in self.path:
+            if item.startswith('$'):
+                item = variable_keys[item[1:]]
+            value = value[item]
+        return value
 
-    def __call__(self, obj_tuple):
-        return self.map(obj_tuple)
+    def _process_value(self, value):
+        return np.asarray([value], dtype=self.dtype)
 
-    def __getitem__(self, item):
-        idx, item = item
-        result = self.mappers[idx][item]
-        if isinstance(result, int):
-            result += sum(m.vector_length for m in self.mappers[:idx])
+    def __call__(self, value, **variable_keys):
+        value = self._get_value(value, variable_keys)
+        if self.converter:
+            value = self.converter
+        return self._process_value(value)
+
+
+class CategoricalFeature(Feature):
+
+    def __init__(self, path, categories, converter=None):
+        super().__init__(path, converter)
+        self.categories = tuple(categories)
+        self.dimension = len(self.categories)
+
+    def _process_value(self, value):
+        result = np.zeros([self.dimension], dtype=self.dtype)
+        result[self.categories.index(value)] = 1
         return result
 
-    def get(self, vector, *field_path):
-        idx, *field_path = field_path
-        offs = 0
-        for mapper in self.mappers[:idx]:
-            offs += mapper.vector_length
-        mapper = self.mappers[idx]
-        return vector[offs:offs+mapper.vector_length]
-
-    @property
-    def field_names(self):
-        return [
-            (i, *fn) if isinstance(m, CombinedMapper) else (i, fn)
-            for i, m in enumerate(self.mappers)
-            for fn in m.field_names
-        ]
+    def decode(self, array):
+        cat_idx = np.argmax(array, -1)
+        return self.categories[cat_idx]
 
 
-class MappedVector:
+class IntervalFeature(Feature):
 
-    def __init__(self, vector, mapper):
-        self.vector = vector
-        self.mapper = mapper
+    def __init__(self, path, boundaries, converter=None):
+        super().__init__(path, converter)
+        self.boundaries = tuple(sorted(boundaries))
+        self.dimension = len(self.boundaries) + 1
 
-    def __getattr__(self, item):
-        idx = self.mapper[item]
-        return self.vector[..., idx]
-
-
-class Field:
-
-    def __init__(self, name, convert=None, restore=None, categorical=None, attr=None):
-        self.name = name
-        attr = attr or name
-        if categorical is None:
-            self.convert = convert or self._converter_as_is(attr)
-            self.restore = restore or self._restorer_as_is(attr)
-        else:
-            self.convert = convert or self._converter_categorical(attr, categorical)
-            self.restore = restore or self._restorer_categorical(attr, categorical)
-
-    def _converter_as_is(self, name):
-        def convert_as_is(obj):
-            return getattr(obj, name)
-        return convert_as_is
-
-    def _restorer_as_is(self, name):
-        def restore_as_is(obj, value):
-            setattr(obj, name, value)
-        return restore_as_is
-
-    def _converter_categorical(self, name, category):
-        def convert_categorical(obj):
-            return int(getattr(obj, name) == category)
-        return convert_categorical
-
-    def _restorer_categorical(self, name, category):
-        def restore_categorical(obj, value):
-            if value > 0.5:
-                setattr(obj, name, category)
-        return restore_categorical
+    def _process_value(self, value):
+        bin_ = self.dimension - 1
+        for i, b in enumerate(self.boundaries):
+            if value < b:
+                bin_ = i
+            else:
+                break
+        result = np.zeros([self.dimension], dtype=self.dtype)
+        result[bin_] = 1
+        return result
 
 
-def _norm_angle(a):
-    return ((a + np.pi) % (2 * np.pi)) - np.pi
+class FeatureSet:
+    def __init__(self, *features):
+        self.features = features
+        self.dimension = sum(f.dimension for f in features)
+
+    def __call__(self, value, **variable_keys):
+        return np.concatenate([f(value, **variable_keys) for f in self.features])
 
 
-bot2vec = Mapper(
-    Field('x'),
-    Field('y'),
-    Field('vx'),
-    Field('vy'),
-    Field('is_raider', categorical=BotType.Raider, attr='type'),
-    Field('is_heavy', categorical=BotType.Heavy, attr='type'),
-    Field('is_sniper', categorical=BotType.Sniper, attr='type'),
-    Field('hp_ratio'),
-    Field('load'),
-    Field('shield_ratio'),
-    Field('shield_warmup'),
-    Field('orientation', lambda bot: _norm_angle(bot.orientation)),
-    Field('tower_orientation', lambda bot: _norm_angle(bot.tower_orientation)),
+bot_visible_fields = FeatureSet(
+    Feature(['x']),
+    Feature(['y']),
+    Feature(['hp']),
+    Feature(['orientation']),
+    Feature(['tower_orientation']),
+    Feature(['shield']),
+    Feature(['has_shield']),
+    Feature(['is_firing']),
 )
-bullet2vec = Mapper(
-    Field('present', lambda bullet: bullet.origin_id is not None),
-    Field('x'),
-    Field('y'),
-    Field('orientation', lambda bullet: _norm_angle(bullet.orientation)),
-    Field('remaining_range'),
-    Field('is_raider', categorical=BotType.Raider, attr='type'),
-    Field('is_heavy', categorical=BotType.Heavy, attr='type'),
-    Field('is_sniper', categorical=BotType.Sniper, attr='type'),
+bot_private_fields = FeatureSet(
+    Feature(['vx']),
+    Feature(['vy']),
+    Feature(['load']),
+    Feature(['shot_ready']),
+    Feature(['shield_warmup']),
+)
+coordinates_fields = FeatureSet(
+    Feature(['x']),
+    Feature(['y']),
+)
+bullet_fields = FeatureSet(
+    Feature(['present']),
+    Feature(['x']),
+    Feature(['y']),
+    Feature(['orientation']),
 )
 
+ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'fire', 'shield'
 
-move2vec = Mapper(
-    Field('move_ahead', categorical=+1, attr='move'),
-    Field('move_no', categorical=0, attr='move'),
-    Field('move_back', categorical=-1, attr='move'),
-)
-rotate2vec = Mapper(
-    Field('rotate_left', categorical=-1, attr='rotate'),
-    Field('rotate_no', categorical=0, attr='rotate'),
-    Field('rotate_right', categorical=+1, attr='rotate'),
-)
-tower_rotate2vec = Mapper(
-    Field('tower_rotate_left', categorical=-1, attr='tower_rotate'),
-    Field('tower_rotate_no', categorical=0, attr='tower_rotate'),
-    Field('tower_rotate_right', categorical=+1, attr='tower_rotate'),
-)
-fire2vec = Mapper(
-    Field('fire_yes', categorical=True, attr='fire'),
-    Field('fire_no', categorical=False, attr='fire'),
-)
-shield2vec = Mapper(
-    Field('shield_yes', categorical=True, attr='fire'),
-    Field('shield_no', categorical=False, attr='fire'),
-)
-
-
-action2vec = Mapper.concat(
-    move2vec,
-    rotate2vec,
-    tower_rotate2vec,
-    fire2vec,
-    shield2vec,
-)
-
-
-state2vec = CombinedMapper(bot2vec, bot2vec, bullet2vec, bullet2vec)
+ctl_move = CategoricalFeature(['move'], [-1, 0, +1])
+ctl_rotate = CategoricalFeature(['rotate'], [-1, 0, +1])
+ctl_tower_rotate = CategoricalFeature(['tower_rotate'], [-1, 0, +1])
+ctl_fire = CategoricalFeature(['fire'], [False, True])
+ctl_shield = CategoricalFeature(['shield'], [False, True])

@@ -1,41 +1,75 @@
 import tensorflow as tf
-from strateobots.engine import BotControl
+import numpy as np
 from strateobots.ai.lib import data
 
 
 class ModelAiFunction:
 
     def __init__(self, model, session):
-        state_ph = tf.placeholder(tf.float32, [1, data.state2vec.vector_length])
-        inference = model.apply(state_ph)
+        self.state_ph = tf.placeholder(tf.float32, [1, model.state_dimension])
+        self.inference = model.apply(self.state_ph)
+        self.model = model
+        self.session = session
+        self._prev_state = None
 
-        def function(engine, bot, enemy, ctl):
-            bullet_b, bullet_e = find_bullets(engine, [bot, enemy])
-            state = data.state2vec((bot, enemy, bullet_b, bullet_e))
-            feeds = {state_ph: [state]}
-            if exploration_feed is not None:
-                feeds.update(exploration_feed)
-            prediction = session.run(inference.action_prediction, feeds)[0]
-            decode_prediction(prediction, ctl, **alt_dict)
+    def __call__(self, state):
+        bot_data = state['friendly_bots'][0]
+        state_vector, self._prev_state = encode_vector_for_model(
+            self.model, state, self._prev_state
+        )
 
-    def __call__(self, engine, bot, enemy, ctl):
-        pass
+        ctl_vectors = self.session.run(
+            self.inference.controls, feed_dict={
+                self.state_ph: [state_vector],
+            }
+        )
+        ctl_dict = {
+            'id': bot_data['id'],
+            'move': data.ctl_move.decode(ctl_vectors['move'][0]),
+            'rotate': data.ctl_rotate.decode(ctl_vectors['rotate'][0]),
+            'tower_rotate': data.ctl_tower_rotate.decode(ctl_vectors['tower_rotate'][0]),
+            'shield': data.ctl_shield.decode(ctl_vectors['shield'][0]),
+            'fire': data.ctl_fire.decode(ctl_vectors['fire'][0]),
+        }
+        return [ctl_dict]
+
+    def on_new_game(self):
+        self._prev_state = None
 
 
-def find_bullets(engine, bots):
-    bullets = {
-        bullet.origin_id: bullet
-        for bullet in engine.iter_bullets()
-    }
-    return [
-        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0))
-        for bot in bots
-    ]
+def encode_vector_for_model(model, state, prev_state, team=None, opponent_team=None):
+    if team is None:
+        bot_data = state['friendly_bots'][0]
+        enemy_data = state['enemy_bots'][0]
+    else:
+        if opponent_team is None:
+            opponent_team = (set(state['bots'].keys()) - {team}).pop()
+        bot_data = state['bots'][team][0]
+        enemy_data = state['bots'][opponent_team][0]
+    bot_bullet_data = None
+    enemy_bullet_data = None
 
+    for bullet in state['bullets']:
+        if bullet['origin_id'] == bot_data['id']:
+            bot_bullet_data = bullet
+        elif bullet['origin_id'] == enemy_data['id']:
+            enemy_bullet_data = bullet
 
-def make_states(engine):
-    bot1, bot2 = engine.ai1.bot, engine.ai2.bot
-    bullet1, bullet2 = find_bullets(engine, [bot1, bot2])
-    state1 = data.state2vec((bot1, bot2, bullet1, bullet2))
-    state2 = data.state2vec((bot2, bot1, bullet2, bullet1))
-    return state1, state2
+    next_prev_state = model.encode_prev_state(
+        bot=bot_data,
+        enemy=enemy_data,
+        bot_bullet=bot_bullet_data,
+        enemy_bullet=enemy_bullet_data,
+    )
+    if prev_state is None:
+        prev_state = next_prev_state
+
+    current_state = model.encode_state(
+        bot=bot_data,
+        enemy=enemy_data,
+        bot_bullet=bot_bullet_data,
+        enemy_bullet=enemy_bullet_data,
+    )
+
+    state_vector = np.concatenate([prev_state, current_state])
+    return state_vector, next_prev_state

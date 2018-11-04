@@ -3,10 +3,11 @@ import tensorflow as tf
 
 class Linear:
 
-    def __init__(self, name, in_dim, out_dim, shared_weight=None):
+    def __init__(self, name, in_dim, out_dim, shared_weight=None, activation=None):
         self.name = name
         self.in_dim = in_dim
         self.out_dim = out_dim
+        self.activation = activation
         with tf.variable_scope(self.name):
             self.weight = shared_weight or tf.get_variable('W', [in_dim, out_dim])
             assert self.weight.shape.as_list() == [in_dim, out_dim]
@@ -16,7 +17,11 @@ class Linear:
         else:
             self.var_list = [self.weight, self.bias]
 
-    def apply(self, x, activation):
+    def apply(self, x, activation=None):
+        if activation is None:
+            if self.activation is None:
+                raise ValueError("Activation must be specified")
+            activation = self.activation
         return self.Apply(x, self, activation)
 
     class Apply:
@@ -28,6 +33,19 @@ class Linear:
                 self.multiplied = batch_matmul(x, model.weight)
                 self.biased = self.multiplied + model.bias
                 self.out = activation(self.biased)
+
+    @classmethod
+    def chain_factory(cls, input_dim, name_prefix):
+        i = 1
+
+        def factory(out_dim, activation=None):
+            nonlocal input_dim, i
+            name = name_prefix + str(i)
+            self = cls(name, input_dim, out_dim, activation=activation)
+            i += 1
+            input_dim = out_dim
+            return self
+        return factory
 
 
 class Residual(Linear):
@@ -51,11 +69,12 @@ class Residual(Linear):
 
 class ResidualV2:
 
-    def __init__(self, name, in_dim, hidden_dim, out_dim):
+    def __init__(self, name, in_dim, hidden_dim, out_dim, activation=None):
         self.name = name
         self.in_dim = in_dim
         self.hidden_dim = hidden_dim
         self.out_dim = out_dim
+        self.activation = activation
 
         self.resid = Linear(name + '/Resid', in_dim, hidden_dim)
         self.join = Linear(name + '/Join', in_dim + hidden_dim, out_dim)
@@ -63,6 +82,10 @@ class ResidualV2:
         self.var_list = [*self.resid.var_list, *self.join.var_list]
 
     def apply(self, x, activation):
+        if activation is None:
+            if self.activation is None:
+                raise ValueError("Activation must be specified")
+            activation = self.activation
         return self.Apply(x, self, activation)
 
     class Apply:
@@ -75,9 +98,10 @@ class ResidualV2:
 
 class ResidualV3:
 
-    def __init__(self, name, n_dim):
+    def __init__(self, name, n_dim, activation=None):
         self.name = name
         self.n_dim = n_dim
+        self.activation = activation
 
         self.resid = Linear(name + '/Resid', n_dim, n_dim)
         self.mask = tf.get_variable(name + '/M', [n_dim])
@@ -85,6 +109,10 @@ class ResidualV3:
         self.var_list = [*self.resid.var_list, self.mask]
 
     def apply(self, x, activation):
+        if activation is None:
+            if self.activation is None:
+                raise ValueError("Activation must be specified")
+            activation = self.activation
         return self.Apply(x, self, activation)
 
     class Apply:
@@ -93,34 +121,32 @@ class ResidualV3:
             self.out = x + model.mask * self.resid.out
 
 
-# class LayerChain:
-#
-#     def __init__(self, factory, *args, **kwargs):
-#         self.layers = []
-#         while True:
-#             layer, args, kwargs = factory(*args, **kwargs)
-#             if layer is not None:
-#                 self.layers.append(layer)
-#             else:
-#                 break
-#         if self.layers and hasattr(self.layers[0], 'name'):
-#             self.name = self.layers[0].name
-#
-#     def apply(self, x, *args, **kwargs):
-#         nodes = []
-#         for layer in self.layers:
-#             node = layer.apply(x, *args, **kwargs)
-#             x = node.out
-#             nodes.append(node)
-#         return self._Apply(nodes)
-#
-#     class _Apply:
-#         def __init__(self, nodes):
-#             self.nodes = nodes
-#
-#
-# def simple_chain(layer_cls, name_prefix, param0, other_params):
-#
+class LayerChain:
+
+    def __init__(self, factory, *arg_lists, **kwargs):
+        self.layers = []
+        for args in arg_lists:
+            if not isinstance(args, (list, tuple)):
+                args = (args,)
+            self.layers.append(factory(*args, **kwargs))
+        if self.layers and hasattr(self.layers[0], 'name'):
+            self.name = self.layers[0].name
+        self.var_list = sum([l.var_list for l in self.layers], [])
+
+    def apply(self, x, *args, **kwargs):
+        nodes = []
+        for layer in self.layers:
+            node = layer.apply(x, *args, **kwargs)
+            x = node.out
+            nodes.append(node)
+        return nodes
+
+
+def stack(*layers):
+    return LayerChain(
+        lambda layer: layer,
+        *layers
+    )
 
 
 def shape_to_list(shape):

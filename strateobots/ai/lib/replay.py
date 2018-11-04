@@ -1,280 +1,150 @@
 import numpy as np
 import os
 import random
+import time
 import json
+from strateobots.replay import ReplayDataStorage
+from strateobots.ai.lib.integration import encode_vector_for_model
+from strateobots.ai.lib import data
 
 
 class ReplayMemory:
 
-    def __init__(self, capacity, *vector_sizes):
-        self._capacity = capacity
-        self._storages = [
-            np.empty((capacity, vsz), np.float32)
-            for vsz in vector_sizes
-        ]
-        self._sizes = vector_sizes
-        self._used = 0
-        self._last_insert = -1
+    def __init__(self, storage_directory, model, load_winner_data=False):
+        self._rds = ReplayDataStorage(storage_directory)
+        self.model = model
+        self._load_winner_data = load_winner_data
+        self._data = []
+        self._prepared_epoch = None
 
-    def save(self, save_dir):
-        """
-        Saves replay memory to files within specified directory
-        :param save_dir: directory path where to save data
-        """
-        os.makedirs(save_dir, exist_ok=True)
-        arrays = self.get_last_entries(self.used_size)
-        for i, arr in enumerate(arrays):
-            np.save(os.path.join(save_dir, '{}.npy'.format(i)), arr)
+        for key in self._rds.list_keys():
+            rd = _ReplayData(key)
+            self._load_numpy(rd)
+            self._data.append(rd)
 
-    def load(self, save_dir):
-        """
-        Loads replay memory from files within specified directory
-        :param save_dir: directory path from where to load data
-        """
-        data = [
-            np.load(os.path.join(save_dir, '{}.npy'.format(i)))
-            for i in range(len(self._sizes))
-        ]
-        load_size = data[0].shape[0]
-        max_idx = min(self._used + load_size, self._capacity)
-        min_idx = max(0, max_idx - load_size)
-        insert_size = min(load_size, max_idx-min_idx)
-        for i, strg in enumerate(self._storages):
-            strg[min_idx:min_idx+insert_size] = data[i][:insert_size]
-        self._used = min_idx+insert_size
-        self._last_insert = self._used-1
+    def add_replay(self, metadata, replay_data):
+        key = time.strftime('%Y%m%d_%H%M%S')
+        self._rds.save_replay(key, metadata, replay_data)
+        rd = _ReplayData(key)
+        self._load_numpy(rd)
+        self._data.append(rd)
 
-    def update(self, memory):
-        """
-        Adds entries from given instance to this one.
-        Equivalent to iterating entries from given buffer and putting them here.
-        :type memory: ReplayMemory
-        """
-        arrays = memory.get_last_entries(memory.used_size)
-        self.put_many(*arrays)
+    def prepare_epoch(self, size=None, shuffle=False):
+        self._prepared_epoch = self.get_loser_data_flat(size, shuffle)
 
-    def put_many(self, *vector_arrays):
-        assert len({va.shape[0] for va in vector_arrays}) == 1
-        assert len(vector_arrays) == len(self._storages)
+    def get_prepared_epoch_batch(self, batch_size, batch_index):
+        start = batch_size * batch_index
+        end = batch_size * (batch_index + 1)
+        ticks, actions, st_before, st_after = self._prepared_epoch
+        actions = {
+            ctl: actions[start:end]
+            for ctl in data.ALL_CONTROLS
+        }
+        return ticks[start:end], actions, st_before[start:end], st_after[start:end]
 
-        size = vector_arrays[0].shape[0]
-        if size == 0:
-            return
-        if size > self._capacity:
-            for i, strg in enumerate(self._storages):
-                strg[...] = vector_arrays[i]
+    def get_loser_data_flat(self, size=None, shuffle=False):
+        if size is None:
+            size = sum(rd.ticks.size for rd in self._data)
+            games = self._data
+            requested_size = size
         else:
-            if size < self._capacity - self._used:
-                assert self._last_insert == self._used - 1
-                for i, arr in enumerate(vector_arrays):
-                    self._storages[i][self._used:self._used+size] = arr
-                self._used += size
-                self._last_insert = self._used - 1
-            elif size < self._capacity - self._last_insert - 1:
-                for i, arr in enumerate(vector_arrays):
-                    self._storages[i][self._last_insert + 1:self._last_insert + 1 + size] = arr
-                self._last_insert += size
-            else:
-                rem = self._capacity - (self._last_insert + 1)
-                for i, arr in enumerate(vector_arrays):
-                    self._storages[i][self._last_insert+1:] = arr[:rem]
-                    self._storages[i][:size-rem] = arr[rem:]
-                self._used = self._capacity
-                self._last_insert = size - rem - 1
+            games = self._data[::-1]
+            if shuffle:
+                random.shuffle(games)
 
-    def trunc(self, to_size, offset=0):
-        assert offset+to_size <= self._used
-        if offset != 0:
-            for i, strg in enumerate(self._storages):
-                strg[:to_size] = strg[offset:offset+to_size]
-        self._used = to_size
-        self._last_insert = min(self._last_insert, self._used - 1)
+            least_size = size
+            i = 0
+            while least_size > 0:
+                least_size -= games[i].ticks.size
+                i += 1
+            games = games[:i+1]
+            requested_size = size
+            size -= least_size  # least_size is negative
 
-    @property
-    def used_size(self):
-        """
-        :return: number of stored entries
-        """
-        return self._used
-    
-    @property
-    def capacity(self):
-        return self._capacity
+        ticks_buffer = np.empty([size])
+        actions_buffer = {ctl: np.empty([size]) for ctl in data.ALL_CONTROLS}
+        states_buffer = np.empty([size, self.model.state_dimension])
+        next_states_buffer = np.empty([size, self.model.state_dimension])
 
-    def put_entry(self, *vectors):
-        """
-        Adds a new entry into the memory
-        :param vectors: 1-D vectors
-        :return: entry_id
-        """
-        if self._used < self._capacity:
-            eid = self._used
-            self._used += 1
+        i = 0
+        for rd in games:
+            n = rd.ticks.size
+            ticks_buffer[i:i+n] = rd.ticks
+            for ctl in data.ALL_CONTROLS:
+                actions_buffer[ctl][i:i+n] = rd.loser_action_idx[ctl]
+            states_buffer[i:i+n] = rd.loser_numpy_data[:-1]
+            next_states_buffer[i:i+n] = rd.loser_numpy_data[1:]
+            i += n
+
+        if shuffle:
+            indices = np.arange(size)
+            np.random.shuffle(indices)
+            ticks_buffer = ticks_buffer[indices]
+            actions_buffer = actions_buffer[indices]
+            states_buffer = states_buffer[indices]
+            next_states_buffer = next_states_buffer[indices]
+        if requested_size != size:
+            ticks_buffer = ticks_buffer[:requested_size]
+            actions_buffer = actions_buffer[:requested_size]
+            states_buffer = states_buffer[:requested_size]
+            next_states_buffer = next_states_buffer[:requested_size]
+
+        return ticks_buffer, actions_buffer, states_buffer, next_states_buffer
+
+    def _load_numpy(self, rd):
+        rd.json_data = self._rds.load_replay_data(rd.key)
+        team1, team2 = rd.json_data[-1]['bots'].keys()
+        if not rd.json_data[-1]['bots'][team1]:
+            winner_team = team2
+            loser_team = team1
+        elif not rd.json_data[-1]['bots'][team2]:
+            winner_team = team1
+            loser_team = team2
         else:
-            eid = (self._last_insert + 1) % self._capacity
-        self._last_insert = eid
-        for i, vec in enumerate(vectors):
-            self._storages[i][eid, :] = vec
-        return eid
+            winner_team = None
+            loser_team = team1
 
-    def get_entry(self, entry_id):
-        """
-        Gets memory entry at specified id.
-        :param entry_id: result of previous put_entry() call
-        :return: (state_before, action, state_after)
-        """
-        return [strg[entry_id, :] for strg in self._storages]
+        last_tick = next(i for i in range(len(rd.json_data)-1, -1)
+                         if rd.json_data['controls'][team1] is not None)
 
-    def get_last_entries(self, n):
-        """
-        Returns N last entries
-        :param n: number of entries to take
-        :return: 2-D vectors of samples of (state_before, action, state_after)
-        """
-        if n > self._used:
-            raise ValueError('not enough entries')
-        if n <= self._last_insert + 1:
-            smpl = slice(self._last_insert+1-n, self._last_insert+1)
-            return [strg[smpl, :] for strg in self._storages]
-        else:
-            return [
-                np.concatenate([
-                    strg[self._used-n+self._last_insert+1:self._used],
-                    strg[:self._last_insert+1]
-                ], axis=0)
-                for strg in self._storages
-            ]
+        rd.loser_numpy_data, rd.loser_action_idx = \
+            self._load_numpy_data_for_team(rd, loser_team, winner_team, last_tick+1)
+        if self._load_winner_data and winner_team is not None:
+            rd.winner_numpy_data, rd.winner_action_idx = \
+                self._load_numpy_data_for_team(rd, winner_team, loser_team, last_tick+1)
+        rd.ticks = np.arange(last_tick+1)
 
-    def get_random_sample(self, sample_size):
-        """
-        Generates a random sample of entries
-        :param sample_size: number of entries to take
-        :return: 2-D vectors of samples of (state_before, action, state_after)
-        """
-        smpl = tuple(random.sample(range(self._used), sample_size))
-        return [strg[smpl, :] for strg in self._storages]
-
-    def get_random_slice(self, slice_size):
-        # TODO doctring
-        start = random.randint(0, self._used-slice_size)
-        slc = slice(start, start+slice_size)
-        return [strg[slc, :] for strg in self._storages]
-
-
-class BalancedMemory:
-
-    def __init__(self, keyfunc, cap_per_class, vector_sizes):
-        self._keyfunc = keyfunc
-        self._cap_per_class = cap_per_class
-        self._vector_sizes = vector_sizes
-        self._classes = {}
-
-    def save(self, save_dir, serialize_key=str):
-        keymap = {key: str(i) for i, key in enumerate(self._classes.keys())}
-        for key, mem in self._classes.items():
-            subdir = keymap[key]
-            mem.save(os.path.join(save_dir, subdir))
-        with open(os.path.join(save_dir, 'keymap.json'), 'w') as f:
-            json.dump(
-                {serialize_key(key): subdir
-                 for key, subdir in keymap.items()},
-                f
+    def _load_numpy_data_for_team(self, rd, team, opponent_team, end_t):
+        state_array = np.empty([end_t+1, self.model.state_dimension], dtype=np.float32)
+        action_arrays = {
+            ctl: np.empty([end_t], dtype=np.float32)
+            for ctl in data.ALL_CONTROLS
+        }
+        prev_state = None
+        for i in range(end_t+1):
+            item = rd.json_data[i]
+            state_vector, prev_state = encode_vector_for_model(
+                self.model, item, prev_state,
+                team, opponent_team
             )
+            state_array[i] = state_vector
+        for ctl in data.ALL_CONTROLS:
+            act_arr = action_arrays[ctl]
+            get_idx = getattr(data, 'ctl_'+ctl).categories.index
+            for i in range(end_t):
+                act_arr[i] = get_idx(rd.json_data[i]['controls'][team][0][ctl])
 
-    def load(self, save_dir, load_key=str):
-        with open(os.path.join(save_dir, 'keymap.json')) as f:
-            keymap = json.load(f)
-        for key, subdir in keymap.items():
-            key = load_key(key)
-            mem = self._get_mem(key)
-            mem.load(os.path.join(save_dir, subdir))
-            self._classes[key] = mem
+        return state_array, action_arrays
 
-    def update(self, memory):
-        arrays = memory.get_last_entries(memory.used_size)
-        self.put_many(*arrays)
 
-    def put_many(self, *vector_arrays):
-        for vectors in zip(*vector_arrays):
-            self.put_entry(*vectors)
+class _ReplayData:
 
-    def trunc(self, to_size, offset=0):
-        to_sizes = self._distribute(to_size)
-        offsets = self._distribute(offset)
+    def __init__(self, key):
+        self.key = key
+        self.json_data = None
+        self.winner_numpy_data = None
+        self.loser_numpy_data = None
+        self.winner_action_idx = None
+        self.loser_action_idx = None
+        self.ticks = None
 
-        for key, mem in self._classes.items():
-            to_size = to_sizes[key]
-            offset = offsets[key]
-            offset = max(0, min(offset, mem.used_size - to_size))
-            mem.trunc(to_size, offset)
-
-    @property
-    def used_size(self):
-        return sum(mem.used_size for mem in self._classes.values())
-
-    def put_entry(self, *vectors):
-        key = self._keyfunc(*vectors)
-        mem = self._get_mem(key)
-        was_full = mem._used < mem._capacity
-        eid = mem.put_entry(*vectors)
-        now_full = mem._used < mem._capacity
-        if not was_full and now_full:
-            print("Buffer {} becomes full".format(key))
-        return key, eid
-
-    def get_entry(self, entry_id):
-        key, entry_id = entry_id
-        return self._classes[key].get_entru(entry_id)
-
-    def get_last_entries(self, n):
-        ns = self._distribute(n, n)
-        return self._combine_samples(
-            self._classes[key].get_last_entries(n)
-            for key, n in ns.items()
-        )
-
-    def get_random_sample(self, sample_size):
-        szs = self._distribute(sample_size, sample_size)
-        return self._combine_samples(
-            self._classes[key].get_random_sample(sz)
-            for key, sz in szs.items()
-        )
-
-    def get_random_slice(self, slice_size):
-        szs = self._distribute(slice_size, slice_size)
-        return self._combine_samples(
-            self._classes[key].get_random_slice(sz)
-            for key, sz in szs.items()
-        )
-
-    def _distribute(self, parameter, max_bins=None):
-        if not self._classes:
-            raise ValueError("BalancedMemory is empty")
-        itemlist = list(self._classes.items())
-        if max_bins is not None and max_bins < len(itemlist):
-            itemlist = random.sample(itemlist, max_bins)
-        sizes = {key: mem.used_size for key, mem in itemlist}
-        keys_asc = sorted(sizes.keys(), key=sizes.get)
-        result = {}
-        while keys_asc:
-            average = parameter / len(keys_asc)
-            key = keys_asc.pop(0)
-            sz = sizes[key]
-            take = min(sz, int(average))
-            result[key] = take
-            parameter -= take
-        return result
-
-    def _get_mem(self, key):
-        try:
-            return self._classes[key]
-        except KeyError:
-            mem = ReplayMemory(self._cap_per_class, *self._vector_sizes)
-            self._classes[key] = mem
-            return mem
-
-    def _combine_samples(self, samplesets):
-        return [
-            np.concatenate(column)
-            for column in zip(*samplesets)
-        ]
