@@ -53,6 +53,12 @@
         .grey-out {
             background-color: grey;
         }
+        .scrolled {
+            overflow: scroll;
+        }
+        .scroll-container {
+            overflow: scroll;
+        }
     </style>
     <script src="js/vendor/angular.min.js"></script>
     <script src="js/vendor/ngStorage.min.js"></script>
@@ -111,8 +117,8 @@
         </div>
     </div>
 
-    <div class="container main-area-box">
-        <div class="col-md-4" ng-class="{'grey-out': status.is_currently_loading}">
+    <div class="container main-area-box scroll-container">
+        <div class="col-md-4 scrolled" ng-class="{'grey-out': status.is_currently_loading}">
             <div class="row border1px" ng-repeat="sim in simulations">
                 <div class="col-md-5"  ng-click="setCurrentSimulation(sim)">
                     <div class="row">{{sim.init_name}}</div>

@@ -27,7 +27,7 @@ def main(argv=None):
     duel_matchups = [
         ('Duel {}v{}'.format(t1, t2),
          duel_bot_initializer(typemap[t1], typemap[t2], 0.7))
-        for t1, t2 in itertools.combinations('RTL', 2)
+        for t1, t2 in itertools.combinations_with_replacement('RTL', 2)
     ]
     random_matchups = []
     for matchup in config.RANDOM_MATCH_SETTINGS:

@@ -8,6 +8,7 @@ class ReplayDataStorage:
 
     def __init__(self, storage_directory):
         self.storage_directory = storage_directory
+        os.makedirs(storage_directory, exist_ok=True)
 
     def save_replay(self, key, metadata, replay_data):
         _, metadata_path, replay_path = self._prepare_paths(key, True)

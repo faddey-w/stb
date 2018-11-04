@@ -1,4 +1,3 @@
-import numpy as np
 import tensorflow as tf
 from strateobots.ai.lib import data
 
@@ -29,7 +28,7 @@ class RewardWeightedRegression:
             loss_vector = self.reward_ph * tf.log(
                 tf.clip_by_value(tf.gather_nd(
                     1-tf.nn.softmax(quality_safe, axis=1),
-                    tf.stack([tf.range(batch_size), self.action_idx_ph], axis=1)
+                    tf.stack([tf.range(batch_size), self.action_idx_ph[ctl]], axis=1)
                 ), 0.00001, 0.99999)
             )
             self.loss_vectors[ctl] = loss_vector
@@ -51,12 +50,12 @@ class RewardWeightedRegression:
 
     def compute_on_sample(self, session, replay_memory, tensors, batch_index):
 
-        states_before, actions, rewards = [], [], []
         ticks, actions, states, _ = replay_memory.get_prepared_epoch_batch(self.batch_size, batch_index)
         reward = self.reward_function(ticks)
 
         return session.run(tensors, {
-            self.state_ph: states_before,
-            self.action_idx_ph: actions,
+            self.state_ph: states,
             self.reward_ph: reward,
+            **{self.action_idx_ph[ctl]: actions[ctl]
+               for ctl in data.ALL_CONTROLS},
         })

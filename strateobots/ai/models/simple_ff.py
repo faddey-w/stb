@@ -59,7 +59,7 @@ class Model:
             self.fire_block.var_list,
             self.shield_block.var_list,
         ], [])
-        self.init_op = tf.initialize_variables(self.var_list)
+        self.init_op = tf.variables_initializer(self.var_list)
 
     def encode_prev_state(self, bot, enemy, bot_bullet, enemy_bullet):
         return data.coordinates_fields(enemy)

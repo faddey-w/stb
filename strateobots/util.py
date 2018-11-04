@@ -1,6 +1,8 @@
 import functools
 import time
 import sys
+import contextlib
+import signal
 
 
 def _cached_with_timeout_impl(timeout, keyfunc):
@@ -82,3 +84,21 @@ def _dwaa_wrap_flat(value):
     if type(value) is dict:
         value = DictWithAttrAccess(value)
     return value
+
+
+@contextlib.contextmanager
+def interrupt_atomic():
+    def handler(*args, **kwargs):
+        print('Will interrupt after atomic operation')
+        nonlocal interrupted
+        interrupted = True
+    interrupted = False
+
+    prev_handler = signal.getsignal(signal.SIGINT)
+    signal.signal(signal.SIGINT, handler)
+    yield
+    signal.signal(signal.SIGINT, prev_handler)
+    if interrupted:
+        raise KeyboardInterrupt
+
+

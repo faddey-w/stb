@@ -244,6 +244,8 @@ class StbEngine:
         # firing
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
+            if ctl.shield:
+                ctl.fire = False
             typ = bot.type  # type: BotTypeProperties
             if ctl.fire and not typ.shots_ray and bot.shot_ready:
                 angle = random.gauss(
