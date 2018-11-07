@@ -4,10 +4,9 @@ from strateobots.ai.lib import data
 
 class RewardWeightedRegression:
 
-    def __init__(self, model, reward_function, batch_size=10):
+    def __init__(self, model, batch_size=10):
         self.model = model
         self.batch_size = batch_size
-        self.reward_function = reward_function
 
         self.state_ph = tf.placeholder(tf.float32, [batch_size, model.state_dimension])
         self.action_idx_ph = {
@@ -25,11 +24,12 @@ class RewardWeightedRegression:
         for ctl in data.ALL_CONTROLS:
             quality = self.inference.controls[ctl]
             quality_safe = quality - tf.reduce_max(quality, axis=1, keepdims=True)
+            clip_epsilon = +0.00001
             loss_vector = self.reward_ph * tf.log(
                 tf.clip_by_value(tf.gather_nd(
                     1-tf.nn.softmax(quality_safe, axis=1),
                     tf.stack([tf.range(batch_size), self.action_idx_ph[ctl]], axis=1)
-                ), 0.00001, 0.99999)
+                ), clip_epsilon, 1-clip_epsilon)
             )
             self.loss_vectors[ctl] = loss_vector
         self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
@@ -50,8 +50,8 @@ class RewardWeightedRegression:
 
     def compute_on_sample(self, session, replay_memory, tensors, batch_index):
 
-        ticks, actions, states, _ = replay_memory.get_prepared_epoch_batch(self.batch_size, batch_index)
-        reward = self.reward_function(ticks)
+        props, actions, states, _ = replay_memory.get_prepared_epoch_batch(batch_index)
+        reward = props[..., 0]
 
         return session.run(tensors, {
             self.state_ph: states,

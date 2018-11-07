@@ -15,6 +15,7 @@ class Constants:
     friction_factor = 175
     collision_factor = 0.0002
     rotation_smoothness = 5
+    min_collision_speed = 3
 
 
 log = logging.getLogger(__name__)
@@ -25,7 +26,8 @@ class StbEngine:
     TEAMS = 0x00DD00, 0x0000FF
 
     def __init__(self, world_width, world_height, ai1, ai2, initialize_bots,
-                 max_ticks=1000, wait_after_win=1, teams=None, stop_all_after_finish=False):
+                 max_ticks=1000, wait_after_win=1, wait_after_win_ticks=None,
+                 teams=None, stop_all_after_finish=False):
         self.world_width = world_width
         self.world_height = world_height
         self.stop_all_after_finish = stop_all_after_finish
@@ -45,7 +47,9 @@ class StbEngine:
         self.max_ticks = max_ticks
         self._win_reached_at = None
         self.ticks_per_sec = 50
-        self._wait_after_win = max(1, wait_after_win * self.ticks_per_sec)
+        if wait_after_win_ticks is None:
+            wait_after_win_ticks = self.ticks_per_sec * wait_after_win
+        self._wait_after_win = max(1, wait_after_win_ticks)
 
         self.ai1 = ai1
         self.ai2 = ai2
@@ -94,6 +98,7 @@ class StbEngine:
         collision_factor = Constants.collision_factor
         rotation_smoothness = Constants.rotation_smoothness
         eps = Constants.epsilon
+        min_collision_speed = Constants.min_collision_speed
 
         # process AI
         bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = \
@@ -394,6 +399,10 @@ class StbEngine:
                 b2.y = my + (bot_radius + eps) * c_sin
 
                 # make damage
+
+                if abs(v1r-v2r) < min_collision_speed:
+                    continue
+
                 e1a = vec_len2(b1.vx, b1.vy)
                 e2a = vec_len2(b2.vx, b2.vy)
 

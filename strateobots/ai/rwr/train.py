@@ -1,7 +1,9 @@
 import logging
+import argparse
+import shutil
+import os
 import tensorflow as tf
 import numpy as np
-from functools import partial
 from strateobots.engine import StbEngine, BotType
 from strateobots import util
 from strateobots.ai.lib.bot_initializers import duel_bot_initializer
@@ -14,16 +16,42 @@ from strateobots.ai.rwr.core import RewardWeightedRegression
 log = logging.getLogger(__name__)
 
 
+def reward_function(replay_data, team, is_win,
+                    decay=0.99):
+    n = len(replay_data)-1
+    opp_team = (set(replay_data[0]['bots']) - {team}).pop()
+    reward = np.zeros([n])
+    reward += 100 / n * (+1 if is_win else -1)
+    r = 0.0
+
+    def get_hp(tick):
+        bots = replay_data[tick]['bots'][opp_team]
+        if bots:
+            return bots[0]['hp']
+        else:
+            return 0.0 if tick > 0 else 1.0
+
+    for i in range(n-1, -1, -1):
+        hp_next = get_hp(i+1)
+        hp_prev = get_hp(i)
+        imm_r = hp_prev - hp_next
+        r = decay * r + imm_r
+        reward[i] += r
+
+    return reward
+
+
 class RWRTraining:
 
     def __init__(self, session, storage_directory):
         self.sess = session
         self.model = simple_ff.Model('RWRModel')
         self.training_step = 0
-        self.replay_memory = replay.ReplayMemory(storage_directory, self.model)
+        self.replay_memory = replay.ReplayMemory(storage_directory, self.model,
+                                                 reward_function,
+                                                 load_winner_data=True)
         self.rwr = RewardWeightedRegression(
             self.model,
-            partial(reward_function, decay=0.99),
             batch_size=100
         )
         self.function = integration.ModelAiFunction(self.model, self.sess)
@@ -31,6 +59,7 @@ class RWRTraining:
         self.bot_init = duel_bot_initializer(BotType.Raider, BotType.Raider, 0.8)
         self.bot_init_name = 'Duel RvR'
         self.n_batches_per_loop = 10
+        self.win_lost_proportion = 0.0
 
     def run_game(self, opponent):
         engine = StbEngine(
@@ -40,7 +69,7 @@ class RWRTraining:
             ai2=opponent['function'],
             initialize_bots=self.bot_init,
             max_ticks=2000,
-            wait_after_win=1,
+            wait_after_win_ticks=0,
             stop_all_after_finish=True,
         )
         metadata = dict(
@@ -74,13 +103,16 @@ class RWRTraining:
             self.replay_memory.add_replay(metadata, engine.replay)
 
     def train_once(self, n_batches):
-        self.replay_memory.prepare_epoch(n_batches * self.rwr.batch_size, True)
+        win_batch = int(self.rwr.batch_size * self.win_lost_proportion)
+        lost_batch = self.rwr.batch_size - win_batch
+        self.replay_memory.prepare_epoch(win_batch, lost_batch, n_batches, True)
 
         for i in range(n_batches):
             self.rwr.do_train_step(self.sess, self.replay_memory, i)
         self.training_step += 1
 
-    def game_train_loop(self):
+    def game_train_loop(self, n_games):
+        log.info('Start training')
         opponent = {
             'function': simple_duel.short_range_attack,
             'name': 'Close distance attack',
@@ -91,26 +123,31 @@ class RWRTraining:
             try:
                 self.train_once(self.n_batches_per_loop)
             except replay.NotEnoughData:
-                pass
-
-
-def reward_function(ticks, decay):
-    ticks_remaining = ticks[..., 1] - ticks[..., 0]
-    result = np.zeros_like(ticks_remaining)
-    r = result[-1] = -1
-    for i in range(np.size(ticks_remaining) - 2, -1, -1):
-        next_r = decay * r
-        r = result[i] = next_r
-    return result
+                log.info('not enough data')
+            if n_games is not None:
+                n_games -= 1
+                if n_games <= 0:
+                    break
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--drop-data', action='store_true')
+    parser.add_argument('--data-dir', default='_data/RWR')
+    parser.add_argument('--n-games', '-n', type=int)
+    opts = parser.parse_args()
+
     logging.basicConfig(level=logging.INFO, format='%(message)s')
     session = tf.Session()
-    rwr_train = RWRTraining(session, '_data/RWR')
+
+    if opts.drop_data:
+        if os.path.exists(opts.data_dir):
+            shutil.rmtree(opts.data_dir)
+
+    rwr_train = RWRTraining(session, opts.data_dir)
     session.run(rwr_train.model.init_op)
     session.run(rwr_train.rwr.init_op)
-    rwr_train.game_train_loop()
+    rwr_train.game_train_loop(opts.n_games)
 
 
 if __name__ == '__main__':
