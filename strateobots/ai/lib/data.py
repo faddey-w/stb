@@ -33,7 +33,7 @@ class Feature:
     def __call__(self, value, **variable_keys):
         value = self._get_value(value, variable_keys)
         if self.converter:
-            value = self.converter
+            value = self.converter(value)
         return self._process_value(value)
 
 
@@ -73,16 +73,41 @@ class IntervalFeature(Feature):
         return result
 
 
+class RangeSensorFeature(Feature):
+
+    def __init__(self, path, min_value, max_value, n_sensors, converter=None):
+        super().__init__(path, converter)
+        self.min_value = min_value
+        self.max_value = max_value
+        self.dimension = n_sensors
+        self._step = (max_value - min_value) / n_sensors
+
+    def _process_value(self, value):
+        result = np.zeros([self.dimension], dtype=self.dtype)
+        if value < self.min_value:
+            result[0] = 1
+        elif value >= self.max_value:
+            result[-1] = 1
+        else:
+            index = (value - self.min_value) / self._step
+            lower = int(index)
+            lower_prop = index - lower
+            higher_prop = 1 - lower_prop
+            result[lower] = lower_prop
+            result[lower+1] = higher_prop
+        return result
+
+
 class FeatureSet:
-    def __init__(self, *features):
-        self.features = features
-        self.dimension = sum(f.dimension for f in features)
+    def __init__(self, features):
+        self.features = list(features)
+        self.dimension = sum(f.dimension for f in self.features)
 
     def __call__(self, value, **variable_keys):
         return np.concatenate([f(value, **variable_keys) for f in self.features])
 
 
-bot_visible_fields = FeatureSet(
+bot_visible_fields = FeatureSet([
     Feature(['x']),
     Feature(['y']),
     Feature(['hp']),
@@ -91,24 +116,24 @@ bot_visible_fields = FeatureSet(
     Feature(['shield']),
     Feature(['has_shield']),
     Feature(['is_firing']),
-)
-bot_private_fields = FeatureSet(
+])
+bot_private_fields = FeatureSet([
     Feature(['vx']),
     Feature(['vy']),
     Feature(['load']),
     Feature(['shot_ready']),
     Feature(['shield_warmup']),
-)
-coordinates_fields = FeatureSet(
+])
+coordinates_fields = FeatureSet([
     Feature(['x']),
     Feature(['y']),
-)
-bullet_fields = FeatureSet(
+])
+bullet_fields = FeatureSet([
     Feature(['present']),
     Feature(['x']),
     Feature(['y']),
     Feature(['orientation']),
-)
+])
 
 ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'fire', 'shield'
 

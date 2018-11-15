@@ -3,7 +3,7 @@ import random
 import time
 import logging
 from strateobots.replay import ReplayDataStorage
-from strateobots.ai.lib.integration import encode_vector_for_model
+from strateobots.ai.lib.model_function import encode_vector_for_model
 from strateobots.ai.lib import data
 
 
@@ -12,10 +12,13 @@ log = logging.getLogger(__name__)
 
 class ReplayMemory:
 
-    def __init__(self, storage_directory, model, props_function, load_winner_data=False, max_games_keep=100):
+    def __init__(self, storage_directory, model, props_function,
+                 load_winner_data=False, load_loser_data=True,
+                 max_games_keep=100):
         self._rds = ReplayDataStorage(storage_directory)
         self.model = model
         self._load_winner_data = load_winner_data
+        self._load_loser_data = load_loser_data
         self.max_games_keep = max_games_keep
         self.props_function = props_function
         self._data = []
@@ -158,8 +161,9 @@ class ReplayMemory:
         last_tick = next(i for i in range(len(rd.json_data)-1, -1, -1)
                          if rd.json_data[i]['controls'][team1] is not None)
 
-        rd.loser_state_data, rd.loser_action_idx = \
-            self._load_numpy_data_for_team(rd, loser_team, winner_team, last_tick+1)
+        if self._load_loser_data:
+            rd.loser_state_data, rd.loser_action_idx = \
+                self._load_numpy_data_for_team(rd, loser_team, winner_team, last_tick+1)
         if self._load_winner_data and winner_team is not None:
             rd.winner_state_data, rd.winner_action_idx = \
                 self._load_numpy_data_for_team(rd, winner_team, loser_team, last_tick+1)

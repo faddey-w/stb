@@ -1,157 +1,184 @@
 import tensorflow as tf
+import numpy as np
 from math import pi
+from collections import defaultdict
 
-from strateobots.ai.lib import layers
-from strateobots.ai.lib.data import state2vec
-from strateobots.ai.rwr.model.base import BaseActionInferenceModel
-
-ANGLE_FEATURES = (
-    (0, 'orientation'),
-    (0, 'tower_orientation'),
-    (1, 'orientation'),
-    (1, 'tower_orientation'),
-    (2, 'orientation'),
-    (3, 'orientation'),
-)
-RANGE_FEATURES = (
-    (0, 'x'),
-    (0, 'y'),
-    (1, 'x'),
-    (1, 'y'),
-    (2, 'remaining_range'),
-    (3, 'remaining_range'),
-)
-OTHER_FEATURES = (
-    (0, 'hp_ratio'),
-    (0, 'load'),
-    (0, 'shield_ratio'),
-    (1, 'hp_ratio'),
-    (1, 'load'),
-    (1, 'shield_ratio'),
-    (2, 'present'),
-    (3, 'present'),
-)
+from strateobots.ai.lib import data, nn
+from strateobots.ai.simple_duel import norm_angle
 
 
-class ActionInferenceModel(BaseActionInferenceModel):
+def _angle_feature(path):
+    return data.RangeSensorFeature(path, 0, 2*pi, 30, norm_angle)
 
-    def _create_layers(self, layer_sizes, angle_sections):
 
-        self.layers = []
-        in_dim = (
-            + (angle_sections + 1)  # vector from bot to enemy
-            + (angle_sections + 1)  # vector from enemy to our bullet
-            + (angle_sections + 1)  # vector from bot to enemy's bullet
-            + 2 * (angle_sections + 1)  # 2 bot velocity vectors
-            + angle_sections * len(ANGLE_FEATURES)
-            + len(RANGE_FEATURES)
-            + len(OTHER_FEATURES)
+def _scale(scale):
+    return lambda x: scale * x
+
+
+angle_features = data.FeatureSet([
+    _angle_feature(['bot', 'orientation']),
+    _angle_feature(['bot', 'tower_orientation']),
+    _angle_feature(['enemy', 'orientation']),
+    _angle_feature(['enemy', 'tower_orientation']),
+    _angle_feature(['bot_bullet', 'orientation']),
+    _angle_feature(['enemy_bullet', 'orientation']),
+    _angle_feature(['engineered', 'angle_to_enemy']),
+])
+
+COORDINATE_SCALE = _scale(0.01)
+VELOCITY_SCALE = _scale(0.1)
+range_features = data.FeatureSet([
+    data.Feature(['bot', 'x'], COORDINATE_SCALE),
+    data.Feature(['bot', 'y'], COORDINATE_SCALE),
+    data.Feature(['bot', 'vx'], VELOCITY_SCALE),
+    data.Feature(['bot', 'vy'], VELOCITY_SCALE),
+    data.Feature(['enemy', 'x'], COORDINATE_SCALE),
+    data.Feature(['enemy', 'y'], COORDINATE_SCALE),
+    data.Feature(['bot_bullet', 'x'], COORDINATE_SCALE),
+    data.Feature(['bot_bullet', 'y'], COORDINATE_SCALE),
+    data.Feature(['enemy_bullet', 'x'], COORDINATE_SCALE),
+    data.Feature(['enemy_bullet', 'y'], COORDINATE_SCALE),
+    data.Feature(['engineered', 'distance_to_enemy'], COORDINATE_SCALE),
+])
+
+other_features = data.FeatureSet([
+    data.Feature(['bot', 'hp']),
+    data.Feature(['bot', 'shield']),
+    data.Feature(['bot', 'has_shield']),
+    data.Feature(['bot', 'is_firing']),
+    data.Feature(['bot', 'load']),
+    data.Feature(['bot', 'shot_ready']),
+    data.Feature(['bot', 'shield_warmup']),
+    data.Feature(['enemy', 'hp']),
+    data.Feature(['enemy', 'shield']),
+    data.Feature(['enemy', 'has_shield']),
+    data.Feature(['enemy', 'is_firing']),
+    data.Feature(['bot_bullet', 'present']),
+    data.Feature(['enemy_bullet', 'present']),
+])
+
+
+class Model:
+
+    _prev_state_dimension = data.coordinates_fields.dimension
+    _current_state_dimension = sum((
+        angle_features.dimension,
+        range_features.dimension,
+        other_features.dimension,
+    ))
+    state_dimension = _prev_state_dimension + _current_state_dimension
+    name = 'ClassicNNModel'
+
+    def __init__(self, name=None):
+        if name is not None:
+            self.name = name
+
+        with tf.variable_scope(self.name):
+            self.move_block = nn.LayerChain(
+                nn.Linear.chain_factory(self.state_dimension, 'MoveBlock'),
+                (50, tf.nn.relu),
+                (data.ctl_move.dimension, tf.identity),
+            )
+            self.rotate_block = nn.LayerChain(
+                nn.Residual.chain_factory(self.state_dimension, 'RotateBlock', allow_skip_transform=True),
+                (20, tf.square),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                (20, tf.nn.leaky_relu),
+                # (30, tf.nn.relu),
+                (data.ctl_rotate.dimension, tf.identity),
+            )
+            self.tower_rotate_block = nn.LayerChain(
+                nn.Linear.chain_factory(self.state_dimension, 'TowerBlock'),
+                (30, tf.nn.relu),
+                (30, tf.nn.relu),
+                (30, tf.nn.relu),
+                (30, tf.nn.relu),
+                (data.ctl_tower_rotate.dimension, tf.identity),
+            )
+            self.fire_block = nn.LayerChain(
+                nn.Linear.chain_factory(self.state_dimension, 'FireBlock'),
+                (10, tf.sigmoid),
+                (data.ctl_fire.dimension, tf.identity),
+            )
+            self.shield_block = nn.LayerChain(
+                nn.Linear.chain_factory(self.state_dimension, 'ShieldBlock'),
+                (10, tf.sigmoid),
+                (data.ctl_shield.dimension, tf.identity),
+            )
+        self.var_list = sum([
+            self.move_block.var_list,
+            self.rotate_block.var_list,
+            self.tower_rotate_block.var_list,
+            self.fire_block.var_list,
+            self.shield_block.var_list,
+        ], [])
+        self.init_op = tf.variables_initializer(self.var_list)
+
+    def encode_prev_state(self, bot, enemy, bot_bullet, enemy_bullet):
+        return COORDINATE_SCALE(data.coordinates_fields(enemy))
+
+    def encode_state(self, bot, enemy, bot_bullet, enemy_bullet):
+        # prepare data of optional objects
+        if bot_bullet is None:
+            bot_bullet = defaultdict(float, present=False)
+        else:
+            bot_bullet = {'present': True, **bot_bullet}
+        if enemy_bullet is None:
+            enemy_bullet = defaultdict(float, present=False)
+        else:
+            enemy_bullet = {'present': True, **enemy_bullet}
+
+        # prepare engineered features
+        dx = enemy['x'] - bot['x']
+        dy = enemy['y'] - bot['y']
+        extra = {
+            'angle_to_enemy': np.arctan2(dy, dx),
+            'distance_to_enemy': np.sqrt(dx*dx + dy*dy),
+        }
+
+        # build complete data structure
+        all_state = dict(
+            bot=bot,
+            enemy=enemy,
+            bot_bullet=bot_bullet,
+            enemy_bullet=enemy_bullet,
+            engineered=extra
         )
-        for i, out_dim in enumerate(layer_sizes):
-            node = layers.Linear('Lin{}'.format(i), in_dim, out_dim)
-            self.layers.append(node)
-            in_dim = out_dim
 
-        self.angle_sections = angle_sections
+        # do encoding
+        angles = angle_features(all_state)
+        ranges = range_features(all_state)
+        others = other_features(all_state)
+        return np.concatenate([angles, ranges, others])
 
-        return in_dim, self.layers
+    def apply(self, state_vector_array):
+        move = self.move_block.apply(state_vector_array)
+        rotate = self.rotate_block.apply(state_vector_array)
+        tower_rotate = self.tower_rotate_block.apply(state_vector_array)
+        fire = self.fire_block.apply(state_vector_array)
+        shield = self.shield_block.apply(state_vector_array)
+        return self._Apply(state_vector_array,
+                           move, rotate, tower_rotate, fire, shield)
 
-    def create_inference(self, inference, state):
-        nodes = []
-        f = selector(state)
+    class _Apply:
 
-        bmx = f(0, 'x')
-        bmy = f(0, 'y')
-        emx = f(1, 'x')
-        emy = f(1, 'y')
-        bbx = f(2, 'x')
-        bby = f(2, 'y')
-        ebx = f(3, 'x')
-        eby = f(3, 'y')
-        bmo = f(0, 'orientation')
-        emo = f(1, 'orientation')
-
-        b2e_mx = emx-bmx
-        b2e_my = emy-bmy
-        e2b_bx = bbx-emx
-        e2b_by = bby-emy
-        b2e_bx = ebx-bmx
-        b2e_by = eby-bmy
-
-        b2e_mr = tf_vec_length(b2e_mx, b2e_my)
-        e2b_br = tf_vec_length(e2b_bx, e2b_by)
-        b2e_br = tf_vec_length(b2e_bx, b2e_by)
-
-        b2e_ma = tf_normed_angle(b2e_mx, b2e_my, bmo)
-        e2b_ba = tf_normed_angle(e2b_bx, e2b_by, emo)
-        b2e_ba = tf_normed_angle(b2e_bx, b2e_by, bmo)
-
-        bvx = f(0, 'vx')
-        bvy = f(0, 'vy')
-        evx = f(1, 'vx')
-        evy = f(1, 'vy')
-
-        ranges = [
-            b2e_mr,
-            e2b_br,
-            b2e_br,
-            tf_vec_length(bvx, bvy),
-            tf_vec_length(evx, evy),
-            *map(f, RANGE_FEATURES),
-        ]
-        ranges_tensor = tf.concat(ranges, -1) / 500.0
-
-        angles = [
-            b2e_ma,
-            e2b_ba,
-            b2e_ba,
-            tf_normed_angle(bvx, bvy, bmo),
-            tf_normed_angle(evx, evy, emo),
-            *map(f, ANGLE_FEATURES),
-        ]
-        angle_tensor_parts = []
-        for angle in angles:
-            a_interval = 2 * pi / self.angle_sections
-            a_normed = angle / a_interval
-            for i in range(self.angle_sections):
-                a_before = a_normed - i + 1
-                a_after = - a_normed + i + 1
-                a_tensor_part = tf.maximum(0.0, tf.minimum(a_before, a_after))
-                angle_tensor_parts.append(a_tensor_part)
-        angles_tensor = tf.concat(angle_tensor_parts, -1)
-
-        inference.input_tensor = tf.concat([
-            ranges_tensor,
-            angles_tensor,
-            *map(f, OTHER_FEATURES),
-        ], -1)
-
-        vector = inference.input_tensor
-        for layer in self.layers:
-            node = layer.apply(vector, tf.sigmoid)
-            vector = node.out
-            nodes.append(node)
-        inference.nodes = nodes
-        return vector
-
-Model = ActionInferenceModel
-
-
-def selector(tensor):
-    def select(*feature_name):
-        if len(feature_name) == 1 and isinstance(feature_name[0], tuple):
-            feature_name = feature_name[0]
-        idx = state2vec[feature_name]
-        return tensor[..., idx:idx+1]
-    return select
-
-
-def tf_vec_length(x, y):
-    return tf.sqrt(tf.square(x) + tf.square(y))
-
-
-def tf_normed_angle(x, y, rel_a=None):
-    a = tf.atan2(y, x)
-    if rel_a is not None:
-        a -= rel_a
-    return a % (2 * pi)
+        def __init__(self, state, move, rotate, tower_rotate, fire, shield):
+            self.state = state
+            self.move = move
+            self.rotate = rotate
+            self.tower_rotate = tower_rotate
+            self.fire = fire
+            self.shield = shield
+            self.controls = {
+                'move': self.move[-1].out,
+                'rotate': self.rotate[-1].out,
+                'tower_rotate': self.tower_rotate[-1].out,
+                'fire': self.fire[-1].out,
+                'shield': self.shield[-1].out,
+            }

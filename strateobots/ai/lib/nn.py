@@ -35,13 +35,13 @@ class Linear:
                 self.out = activation(self.biased)
 
     @classmethod
-    def chain_factory(cls, input_dim, name_prefix):
+    def chain_factory(cls, input_dim, name_prefix, **kwargs):
         i = 1
 
         def factory(out_dim, activation=None):
             nonlocal input_dim, i
             name = name_prefix + str(i)
-            self = cls(name, input_dim, out_dim, activation=activation)
+            self = cls(name, input_dim, out_dim, activation=activation, **kwargs)
             i += 1
             input_dim = out_dim
             return self
@@ -50,11 +50,14 @@ class Linear:
 
 class Residual(Linear):
 
-    def __init__(self, name, in_dim, out_dim):
-        super(Residual, self).__init__(name, in_dim, out_dim)
-        with tf.variable_scope(self.name):
-            self.transform = tf.get_variable('T', [in_dim, out_dim])
-        self.var_list.append(self.transform)
+    def __init__(self, name, in_dim, out_dim, shared_weight=None, activation=None, allow_skip_transform=False):
+        super(Residual, self).__init__(name, in_dim, out_dim, shared_weight, activation)
+        if in_dim == out_dim and allow_skip_transform:
+            self.transform = None
+        else:
+            with tf.variable_scope(self.name):
+                self.transform = tf.get_variable('T', [in_dim, out_dim])
+            self.var_list.append(self.transform)
 
     class Apply:
         def __init__(self, x, model: 'Residual', activation):
@@ -63,8 +66,12 @@ class Residual(Linear):
             self.x = x
             with tf.name_scope(self.name):
                 self.resid = Linear.Apply(x, model, activation)
-                self.transformed = batch_matmul(x, model.transform)
-                self.out = self.transformed - self.resid.out
+                self.has_transform = model.transform is not None
+                if self.has_transform:
+                    self.transformed = batch_matmul(x, model.transform)
+                    self.out = self.transformed - self.resid.out
+                else:
+                    self.out = x - self.resid.out
 
 
 class ResidualV2:

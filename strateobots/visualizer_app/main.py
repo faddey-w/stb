@@ -18,6 +18,7 @@ def main(argv=None):
     parser.add_argument('--static-dir', required=True)
     parser.add_argument('--port', '-P', default=9999, type=int)
     parser.add_argument('--storage-dir', required=True)
+    parser.add_argument('--saved-models-dir', '-M')
     parser.add_argument('--debug', action='store_true')
     args = parser.parse_args(argv)
     logging.config.dictConfig(config.DEBUG_LOGGING if args.debug else config.LOGGING)
@@ -46,7 +47,7 @@ def main(argv=None):
         default_module,
         physics_demo.AIModule(),
         simple_duel.AIModule(),
-        models.AIModule(),
+        models.AIModule(args.saved_models_dir),
     ], storage)
     initargs = dict(serverstate=state, auth_handler=handlers.noop_auth_handler)
     fileserver_args = dict(path=args.static_dir, default_filename='index.html')

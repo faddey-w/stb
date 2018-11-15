@@ -7,7 +7,7 @@ import numpy as np
 from strateobots.engine import StbEngine, BotType
 from strateobots import util
 from strateobots.ai.lib.bot_initializers import duel_bot_initializer
-from strateobots.ai.lib import integration, replay
+from strateobots.ai.lib import model_function, replay
 from strateobots.ai.models import simple_ff
 from strateobots.ai import simple_duel
 from strateobots.ai.rwr.core import RewardWeightedRegression
@@ -52,14 +52,14 @@ class RWRTraining:
                                                  load_winner_data=True)
         self.rwr = RewardWeightedRegression(
             self.model,
-            batch_size=100
+            batch_size=300
         )
-        self.function = integration.ModelAiFunction(self.model, self.sess)
+        self.function = model_function.ModelAiFunction(self.model, self.sess)
 
         self.bot_init = duel_bot_initializer(BotType.Raider, BotType.Raider, 0.8)
         self.bot_init_name = 'Duel RvR'
-        self.n_batches_per_loop = 10
-        self.win_lost_proportion = 0.0
+        self.n_batches_per_loop = 2
+        self.win_lost_proportion = 1.0
 
     def run_game(self, opponent):
         engine = StbEngine(
