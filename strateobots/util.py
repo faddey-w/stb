@@ -3,6 +3,7 @@ import time
 import sys
 import contextlib
 import signal
+from collections import UserDict
 
 
 def _cached_with_timeout_impl(timeout, keyfunc):
@@ -62,27 +63,40 @@ def replay_descriptor_from_storage(storage, key):
     }
 
 
-class DictWithAttrAccess(dict):
+class objedict(UserDict):
+
+    def __getitem__(self, item):
+        return _objedict_wrap_nested(super(objedict, self).__getitem__(item))
 
     def __getattr__(self, item):
-        return _dwaa_wrap_nested(self[item])
+        return self[item]
 
     def __setattr__(self, key, value):
-        self[key] = value
+        try:
+            self.__dict__['data'][key] = value
+        except KeyError:
+            super(objedict, self).__setattr__(key, value)
+
+    @property
+    def __class__(self):
+        return dict
 
 
-def _dwaa_wrap_nested(value):
+DictWithAttrAccess = objedict
+
+
+def _objedict_wrap_nested(value):
     typ = type(value)
     if typ is dict:
-        value = DictWithAttrAccess(value)
+        value = objedict(value)
     elif typ in (list, tuple, set, frozenset):
-        value = typ(map(_dwaa_wrap_flat, value))
+        value = typ(map(_objedict_wrap_flat, value))
     return value
 
 
-def _dwaa_wrap_flat(value):
+def _objedict_wrap_flat(value):
     if type(value) is dict:
-        value = DictWithAttrAccess(value)
+        value = objedict(value)
     return value
 
 

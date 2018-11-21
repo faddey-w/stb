@@ -1,7 +1,7 @@
-from math import pi, acos, sqrt, asin, copysign, cos, sin
+from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
 from strateobots.engine import dist_points, vec_len, dist_line, vec_dot
 from strateobots.engine import Constants, BotType
-from strateobots.util import DictWithAttrAccess
+from strateobots.util import objedict
 from . import base
 
 
@@ -27,11 +27,11 @@ class AIModule(base.AIModule):
 
 
 def short_range_attack(state):
-    bot = DictWithAttrAccess(state['friendly_bots'][0])
+    bot = objedict(state['friendly_bots'][0])
     bottype = BotType.by_code(bot.type)
-    enemy = DictWithAttrAccess(state['enemy_bots'][0])
+    enemy = objedict(state['enemy_bots'][0])
     enemytype = BotType.by_code(enemy.type)
-    ctl = DictWithAttrAccess()
+    ctl = objedict()
     ctl.id = bot.id
 
     orbit_k = 1 / 3
@@ -39,7 +39,7 @@ def short_range_attack(state):
     max_speed = sqrt(500 * orbit)
 
     dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
-    enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
+    enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     ori_angle = norm_angle(bot.orientation)
 
     ctl.tower_rotate = navigate_gun(bot, enemy)
@@ -75,11 +75,11 @@ def short_range_attack(state):
 
 
 def distance_attack(state):
-    bot = DictWithAttrAccess(state['friendly_bots'][0])
+    bot = objedict(state['friendly_bots'][0])
     bottype = BotType.by_code(bot.type)
-    enemy = DictWithAttrAccess(state['enemy_bots'][0])
+    enemy = objedict(state['enemy_bots'][0])
     enemytype = BotType.by_code(enemy.type)
-    ctl = DictWithAttrAccess()
+    ctl = objedict()
     ctl.id = bot.id
     max_ahead_v = 100
 
@@ -96,7 +96,7 @@ def distance_attack(state):
         ctl.move = -1
 
     # try to keep target in front
-    enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
+    enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
     ctl.tower_rotate = navigate_shortest(bot, enemy_angle)
     # ori_angle = norm_angle(bot.orientation)
@@ -138,15 +138,6 @@ def turret_behavior(bot, enemy, ctl, engine=None):
         ctl.rotate = rot
 
 
-def to_angle(dx, dy, dist=None):
-    if dist is None:
-        dist = sqrt(dx*dx + dy*dy)
-    angle = acos(dx / dist)
-    if dy < 0:
-        angle = -angle
-    return angle
-
-
 def norm_angle(angle):
     angle %= (2 * pi)
     if angle > pi:
@@ -182,8 +173,7 @@ def navigate_shortest(bot, enemy_angle, with_gun=True):
 
 
 def navigate_gun(bot, enemy):
-    dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
-    enemy_angle = to_angle((enemy.x - bot.x), (enemy.y - bot.y), dist)
+    enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     gun_angle = norm_angle(bot.orientation + bot.tower_orientation)
     delta_angle = norm_angle(enemy_angle - gun_angle)
     # if dist < bot.type.shot_range:
@@ -201,8 +191,7 @@ def navigate_gun(bot, enemy):
 def get_angle(from_bot, to_bot):
     dx = to_bot.x - from_bot.x
     dy = to_bot.y - from_bot.y
-    dist = dist_points(to_bot.x, to_bot.y, from_bot.x, from_bot.y)
-    return to_angle(dx, dy, dist)
+    return atan2(dy, dx)
 
 
 def is_at_back(bot, angle):

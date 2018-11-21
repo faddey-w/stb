@@ -40,6 +40,9 @@ class ReplayMemory:
             # self._rds.remove_replay(self._data[0].key)
             del self._data[0]
 
+    def total_items(self):
+        return sum(rd.ticks.size-1 for rd in self._data)
+
     def prepare_epoch(self, win_batch_size, lost_batch_size, n_batches, shuffle=False):
         win_epoch = self.get_winner_data_flat(n_batches * win_batch_size, shuffle)
         lost_epoch = self.get_loser_data_flat(n_batches * lost_batch_size, shuffle)

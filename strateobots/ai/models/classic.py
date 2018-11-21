@@ -56,11 +56,15 @@ other_features = data.FeatureSet([
     data.Feature(['bot_bullet', 'present']),
     data.Feature(['enemy_bullet', 'present']),
 ])
+coordinates_fields = data.FeatureSet([
+    data.Feature(['x'], COORDINATE_SCALE),
+    data.Feature(['y'], COORDINATE_SCALE),
+])
 
 
 class Model:
 
-    _prev_state_dimension = data.coordinates_fields.dimension
+    _prev_state_dimension = coordinates_fields.dimension
     _current_state_dimension = sum((
         angle_features.dimension,
         range_features.dimension,

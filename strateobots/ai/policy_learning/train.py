@@ -25,7 +25,7 @@ class PLTraining:
                                                  load_winner_data=True,
                                                  load_loser_data=False,
                                                  )
-        import code; code.interact(local=dict(**locals(), **globals()))
+        # import code; code.interact(local=dict(**locals(), **globals()))
         self.pl = PolicyLearning(
             self.model,
             batch_size=300
@@ -37,17 +37,27 @@ class PLTraining:
         accuracies = defaultdict(float)
 
         for i in range(n_batches):
-            act_idx, ctl_val = self.pl.do_train_step(self.sess, self.replay_memory, i, extra_t)
+            _, (act_idx, ctl_val) = self.pl.compute_on_sample(
+                self.sess,
+                self.replay_memory,
+                [self.pl.train_steps['tower_rotate'], extra_t],
+                i,
+            )
             for ctl in data.ALL_CONTROLS:
                 pred_idx = np.argmax(ctl_val[ctl], 1)
                 correct = act_idx[ctl] == pred_idx
                 accuracies[ctl] += np.sum(correct) / np.size(pred_idx) / n_batches
-        message = '#{}: {}'.format(step_idx, ' '.join(
+        message = '#{}: {}'.format((step_idx+1) * n_batches, ' '.join(
             '{}={:.2f}'.format(ctl, accuracies[ctl])
             for ctl in data.ALL_CONTROLS
         ))
         log.info(message)
         return accuracies
+
+    def __call__(self, tensor, prepare_new=False):
+        if prepare_new:
+            self.replay_memory.prepare_epoch(self.pl.batch_size, 0, 1, True)
+        return self.pl.compute_on_sample(self.sess, self.replay_memory, tensor, 0)
 
     def train_loop(self, target_accuracy=None, max_iterations=None, max_time=None):
         def iterator():
@@ -63,7 +73,7 @@ class PLTraining:
             stop_time = None
         log.info('Start training')
         for i in iterator():
-            accuracies = self.train_once(i, 20)
+            accuracies = self.train_once(i, 100)
             if target_accuracy is not None:
                 if min(accuracies.values()) >= target_accuracy:
                     break
@@ -84,6 +94,8 @@ def main():
     parser.add_argument('--max-accuracy', '-A', type=float)
     parser.add_argument('--max-time', '-t', type=float)
     parser.add_argument('--save-dir', '-S')
+    parser.add_argument('--interactive', '-i', action='store_true')
+    parser.add_argument('--interactive-after', '-a', action='store_true')
     opts = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -92,15 +104,40 @@ def main():
     pl_train = PLTraining(session, opts.data_dir)
     session.run(pl_train.model.init_op)
     session.run(pl_train.pl.init_op)
+
+    plt = pl_train
+    if opts.interactive:
+        interactive(globals(), locals())
     try:
         pl_train.train_loop(opts.max_accuracy, opts.n_batches, opts.max_time)
     except KeyboardInterrupt:
         pass
+    if opts.interactive_after:
+        interactive(globals(), locals())
 
     if opts.save_dir:
         mgr = model_saving.ModelManager(pl_train.model, opts.save_dir)
         mgr.save_definition()
         mgr.save_vars(session)
+
+
+def interactive(*nsdicts):
+    ns = {}
+    for d in nsdicts:
+        ns.update(d)
+
+    class Resume(SystemExit):
+        pass
+
+    def resume():
+        raise Resume
+    ns['resume'] = resume
+
+    import code
+    try:
+        code.interact(local=ns)
+    except Resume:
+        pass
 
 
 if __name__ == '__main__':

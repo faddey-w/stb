@@ -21,20 +21,29 @@ class PolicyLearning:
 
         self.loss_vectors = {}
         self.losses = {}
+        self.accuracies = {}
         self.train_steps = {}
+        self.vars_grads = {}
         for ctl in data.ALL_CONTROLS:
             quality = self.inference.controls[ctl]
             n_actions = tf.shape(quality)[1]
             action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
             loss_vector = tf.nn.softmax_cross_entropy_with_logits_v2(
-                labels=action_labels,
+                labels=tf.stop_gradient(action_labels),
                 logits=quality,
             )
             self.loss_vectors[ctl] = loss_vector
             self.losses[ctl] = tf.reduce_mean(loss_vector)
-            self.train_steps[ctl] = self.optimizer.minimize(self.losses[ctl], var_list=model.var_list)
-        self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
-        self.loss = tf.reduce_mean(self.full_loss_vector)
+            self.vars_grads[ctl] = self.optimizer.compute_gradients(self.losses[ctl], model.var_list)
+            self.train_steps[ctl] = self.optimizer.apply_gradients(self.vars_grads[ctl])
+
+            predicted_idx = tf.argmax(quality, 1, output_type=tf.int32)
+            match_flags = tf.equal(predicted_idx, self.action_idx_ph[ctl])
+            accuracy = tf.reduce_mean(tf.to_float(match_flags))
+            self.accuracies[ctl] = accuracy
+
+        # self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
+        # self.loss = tf.reduce_mean(self.full_loss_vector)
 
         self.train_step = tuple(self.train_steps.values())
 

@@ -104,36 +104,11 @@ class FeatureSet:
         self.dimension = sum(f.dimension for f in self.features)
 
     def __call__(self, value, **variable_keys):
-        return np.concatenate([f(value, **variable_keys) for f in self.features])
+        if self.features:
+            return np.concatenate([f(value, **variable_keys) for f in self.features])
+        else:
+            return np.array([], dtype=np.float)
 
-
-bot_visible_fields = FeatureSet([
-    Feature(['x']),
-    Feature(['y']),
-    Feature(['hp']),
-    Feature(['orientation']),
-    Feature(['tower_orientation']),
-    Feature(['shield']),
-    Feature(['has_shield']),
-    Feature(['is_firing']),
-])
-bot_private_fields = FeatureSet([
-    Feature(['vx']),
-    Feature(['vy']),
-    Feature(['load']),
-    Feature(['shot_ready']),
-    Feature(['shield_warmup']),
-])
-coordinates_fields = FeatureSet([
-    Feature(['x']),
-    Feature(['y']),
-])
-bullet_fields = FeatureSet([
-    Feature(['present']),
-    Feature(['x']),
-    Feature(['y']),
-    Feature(['orientation']),
-])
 
 ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'fire', 'shield'
 
@@ -142,3 +117,8 @@ ctl_rotate = CategoricalFeature(['rotate'], [-1, 0, +1])
 ctl_tower_rotate = CategoricalFeature(['tower_rotate'], [-1, 0, +1])
 ctl_fire = CategoricalFeature(['fire'], [False, True])
 ctl_shield = CategoricalFeature(['shield'], [False, True])
+
+
+BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'
+BOT_PRIVATE_FIELDS = 'vx', 'vy', 'load', 'shot_ready', 'shield_warmup'
+BULLET_FIELDS = 'present', 'x', 'y', 'orientation'
