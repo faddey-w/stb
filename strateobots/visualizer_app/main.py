@@ -1,25 +1,29 @@
 import logging.config
 import argparse
 import itertools
+import os
+import strateobots
 from tornado import web, ioloop
 from strateobots.engine import BotType
 from strateobots.ai.lib.bot_initializers import random_bot_initializer, duel_bot_initializer
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
-from strateobots.ai import base, physics_demo, simple_duel, models
+from strateobots.ai import base, physics_demo, simple_duel
 
 
 log = logging.getLogger(__name__)
 
 
 def main(argv=None):
+    static_dir = os.path.join(strateobots.REPO_ROOT, 'visualizer_frontend')
+
     parser = argparse.ArgumentParser()
-    parser.add_argument('--static-dir', required=True)
+    parser.add_argument('--static-dir', default=static_dir)
     parser.add_argument('--port', '-P', default=9999, type=int)
-    parser.add_argument('--storage-dir', required=True)
+    parser.add_argument('--storage-dir', '-S', required=True)
     parser.add_argument('--saved-models-dir', '-M')
-    parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--debug', '-d', action='store_true')
     args = parser.parse_args(argv)
     logging.config.dictConfig(config.DEBUG_LOGGING if args.debug else config.LOGGING)
 
@@ -41,14 +45,18 @@ def main(argv=None):
         *duel_matchups,
         *random_matchups,
     ])
-
-    storage = CachedReplayDataStorage(args.storage_dir)
-    state = ServerState([
+    ai_modules = [
         default_module,
         physics_demo.AIModule(),
         simple_duel.AIModule(),
-        models.AIModule(args.saved_models_dir),
-    ], storage)
+    ]
+
+    if args.saved_models_dir is not None:
+        from strateobots.ai import models
+        ai_modules.append(models.AIModule(args.saved_models_dir))
+
+    storage = CachedReplayDataStorage(args.storage_dir)
+    state = ServerState(ai_modules, storage)
     initargs = dict(serverstate=state, auth_handler=handlers.noop_auth_handler)
     fileserver_args = dict(path=args.static_dir, default_filename='index.html')
     app = web.Application([

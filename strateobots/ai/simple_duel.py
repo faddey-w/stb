@@ -3,14 +3,20 @@ from strateobots.engine import dist_points, vec_len, dist_line, vec_dot
 from strateobots.engine import Constants, BotType
 from strateobots.util import objedict
 from . import base
+import logging
+
+
+log = logging.getLogger(__name__)
 
 
 class AIModule(base.AIModule):
 
     def __init__(self):
         self.config = {
-            'short': (short_range_attack, 'Close distance attack'),
-            'distance': (distance_attack, 'Long distance attack'),
+            'short': (lambda: short_range_attack, 'Close distance attack'),
+            'distance': (lambda: distance_attack, 'Long distance attack'),
+            'ramming': (lambda: RammingAttack(), 'Ramming attack'),
+            'hold': (lambda: hold_position, 'Hold position'),
         }
 
     def list_ai_function_descriptions(self):
@@ -23,7 +29,7 @@ class AIModule(base.AIModule):
         return []
 
     def construct_ai_function(self, team, parameters):
-        return self.config[parameters][0]
+        return self.config[parameters][0]()
 
 
 def short_range_attack(state):
@@ -127,15 +133,89 @@ def distance_attack(state):
     return [ctl]
 
 
-def turret_behavior(bot, enemy, ctl, engine=None):
-    angl = get_angle(bot, enemy)
-    rot = navigate_shortest(bot, angl, with_gun=True)
-    ctl.tower_rotate = rot
-    ctl.fire = should_fire(bot, enemy, bot.type.shot_range)
-    if ctl.fire:
-        ctl.rotate = navigate_shortest(bot, angl, with_gun=False)
-    else:
-        ctl.rotate = rot
+class RammingAttack:
+    def __init__(self):
+        self.last_v = None
+        self.is_ramming = True
+
+    def __call__(self, state):
+        bot = objedict(state['friendly_bots'][0])
+        bottype = BotType.by_code(bot.type)
+        enemy = objedict(state['enemy_bots'][0])
+        if self.last_v is None:
+            last_v = 0
+        else:
+            last_v = self.last_v
+        # enemytype = BotType.by_code(enemy.type)
+        ctl = objedict()
+        ctl.id = bot.id
+
+        limit_speed = bottype.max_ahead_speed / 2
+        almost_zero_speed = bottype.acc * 0.2
+        full_acc_dist = bottype.max_ahead_speed ** 2 / (2 * bottype.acc)
+        dist_k = 1
+        ramming_dist = dist_k * full_acc_dist
+
+        dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
+        v = vec_len(bot.vx, bot.vy)
+        self.last_v = v
+        ori_cos = cos(bot.orientation)
+        ori_sin = sin(bot.orientation)
+        enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
+
+        # have_contact = dist < 2 * Constants.bot_radius + 3 * Constants.epsilon
+        is_ahead = (bot.vx * ori_cos + bot.vy * ori_sin) > 0
+
+        enemy_dir_cos = (enemy.x - bot.x) / dist
+        enemy_dir_sin = (enemy.y - bot.y) / dist
+        v_r_len = vec_len(bot.vx * enemy_dir_cos, bot.vy * enemy_dir_sin)
+        v_r = v_r_len * (+1 if cos(bot.orientation - enemy_angle) > 0 else -1)
+        time_to_max_speed = (bottype.max_ahead_speed - v_r) / bottype.acc
+        dist_to_max_speed = time_to_max_speed * (bottype.max_ahead_speed + v_r) / 2
+        contact_dist = dist - Constants.bot_radius
+        if dist_to_max_speed > contact_dist:
+            ts = solve_square_equation(bottype.acc / 2, v_r, -contact_dist)
+            contact_time = max(ts)
+            contact_speed = v_r + bottype.acc * contact_time
+        else:
+            contact_time = time_to_max_speed + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
+            contact_speed = bottype.max_ahead_speed
+
+        if bot.has_shield:
+            shield_start_time = 0
+        else:
+            shield_start_time = bottype.shield_warmup_period * (1 - bot.shield_warmup)
+        shield_max_time = bot.shield * bottype.shield_energy / bottype.shield_regen
+
+        if self.is_ramming:
+            if v < last_v - 2:
+                self.is_ramming = False
+            do_ramming = self.is_ramming
+        else:
+            self.is_ramming = do_ramming = dist > ramming_dist
+
+        can_ram_with_shield = shield_start_time + 0.1 < contact_time < shield_start_time + 0.9 * shield_max_time
+        if can_ram_with_shield and do_ramming:
+            ctl.shield = shield_start_time + 0.1 < contact_time < shield_start_time + min(1, 0.9 * shield_max_time)
+        else:
+            ctl.shield = False
+
+        if do_ramming:
+            ctl.move = +1
+            ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+        else:
+            ctl.move = -1
+            ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+        ctl.tower_rotate = navigate_shortest(bot, enemy_angle, with_gun=True)
+        ctl.fire = should_fire(bot, enemy, bottype.shot_range, dist)
+
+        return [ctl]
+
+
+def hold_position(state):
+    [ctl] = distance_attack(state)
+    ctl.move = 0
+    return [ctl]
 
 
 def norm_angle(angle):
@@ -186,6 +266,17 @@ def navigate_gun(bot, enemy):
         return +1
     else:
         return -1
+
+
+def solve_square_equation(a, b, c):
+    """"Solve equation a*x^2 + b*x + c = 0 in real numbers"""
+    d = b*b - 4*a*c
+    if d < 0:
+        return []
+    if d == 0:
+        return [-b / (2*a)]
+    d_sqrt = sqrt(d)
+    return [(-b+d_sqrt) / (2*a), (-b-d_sqrt) / (2*a)]
 
 
 def get_angle(from_bot, to_bot):

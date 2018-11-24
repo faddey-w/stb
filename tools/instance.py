@@ -4,6 +4,7 @@ import boto3
 import os
 import json
 import time
+import webbrowser
 
 
 def get_instance_ip_address(instance_info):
@@ -29,7 +30,8 @@ def start_instance(ec2, instance_id):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['start', 'stop', 'ssh'])
+    parser.add_argument('command', choices=['start', 'stop', 'ssh', 'show'])
+    parser.add_argument('--brower', '-B', action='store_true')
     opts = parser.parse_args()
 
     with open(os.path.join(os.path.dirname(__file__), 'credentials.json')) as f:
@@ -42,6 +44,13 @@ def main():
 
     if opts.command == 'start':
         start_instance(ec2, inst_id)
+    elif opts.command == 'show':
+        info = get_instance_info(ec2, inst_id)
+        ip_addr = get_instance_ip_address(info)
+        url = 'http://{}:9999'.format(ip_addr)
+        print(url)
+        if opts.browser:
+            webbrowser.open(url)
     elif opts.command == 'stop':
         stop_instance(ec2, inst_id)
     elif opts.command == 'ssh':
