@@ -31,7 +31,7 @@ def start_instance(ec2, instance_id):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('command', choices=['start', 'stop', 'ssh', 'show'])
-    parser.add_argument('--brower', '-B', action='store_true')
+    parser.add_argument('--browser', '-B', action='store_true')
     opts = parser.parse_args()
 
     with open(os.path.join(os.path.dirname(__file__), 'credentials.json')) as f:
