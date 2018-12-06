@@ -43,16 +43,14 @@ def supervisor(storage_dir, n_workers, suffix_first, suffix_last):
         ],
     }
     one_ai_cases = [
-        (ai_path, ai_name)
+        (ai_path, ai_name, t)
         for ai_path, ai_list in ai_names.items()
         for ai_name in ai_list
+        for t in 'RTL'
     ]
     cases = [
         (t1, t2, ai1_path, ai1_name, ai2_path, ai2_name, suffix)
-        for (ai1_path, ai1_name), (ai2_path, ai2_name) in itertools.combinations_with_replacement(one_ai_cases, 2)
-        for t1 in 'RTL'
-        for t2 in 'RTL'
-        if (ai1_path, ai1_name, t1) != (ai2_path, ai2_name, t2)
+        for (ai1_path, ai1_name, t1), (ai2_path, ai2_name, t2) in itertools.combinations(one_ai_cases, 2)
         for suffix in map(str, range(suffix_first, suffix_last+1))
     ]
     counter = AtomicInteger()
