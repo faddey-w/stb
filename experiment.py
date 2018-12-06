@@ -24,10 +24,12 @@ def supervisor_argparse(argv):
     parser = argparse.ArgumentParser()
     parser.add_argument('storage_dir')
     parser.add_argument('n_workers', type=int)
+    parser.add_argument('--suffix-first', type=int, default=1)
+    parser.add_argument('--suffix-last', type=int, default=5)
     return vars(parser.parse_args(argv))
 
 
-def supervisor(storage_dir, n_workers):
+def supervisor(storage_dir, n_workers, suffix_first, suffix_last):
     ai_names = {
         'strateobots.ai.simple_duel': [
             'short',
@@ -51,7 +53,7 @@ def supervisor(storage_dir, n_workers):
         for t1 in 'RTL'
         for t2 in 'RTL'
         if (ai1_path, ai1_name, t1) != (ai2_path, ai2_name, t2)
-        for suffix in map(str, range(1, 5+1))
+        for suffix in map(str, range(suffix_first, suffix_last+1))
     ]
     counter = AtomicInteger()
     total = len(cases)
