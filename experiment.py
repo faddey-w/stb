@@ -2,6 +2,7 @@ import argparse
 import importlib
 import subprocess
 import threading
+import itertools
 import sys
 from strateobots.engine import StbEngine, BotType
 from strateobots.ai.lib import bot_initializers
@@ -39,12 +40,14 @@ def supervisor(storage_dir, n_workers):
             # 'MCTS-3',
         ],
     }
+    one_ai_cases = [
+        (ai_path, ai_name)
+        for ai_path, ai_list in ai_names.items()
+        for ai_name in ai_list
+    ]
     cases = [
         (t1, t2, ai1_path, ai1_name, ai2_path, ai2_name, suffix)
-        for ai1_path in ai_names.keys()
-        for ai1_name in ai_names[ai1_path]
-        for ai2_path in ai_names.keys()
-        for ai2_name in ai_names[ai2_path]
+        for (ai1_path, ai1_name), (ai2_path, ai2_name) in itertools.combinations_with_replacement(one_ai_cases, 2)
         for t1 in 'RTL'
         for t2 in 'RTL'
         if (ai1_path, ai1_name, t1) != (ai2_path, ai2_name, t2)
