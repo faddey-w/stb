@@ -63,7 +63,7 @@ def main(argv=None):
     app = web.Application([
         ('/api/v1/launch-params', handlers.GameLaunchParametersHandler, initargs),
         ('/api/v1/game', handlers.GameListHandler, initargs),
-        ('/api/v1/game/([0-9a-f_]+)', handlers.GameViewHandler, initargs),
+        ('/api/v1/game/([0-9a-zA-Z_-]+)', handlers.GameViewHandler, initargs),
         ('/(.*)', web.StaticFileHandler, fileserver_args)
     ], debug=args.debug)
     app.listen(args.port)

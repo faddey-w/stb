@@ -34,8 +34,6 @@ class AIModule(base.AIModule):
 
 class _BaseFunction:
 
-    _printed_once = False
-
     def __call__(self, state):
         bot = objedict(state['friendly_bots'][0])
         enemy = objedict(state['enemy_bots'][0])
@@ -44,11 +42,6 @@ class _BaseFunction:
         ctl = objedict()
         ctl.id = bot.id
         self._make_decision(bot, bottype, enemy, enemytype, ctl)
-        if not self._printed_once and state['bullets']:
-            import json
-            print(json.dumps(state, indent=4))
-            print(json.dumps([ctl], indent=4))
-            self._printed_once = True
         return [ctl]
 
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
