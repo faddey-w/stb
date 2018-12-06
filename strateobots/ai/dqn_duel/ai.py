@@ -33,7 +33,7 @@ class DQNDuelAI(DuelAI):
             bottype=bot_type,
             team=self.team,
             x=x,
-            y=self.engine.world_height * random.random(),
+            y=self.engine.get_constants().world_height * random.random(),
             orientation=random.random() * 2 * pi,
             tower_orientation=random.random() * 2 * pi,
         )
@@ -129,8 +129,8 @@ class LocateAtCircleMode(Mode):
         if team != engine.teams[0]:
             ori += pi
         r = self.radius_ratio
-        bot.x = (0.5 + cos(ori) * r) * engine.world_width
-        bot.y = (0.5 + sin(ori) * r) * engine.world_height
+        bot.x = (0.5 + cos(ori) * r) * engine.get_constants().world_width
+        bot.y = (0.5 + sin(ori) * r) * engine.get_constants().world_height
 
 
 class BackToCenter(Mode):
@@ -138,8 +138,8 @@ class BackToCenter(Mode):
     def on_init(self, bot, team, engine):
         x = bot.x
         y = bot.y
-        cx = engine.world_width / 2
-        cy = engine.world_height / 2
+        cx = engine.get_constants().world_width / 2
+        cy = engine.get_constants().world_height / 2
         angle = atan2(y-cy, x-cx)
         bot.orientation = angle
 
@@ -201,8 +201,8 @@ class RunAI(DQNDuelAI):
 
 
 def _randomize_position(bot, engine):
-    bot.x = random.random() * engine.world_width
-    bot.y = random.random() * engine.world_height
+    bot.x = random.random() * engine.get_constants().world_width
+    bot.y = random.random() * engine.get_constants().world_height
     bot.orientation = random.random() * 2 * pi - pi
     bot.tower_orientation = random.random() * 2 * pi - pi
 

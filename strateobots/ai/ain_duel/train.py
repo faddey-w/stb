@@ -36,7 +36,7 @@ class AINDuelAI(DuelAI):
             team=self.team,
             x=x,
             # y=self.engine.world_height * random.random(),
-            y=self.engine.world_height * 0.5,
+            y=self.engine.get_constants().world_height * 0.5,
             orientation=orientation,
             # tower_orientation=random.random() * 2 * pi,
             tower_orientation=0.0,
@@ -142,7 +142,7 @@ def run_one_game(function1, function2, memories, reward_func, reward_decay, freq
         1,
     )
 
-    engine = StbEngine(1000, 1000, ai1_factory, ai2_factory, max_ticks, 0)
+    engine = StbEngine(ai1_factory, ai2_factory, max_ticks, 0)
 
     state1bef, state2bef = make_states(engine)
     while not engine.is_finished:

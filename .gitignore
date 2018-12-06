@@ -7,3 +7,6 @@ _data
 test.py
 config.ini
 tools/credentials.json
+
+*.c
+*.so

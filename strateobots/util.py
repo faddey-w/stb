@@ -28,7 +28,8 @@ def _cached_with_timeout_impl(timeout, keyfunc):
                     exc_info = sys.exc_info()
                 cache[key] = value, exc_info, now + timeout
             if exc_info:
-                raise exc_info
+                e, v, tb = exc_info
+                raise v.with_traceback(tb)
             return value
         return wrapper
     return decorator

@@ -79,27 +79,32 @@ class Model:
     state_dimension = _o + _d + _d**2 + _d**3
 
     def __init__(self):
-        self.l1 = nn.Linear('L1', self.state_dimension, 20)
+        sd = space_data_schema.dimension
+        n_exp = 0
+        self.le = nn.Linear('LE', sd, n_exp)
+        self.l1 = nn.Linear('L1', self.state_dimension + n_exp, 20)
         self.l2 = nn.Linear('L2', self.l1.out_dim, 20)
         self.l3 = nn.Linear('L3', self.l2.out_dim, num_labels)
-        # self.l3 = nn.Linear('L3', self.l1.out_dim, num_labels)
         self.var_list = [
             *self.l1.var_list,
             *self.l2.var_list,
             *self.l3.var_list,
+            *self.le.var_list,
         ]
-        # self.ll = nn.Linear('LL', self.state_dimension, num_labels)
-        # self.var_list = [*self.ll.var_list]
 
     def apply(self, dataset_t):
-        node1 = self.l1.apply(dataset_t, tf.tanh)
+        sd = space_data_schema.dimension
+        space_data_t = dataset_t[..., :sd]
+        exp_node = self.le.apply(tf.log(1 + tf.abs(space_data_t)), tf.exp)
+        lin_input = tf.concat([dataset_t, exp_node.out], -1)
+        node1 = self.l1.apply(lin_input, tf.tanh)
         node2 = self.l2.apply(node1.out, tf.nn.leaky_relu)
         node3 = self.l3.apply(node2.out, tf.identity)
-        # node3 = self.l3.apply(node1.out, tf.identity)
         return (
             node1,
             node2,
             node3,
+            exp_node,
         ), node3.out
 
     @staticmethod
@@ -171,7 +176,7 @@ with graph.as_default():
     init_op = tf.global_variables_initializer()
 
 
-num_steps = 701
+num_steps = 2001
 
 
 def accuracy(predictions, labels):
@@ -190,7 +195,7 @@ for step in range(num_steps):
         tf_dataset: dataset[sample, ],
         tf_label_idx: labels[sample, ],
     })
-    if step % 10 == 0:
+    if step % 50 == 0:
         measure_start = time.time()
         l, predictions = session.run([loss, train_prediction], {
             tf_dataset: dataset,
@@ -201,7 +206,7 @@ for step in range(num_steps):
         spent_on_measurements += now - measure_start
         elapsed = now - start - spent_on_measurements
         print('#{}: t={:6.2f} loss={:.4f} acc={:.1f}'.format(step, elapsed, l, acc))
-        if acc >= 90:
+        if acc >= 95:
             break
 
 

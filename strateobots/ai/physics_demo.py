@@ -46,8 +46,8 @@ class PhysicsDemoController:
         east, north, west, south = 0, pi/2, pi, -pi/2
 
         def mkbot(bottype, team, x, y, orientation, tower_orientation=ahead, hp=1.0):
-            x *= self.engine.world_width / 10
-            y *= self.engine.world_height / 10
+            x *= self.engine.get_constants().world_width / 10
+            y *= self.engine.get_constants().world_height / 10
             return self.engine.add_bot(
                 bottype=bottype,
                 team=team,
@@ -59,7 +59,7 @@ class PhysicsDemoController:
             )
 
         def trig(bot, sec, **attrs):
-            tick = int(sec * self.engine.ticks_per_sec)
+            tick = int(sec * self.engine.get_constants().ticks_per_sec)
             triglist = self._triggers.setdefault(bot.id, [])
             triglist.append((tick, dict(attrs), bot.team))
 

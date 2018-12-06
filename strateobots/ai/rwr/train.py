@@ -63,8 +63,6 @@ class RWRTraining:
 
     def run_game(self, opponent):
         engine = StbEngine(
-            world_width=1000,
-            world_height=1000,
             ai1=self.function,
             ai2=opponent['function'],
             initialize_bots=self.bot_init,

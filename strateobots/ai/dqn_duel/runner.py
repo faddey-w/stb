@@ -13,7 +13,6 @@ def run_one_game(replay_memory, ai1_func, ai2_func, frames_per_action=1,
     ai2_cls = DQNTrainingAI.parametrize(bot_type=BotType.Raider, function=ai2_func)
 
     engine = StbEngine(
-        world_size, world_size,
         ai1_cls, ai2_cls,
         max_ticks,
         wait_after_win=0,
@@ -61,14 +60,14 @@ class DQNTrainingAI(DuelAI):
             x = self.x_to_team_field(x)
             orientation += math.pi
         else:
-            x *= self.engine.world_width
+            x *= self.engine.get_constants().world_width
         bot_type = self.bot_type or random_bot_type()
         return self.engine.add_bot(
             bottype=bot_type,
             team=self.team,
             x=x,
             # y=self.engine.world_height * random.random(),
-            y=self.engine.world_height * 0.5,
+            y=self.engine.get_constants().world_height * 0.5,
             orientation=orientation,
             # tower_orientation=random.random() * 2 * pi,
             tower_orientation=0.0,

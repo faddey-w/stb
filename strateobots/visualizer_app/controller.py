@@ -8,6 +8,7 @@ from strateobots.visualizer_app.exceptions import BotInitializerNotFound
 from strateobots.visualizer_app.exceptions import AiModuleNotFound
 from strateobots.visualizer_app.exceptions import SimulationNotFound
 from strateobots.visualizer_app import config
+from strateobots.replay import SimulationNotFound
 
 
 log = logging.getLogger(__name__)
@@ -55,8 +56,6 @@ class ServerState:
                 ai2_name=func_name2,
             ),
             params=dict(
-                world_width=config.WORLD_WIDTH,
-                world_height=config.WORLD_HEIGHT,
                 ai1=ai1,
                 ai2=ai2,
                 initialize_bots=bot_init,
@@ -98,7 +97,12 @@ class ServerState:
 
     def remove_replay(self, sim_id):
         log.info('REMOVE simulation %r', sim_id)
-        self.storage.remove_replay(sim_id)
+        for simul in self._request_queue:
+            if sim_id == simul.sim_id:
+                simul.cancelled = True
+                return
+        else:
+            self.storage.remove_replay(sim_id)
 
     @property
     def queue_size(self):
@@ -131,8 +135,9 @@ class ServerState:
                 log.debug('TICK %r: %s', simul.sim_id, simul.engine.nticks)
         yield
         simul.metadata['nticks'] = simul.engine.nticks
-        log.info('FINISH simulation %r', simul.sim_id)
-        self.storage.save_replay(simul.sim_id, simul.metadata, simul.engine.replay)
+        log.info('FINISH simulation %r %s', simul.sim_id, '(cancelled)' if simul.cancelled else '')
+        if not simul.cancelled:
+            self.storage.save_replay(simul.sim_id, simul.metadata, simul.engine.replay)
         self._request_queue.remove(simul)
 
     def _list_used_keys(self):

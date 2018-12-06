@@ -4,9 +4,9 @@ import random
 
 def duel_bot_initializer(type1, type2, distance_ratio):
     def initialize_bots_for_duel(engine):
-        y = engine.world_height / 2
-        x1 = (1 - distance_ratio) * engine.world_width / 2
-        x2 = (1 + distance_ratio) * engine.world_width / 2
+        y = engine.get_constants().world_height / 2
+        x1 = (1 - distance_ratio) * engine.get_constants().world_width / 2
+        x2 = (1 + distance_ratio) * engine.get_constants().world_width / 2
         engine.add_bot(
             bottype=type1,
             team=engine.team1,
@@ -36,8 +36,8 @@ def random_bot_initializer(team1_types, team2_types):
             engine.add_bot(
                 bottype=bottype,
                 team=team,
-                x=random.random() * engine.world_width,
-                y=random.random() * engine.world_height,
+                x=random.random() * engine.get_constants().world_width,
+                y=random.random() * engine.get_constants().world_height,
                 orientation=random.random() * 2 * math.pi,
                 tower_orientation=random.random() * 2 * math.pi,
             )
