@@ -4,6 +4,9 @@ function Renderer(container) {
 
     var camera, scene, renderer;
     var worldSize = 1000;
+    var cameraXOffs = 0;
+    var cameraYOffs = 0;
+    var cameraScale = 1;
 
     // data of battle movie
     var _frames = [];
@@ -161,7 +164,7 @@ function Renderer(container) {
         }
 
         // do render
-        camera.lookAt(scene.position);
+//        camera.lookAt(scene.position);
         renderer.render(scene, camera);
     };
     this.getFramesCount = function() {
@@ -173,7 +176,24 @@ function Renderer(container) {
         var aspect = container.innerWidth / container.innerHeight;
         camera = new THREE.OrthographicCamera(worldSize * aspect / -2, worldSize * aspect / 2, worldSize / 2, worldSize / -2, 1, 2000);
         camera.position.z = 1000;
+
+        camera.left = 0;
+        camera.right = worldSize;
+        camera.bottom = 0;
+        camera.top = worldSize;
+
         scene = new THREE.Scene();
+
+//        camera.lookAt(new THREE.Vector3(
+//            scene.position.x,//+cameraXOffs,
+//            scene.position.y,//+cameraYOffs,
+//            scene.position.z));
+        camera.lookAt(scene.position);
+        camera.updateProjectionMatrix();
+
+        scene.position.x += cameraXOffs;
+        scene.position.y += cameraYOffs;
+        scene.scale.x = scene.scale.y = cameraScale;
         scene.background = new THREE.Color(0xffffff);
 
         // make battle field grey and draw a border around.
@@ -194,7 +214,7 @@ function Renderer(container) {
         );
         battlefield.position.z = -1000;
         battlefield_border.position.z = -1000;
-        scene.add(battlefield);
+//        scene.add(battlefield);
         scene.add(battlefield_border);
 
         renderer = new THREE.WebGLRenderer({antialias: true});
@@ -208,15 +228,15 @@ function Renderer(container) {
     }
 
     function onWindowResize() {
-        camera.left = 0;
-        camera.top = worldSize;
-        camera.right = worldSize;
-        camera.bottom = 0;
+
+//        camera.position.set(
+//            camera.position.x+cameraXOffs,
+//            camera.position.y+cameraYOffs,
+//            camera.position.z);
 
         var canvasSize = Math.min(container.clientWidth, container.clientHeight);
-        camera.updateProjectionMatrix();
         renderer.setSize(canvasSize, canvasSize);
-        camera.lookAt(scene.position);
+
         renderer.render(scene, camera);
     }
 }

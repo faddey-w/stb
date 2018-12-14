@@ -14,7 +14,7 @@ class Constants:
     bot_radius = 25
     shield_damage_absorption = 4/5
     ray_min_load_required = 0.33
-    bullet_speed = 1000
+    bullet_speed = 500
     ray_charge_per_sec = 1
     friction_factor = 175
     collision_factor = 0.0002

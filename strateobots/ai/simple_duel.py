@@ -66,6 +66,7 @@ class LongDistanceAttack(_BaseFunction):
 
         ctl.update(keep_distance(bot, enemy, bottype))
         ctl.tower_rotate = navigate_gun(bot, enemy)
+        ctl.rotate = ctl.tower_rotate
 
         # decide if we should fire
         ctl.fire = fire = should_fire(bot, enemy, bottype.shot_range)

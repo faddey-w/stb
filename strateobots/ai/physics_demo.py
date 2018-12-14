@@ -8,60 +8,87 @@ class AIModule(base.AIModule):
 
     def __init__(self):
         self.controller = None
+        self.simple_controller = None
 
     def list_ai_function_descriptions(self):
         return [
-            ('Physics demo AI', None),
+            ('Physics demo AI', 'full'),
+            # ('Simple demo AI', 'simple'),
         ]
 
     def list_bot_initializers(self):
         return [
             ('Physics demo', self._bot_initializer),
+            # ('Simple demo', self._bot_initializer_simple),
         ]
 
     def construct_ai_function(self, team, parameters):
-        return partial(self._ai_function, team)
+        func = self._ai_function if parameters == 'full' else self._ai_function_simple
+        return partial(func, team)
 
     def _bot_initializer(self, engine):
         self.controller = PhysicsDemoController(engine)
         self.controller.initialize()
 
+    def _bot_initializer_simple(self, engine):
+        self.simple_controller = SimpleDemoController(engine)
+        self.simple_controller.initialize()
+
     def _ai_function(self, team, state):
-        return self.controller.do_control(team)
+        return self.controller.do_control(team, state['tick'])
+
+    def _ai_function_simple(self, team, state):
+        return self.simple_controller.do_control(team, state['tick'])
 
 
-class PhysicsDemoController:
+class _BaseSceneController:
 
     def __init__(self, engine):
         """
-        :type team: int
         :type engine: strateobots.engine.StbEngine
         """
         self.engine = engine
         self._triggers = {}
+
+    def mkbot(self, bottype, team, x, y, orientation, tower_orientation=0, hp=1.0):
+        # x = 100*x - 0
+        # y = 100*y - 600
+        x *= self.engine.get_constants().world_width / 10
+        y *= self.engine.get_constants().world_height / 10
+        return self.engine.add_bot(
+            bottype=bottype,
+            team=team,
+            x=x,
+            y=y,
+            orientation=orientation,
+            tower_orientation=tower_orientation,
+            hp=bottype.max_hp * hp
+        )
+
+    def trigger(self, bot, sec, **attrs):
+        tick = int(sec * self.engine.get_constants().ticks_per_sec)
+        triglist = self._triggers.setdefault(bot.id, [])
+        triglist.append((tick, dict(attrs), bot.team))
+
+    def do_control(self, control_team, tick):
+        result = []
+        for bot_id, triglist in self._triggers.items():
+            for trigger in triglist:
+                t, attrs, team = trigger
+                if t == tick and control_team == team:
+                    result.append({'id': bot_id, **attrs})
+        return result
+
+
+class PhysicsDemoController(_BaseSceneController):
 
     def initialize(self):
         team1, team2 = self.engine.teams
         ahead, left, back, right = 0, pi/2, pi, -pi/2
         east, north, west, south = 0, pi/2, pi, -pi/2
 
-        def mkbot(bottype, team, x, y, orientation, tower_orientation=ahead, hp=1.0):
-            x *= self.engine.get_constants().world_width / 10
-            y *= self.engine.get_constants().world_height / 10
-            return self.engine.add_bot(
-                bottype=bottype,
-                team=team,
-                x=x,
-                y=y,
-                orientation=orientation,
-                tower_orientation=tower_orientation,
-                hp=bottype.max_hp * hp
-            )
-
-        def trig(bot, sec, **attrs):
-            tick = int(sec * self.engine.get_constants().ticks_per_sec)
-            triglist = self._triggers.setdefault(bot.id, [])
-            triglist.append((tick, dict(attrs), bot.team))
+        mkbot = self.mkbot
+        trig = self.trigger
 
         # head-on collisions
         b1 = mkbot(BotType.Raider, team1, 1, 1, east)
@@ -126,21 +153,20 @@ class PhysicsDemoController:
         b1.vy = b1.type.max_ahead_speed / 2
         trig(b1, 0, move=1)
 
-        # sort by tick
-        for triglist in self._triggers.values():
-            triglist.sort(key=lambda tick_and_etc: tick_and_etc[0])
 
-    def do_control(self, control_team):
-        next_triggers = {}
-        result = []
-        for bot_id, triglist in self._triggers.items():
-            new_triglist = []
-            for trigger in triglist:
-                tick, attrs, team = trigger
-                if tick <= self.engine.nticks and control_team == team:
-                    result.append({'id': bot_id, **attrs})
-                else:
-                    new_triglist.append(trigger)
-            next_triggers[bot_id] = new_triglist
-        self._triggers = next_triggers
-        return result
+class SimpleDemoController(_BaseSceneController):
+
+    def initialize(self):
+        team1, team2 = self.engine.teams
+
+        mkbot = self.mkbot
+        trig = self.trigger
+
+        r = mkbot(BotType.Raider, team1, 1, 9, 7*pi/4)
+        trig(r, 0, shield=True)
+
+        l = mkbot(BotType.Sniper, team2, 3, 8, pi - atan(1/2))
+        trig(l, BotType.Raider.shield_warmup_period, fire=True)
+
+        t = mkbot(BotType.Heavy, team1, 1, 7.5, pi/2 - pi/10, -pi/6)
+        trig(t, BotType.Raider.shield_warmup_period + 0.1, fire=True)
