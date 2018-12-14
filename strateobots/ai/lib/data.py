@@ -1,4 +1,5 @@
 import numpy as np
+from functools import wraps
 
 
 def _try_int(x):
@@ -122,3 +123,16 @@ ctl_shield = CategoricalFeature(['shield'], [False, True])
 BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'
 BOT_PRIVATE_FIELDS = 'vx', 'vy', 'load', 'shot_ready', 'shield_warmup'
 BULLET_FIELDS = 'present', 'x', 'y', 'orientation'
+
+
+def generator_encoder(function):
+    @wraps(function)
+    def wrapper(*args, **kwargs):
+        generator = function(*args, **kwargs)
+        generator.send(None)
+
+        def encode(bot, enemy, bot_bullet, enemy_bullet):
+            state = bot, enemy, bot_bullet, enemy_bullet
+            return generator.send(state)
+        return encode
+    return wrapper

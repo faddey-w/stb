@@ -174,17 +174,15 @@ class ReplayMemory:
 
     def _load_numpy_data_for_team(self, rd, team, opponent_team, end_t):
         state_array = np.empty([end_t, self.model.state_dimension], dtype=np.float32)
+        encoder = self.model.data_encoder()
         action_arrays = {
             ctl: np.empty([end_t], dtype=np.float32)
             for ctl in data.ALL_CONTROLS
         }
-        prev_state = None
         for i in range(end_t):
             item = rd.json_data[i]
-            state_vector, prev_state = encode_vector_for_model(
-                self.model, item, prev_state,
-                team, opponent_team
-            )
+            state_vector = encode_vector_for_model(
+                encoder, item, team, opponent_team)
             state_array[i] = state_vector
         for ctl in data.ALL_CONTROLS:
             act_arr = action_arrays[ctl]

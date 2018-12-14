@@ -1,5 +1,4 @@
 import tensorflow as tf
-import numpy as np
 from strateobots.ai.lib import data
 
 
@@ -10,13 +9,11 @@ class ModelAiFunction:
         self.inference = model.apply(self.state_ph)
         self.model = model
         self.session = session
-        self._prev_state = None
+        self.encoder = model.data_encoder()
 
     def __call__(self, state):
         bot_data = state['friendly_bots'][0]
-        state_vector, self._prev_state = encode_vector_for_model(
-            self.model, state, self._prev_state
-        )
+        state_vector = encode_vector_for_model(self.encoder, state)
 
         ctl_vectors = self.session.run(
             self.inference.controls, feed_dict={
@@ -34,10 +31,10 @@ class ModelAiFunction:
         return [ctl_dict]
 
     def on_new_game(self):
-        self._prev_state = None
+        self.encoder = self.model.data_encoder()
 
 
-def encode_vector_for_model(model, state, prev_state, team=None, opponent_team=None):
+def encode_vector_for_model(encoder, state, team=None, opponent_team=None):
     if team is None:
         bot_data = state['friendly_bots'][0]
         enemy_data = state['enemy_bots'][0]
@@ -55,21 +52,9 @@ def encode_vector_for_model(model, state, prev_state, team=None, opponent_team=N
         elif bullet['origin_id'] == enemy_data['id']:
             enemy_bullet_data = bullet
 
-    next_prev_state = model.encode_prev_state(
-        bot=bot_data,
-        enemy=enemy_data,
-        bot_bullet=bot_bullet_data,
-        enemy_bullet=enemy_bullet_data,
+    return encoder(
+        bot_data,
+        enemy_data,
+        bot_bullet_data,
+        enemy_bullet_data,
     )
-    if prev_state is None:
-        prev_state = next_prev_state
-
-    current_state = model.encode_state(
-        bot=bot_data,
-        enemy=enemy_data,
-        bot_bullet=bot_bullet_data,
-        enemy_bullet=enemy_bullet_data,
-    )
-
-    state_vector = np.concatenate([prev_state, current_state])
-    return state_vector, next_prev_state

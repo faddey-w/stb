@@ -119,12 +119,22 @@ class Model:
         ], [])
         self.init_op = tf.variables_initializer(self.var_list)
 
+    @data.generator_encoder
+    def data_encoder(self):
+        state = yield
+        prev_state_vector = self._encode_prev_state(*state)
+        while True:
+            curr_state_vector = self._encode_state(*state)
+            state_vector = np.concatenate([prev_state_vector, curr_state_vector])
+            prev_state_vector = self._encode_prev_state(*state)
+            state = yield state_vector
+
     @staticmethod
-    def encode_prev_state(bot, enemy, bot_bullet, enemy_bullet):
+    def _encode_prev_state(bot, enemy, bot_bullet, enemy_bullet):
         return coordinates_fields(enemy)
 
     @staticmethod
-    def encode_state(bot, enemy, bot_bullet, enemy_bullet):
+    def _encode_state(bot, enemy, bot_bullet, enemy_bullet):
         # prepare data of optional objects
         if bot_bullet is None:
             bot_bullet = defaultdict(float, present=False)

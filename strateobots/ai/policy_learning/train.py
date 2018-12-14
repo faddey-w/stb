@@ -73,7 +73,7 @@ class PLTraining:
             stop_time = None
         log.info('Start training')
         for i in iterator():
-            accuracies = self.train_once(i, 100)
+            accuracies = self.train_once(i, 20)
             if target_accuracy is not None:
                 if min(accuracies.values()) >= target_accuracy:
                     break
