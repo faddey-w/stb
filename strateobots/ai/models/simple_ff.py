@@ -1,7 +1,7 @@
 import tensorflow as tf
 import numpy as np
 from collections import defaultdict
-from strateobots.ai.lib import data, nn
+from strateobots.ai.lib import data, nn, model_function
 from strateobots.ai.simple_duel import norm_angle
 
 
@@ -56,7 +56,7 @@ extra_fields = data.FeatureSet([
 ])
 
 
-class Model:
+class Model(model_function.VectorGeneratorDataEncoderMixin):
 
     _prev_state_dimension = coordinates_fields.dimension
     _current_state_dimension = sum((
@@ -118,16 +118,6 @@ class Model:
             self.shield_block.var_list,
         ], [])
         self.init_op = tf.variables_initializer(self.var_list)
-
-    @data.generator_encoder
-    def data_encoder(self):
-        state = yield
-        prev_state_vector = self._encode_prev_state(*state)
-        while True:
-            curr_state_vector = self._encode_state(*state)
-            state_vector = np.concatenate([prev_state_vector, curr_state_vector])
-            prev_state_vector = self._encode_prev_state(*state)
-            state = yield state_vector
 
     @staticmethod
     def _encode_prev_state(bot, enemy, bot_bullet, enemy_bullet):

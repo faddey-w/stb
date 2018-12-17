@@ -1,4 +1,5 @@
 import tensorflow as tf
+import numpy as np
 from strateobots.ai.lib import data
 
 
@@ -58,3 +59,24 @@ def encode_vector_for_model(encoder, state, team=None, opponent_team=None):
         bot_bullet_data,
         enemy_bullet_data,
     )
+
+
+class VectorGeneratorDataEncoderMixin:
+    @data.generator_encoder
+    def data_encoder(self):
+        state = yield
+        prev_state_vector = self._encode_prev_state(*state)
+        while True:
+            curr_state_vector = self._encode_state(*state)
+            state_vector = np.concatenate(
+                [prev_state_vector, curr_state_vector])
+            prev_state_vector = self._encode_prev_state(*state)
+            state = yield state_vector
+
+    @staticmethod
+    def _encode_prev_state(bot, enemy, bot_bullet, enemy_bullet):
+        raise NotImplementedError
+
+    @staticmethod
+    def _encode_state(bot, enemy, bot_bullet, enemy_bullet):
+        raise NotImplementedError
