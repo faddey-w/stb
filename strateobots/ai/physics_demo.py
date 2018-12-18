@@ -1,6 +1,6 @@
 from math import pi, atan
 from functools import partial
-from strateobots.engine import BotType
+from strateobots.engine import BotType, Action
 from . import base
 
 
@@ -103,13 +103,13 @@ class PhysicsDemoController(_BaseSceneController):
 
         # move by circle and rotate tower
         b1 = mkbot(BotType.Sniper, team1, 7, 1, east)
-        trig(b1, 0, move=1, rotate=1, tower_rotate=-1, fire=True)
+        trig(b1, 0, move=1, rotate=1, tower_rotate=-1, action=Action.FIRE)
 
         # heavy tank duel
         b1 = mkbot(BotType.Heavy, team1, 5, 3, east)
         b2 = mkbot(BotType.Heavy, team2, 7, 3, south, right)
-        trig(b1, 0, fire=True)
-        trig(b2, 0, fire=True)
+        trig(b1, 0, action=Action.FIRE)
+        trig(b2, 0, action=Action.FIRE)
 
         # laser mass kill
         mkbot(BotType.Raider, team2, 3.5, 4.0, west, hp=0.1)
@@ -118,18 +118,18 @@ class PhysicsDemoController(_BaseSceneController):
         mkbot(BotType.Raider, team2, 3.5, 4.5, west, hp=0.1)
         mkbot(BotType.Raider, team2, 3.5, 5.0, west, hp=0.1)
         b = mkbot(BotType.Raider, team2, 4.0, 5.0, west, hp=0.1)
-        trig(b, 0, shield=True)
+        trig(b, 0, action=Action.SHIELD_WARMUP)
 
         b1 = mkbot(BotType.Sniper, team1, 1, 4, east)
         scene_delay = 1
         rot_delay = 0.07
         when = atan(1 / 2) / BotType.Sniper.gun_rot_speed
-        trig(b1, scene_delay, fire=True)
+        trig(b1, scene_delay, action=Action.FIRE)
         trig(b1, scene_delay + rot_delay, tower_rotate=1)
         trig(b1, scene_delay + rot_delay + 1 * when, tower_rotate=-1)
         trig(b1, scene_delay + rot_delay + 2 * when, tower_rotate=0)
-        trig(b1, scene_delay + rot_delay + 2 * when + 0.1, fire=False)
-        trig(b, scene_delay + rot_delay + 3 * when, shield=False)
+        trig(b1, scene_delay + rot_delay + 2 * when + 0.1, action=Action.FIRE)
+        trig(b, scene_delay + rot_delay + 3 * when, action=Action.IDLE)
 
         # raider firing
         mkbot(BotType.Sniper, team1, 2, 7, north)
@@ -138,14 +138,14 @@ class PhysicsDemoController(_BaseSceneController):
         mkbot(BotType.Sniper, team1, 5, 7, north)
         mkbot(BotType.Sniper, team1, 6, 7, north)
         b1 = mkbot(BotType.Raider, team2, 1.0, 6, east, (ahead + left) / 2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
+        trig(b1, 0.0, move=1, action=Action.FIRE)
         b1 = mkbot(BotType.Raider, team2, 1.5, 6, east, (ahead + left) / 2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
+        trig(b1, 0.0, move=1, action=Action.FIRE)
         b1 = mkbot(BotType.Raider, team2, 2.0, 6, east, (ahead + left) / 2, hp=0.1)
-        trig(b1, 0.0, move=1, fire=True)
+        trig(b1, 0.0, move=1, action=Action.FIRE)
         b1 = mkbot(BotType.Heavy, team1, 7, 6, east)
-        trig(b1, 0, shield=True)
-        trig(b1, 6, shield=False)
+        trig(b1, 0, action=Action.SHIELD_WARMUP)
+        trig(b1, 6, action=Action.IDLE)
 
         # drifting
         b1 = mkbot(BotType.Raider, team1, 5, 8, west)
@@ -163,10 +163,10 @@ class SimpleDemoController(_BaseSceneController):
         trig = self.trigger
 
         r = mkbot(BotType.Raider, team1, 1, 9, 7*pi/4)
-        trig(r, 0, shield=True)
+        trig(r, 0, action=Action.SHIELD_WARMUP)
 
         l = mkbot(BotType.Sniper, team2, 3, 8, pi - atan(1/2))
-        trig(l, BotType.Raider.shield_warmup_period, fire=True)
+        trig(l, BotType.Raider.shield_warmup_period, action=Action.FIRE)
 
         t = mkbot(BotType.Heavy, team1, 1, 7.5, pi/2 - pi/10, -pi/6)
-        trig(t, BotType.Raider.shield_warmup_period + 0.1, fire=True)
+        trig(t, BotType.Raider.shield_warmup_period + 0.1, action=Action.FIRE)

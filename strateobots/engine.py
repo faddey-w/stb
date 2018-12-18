@@ -15,13 +15,15 @@ class Constants:
     shield_damage_absorption = 4/5
     ray_min_load_required = 0.33
     bullet_speed = 500
-    ray_charge_per_sec = 1
+    # friction_factor = 0
     friction_factor = 175
     collision_factor = 0.0002
     rotation_smoothness = 5
     min_collision_speed = 3
     ticks_per_sec = 50
-    load_with_shield = 0.4
+    load_with_action = 0.4
+    minimum_shield_warmup = 0.75
+    shield_half_leak_period = 0.5
 
 
 log = logging.getLogger(__name__)
@@ -136,8 +138,7 @@ class StbEngine:
                 move=ctl.move,
                 rotate=ctl.rotate,
                 tower_rotate=ctl.tower_rotate,
-                fire=ctl.fire,
-                shield=ctl.shield,
+                action=ctl.action,
             )
             for bot_id, ctl in self._controls.items()
         }
@@ -189,7 +190,6 @@ class StbEngine:
         next_rays = {}
         tps = float(Constants.ticks_per_sec)
         bullet_speed = Constants.bullet_speed / tps
-        ray_charge_per_tick = Constants.ray_charge_per_sec / tps
         bot_radius = Constants.bot_radius
         friction_factor = Constants.friction_factor
         collision_factor = Constants.collision_factor
@@ -198,7 +198,8 @@ class StbEngine:
         min_collision_speed = Constants.min_collision_speed
         world_width = Constants.world_width
         world_height = Constants.world_height
-        load_with_shield = Constants.load_with_shield
+        load_with_action = Constants.load_with_action
+        shield_leak_factor = 1 - Constants.shield_half_leak_period ** (1 / tps)
 
         # process AI
         bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = \
@@ -249,16 +250,20 @@ class StbEngine:
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
-            bot.rot_speed = (rotation_smoothness * bot.rot_speed + ctl.rotate * typ.rot_speed) / (rotation_smoothness + 1)
+
+            rot_speed = typ.rot_speed
+            if ctl.action == Action.ACCELERATION:
+                rot_speed += typ.bonus_rot_speed
+            bot.rot_speed = (rotation_smoothness * bot.rot_speed + ctl.rotate * rot_speed) / (rotation_smoothness + 1)
             ori_change = little_noise(bot.rot_speed) / tps
 
             a_angle = bot.orientation + ori_change / 2
             a_sin = sin(a_angle)
             a_cos = cos(a_angle)
 
-            v = vec_len(bot.vx, bot.vy)
-            v_cos = bot.vx / v if v else a_cos
-            v_sin = bot.vy / v if v else a_sin
+            # v = vec_len(bot.vx, bot.vy)
+            # v_cos = bot.vx / v if v else a_cos
+            # v_sin = bot.vy / v if v else a_sin
 
             # acceleration
             f_cos = f_sin = None
@@ -268,24 +273,26 @@ class StbEngine:
                 # and friction reduces other part of velocity vector
                 a_cos *= ctl.move
                 a_sin *= ctl.move
-                if vec_dot(a_cos, a_sin, v_cos, v_sin) > 0:
-                    av = bot.vx * a_cos + bot.vy * a_sin
-                    fvx = bot.vx - av * a_cos
-                    fvy = bot.vy - av * a_sin
-                    acc = typ.acc / tps
-                    bot.vx -= fvx
-                    bot.vy -= fvy
-                else:
-                    max_speed = typ.max_ahead_speed if ctl.move == 1 else typ.max_back_speed
-                    fvx = bot.vx - max_speed * a_cos
-                    fvy = bot.vy - max_speed * a_sin
-                    fv = vec_len(fvx, fvy) or 1
-                    f_cos = fvx / fv
-                    f_sin = fvy / fv
-                    fvx = bot.vx
-                    fvy = bot.vy
-                    acc = 0
-                    bot.vx = bot.vy = 0
+                # if vec_dot(a_cos, a_sin, v_cos, v_sin) > 0:
+                av = bot.vx * a_cos + bot.vy * a_sin
+                fvx = bot.vx - av * a_cos
+                fvy = bot.vy - av * a_sin
+                acc = typ.acc / tps
+                if ctl.action == Action.ACCELERATION:
+                    acc += typ.bonus_acc / tps
+                bot.vx -= fvx
+                bot.vy -= fvy
+                # else:
+                #     max_speed = typ.max_ahead_speed if ctl.move == 1 else typ.max_back_speed
+                #     fvx = bot.vx - max_speed * a_cos
+                #     fvy = bot.vy - max_speed * a_sin
+                #     fv = vec_len(fvx, fvy) or 1
+                #     f_cos = fvx / fv
+                #     f_sin = fvy / fv
+                #     fvx = bot.vx
+                #     fvy = bot.vy
+                #     acc = 0
+                #     bot.vx = bot.vy = 0
             else:
                 acc = 0
                 fvx = bot.vx
@@ -313,10 +320,14 @@ class StbEngine:
 
             # maximum speed
             v = sqrt(bot.vx*bot.vx + bot.vy*bot.vy)
-            if ctl.move == 1:
-                v_coeff = max(1, v / typ.max_ahead_speed)
+            if ctl.action == Action.ACCELERATION:
+                extra_speed = typ.bonus_max_speed
             else:
-                v_coeff = max(1, v / typ.max_back_speed)
+                extra_speed = 0
+            if ctl.move == 1:
+                v_coeff = max(1, v / (typ.max_ahead_speed + extra_speed))
+            else:
+                v_coeff = max(1, v / (typ.max_back_speed + extra_speed))
             bot.vx /= v_coeff
             bot.vy /= v_coeff
 
@@ -340,21 +351,23 @@ class StbEngine:
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
-            if ctl.shield:
+            if ctl.action == Action.SHIELD_WARMUP:
                 bot.shield_warmup += 1 / (tps * typ.shield_warmup_period)
                 bot.shield_warmup = min(1.0, bot.shield_warmup)
             else:
-                bot.shield_warmup = 0.0
+                regen = typ.shield_regen
+                if ctl.action == Action.SHIELD_REGEN:
+                    regen += typ.bonus_shield_regen
+                bot.shield_warmup *= shield_leak_factor
                 if bot.shield < typ.shield_energy:
-                    bot.shield = min(typ.shield_energy, bot.shield + typ.shield_regen / tps)
+                    bot.shield = min(typ.shield_energy, bot.shield + regen / tps)
 
         # firing
         for b_id, bot in self._bots.items():
             ctl = self._controls[bot.id]  # type: BotControl
-            if ctl.shield:
-                ctl.fire = False
             typ = bot.type  # type: BotTypeProperties
-            if ctl.fire and not typ.shots_ray and bot.shot_ready:
+            wants_fire = ctl.action == Action.FIRE
+            if wants_fire and not typ.shots_ray and bot.shot_ready and not bot.is_firing:
                 angle = random.gauss(
                     mu=bot.orientation + bot.tower_orientation,
                     sigma=typ.fire_scatter
@@ -364,12 +377,12 @@ class StbEngine:
                     bot.x, bot.y, typ.shot_range
                 )
                 next_bullets.append(bullet)
-                bot.load = 0
+                bot.load -= typ.shot_energy
                 bot.is_firing = True
-            elif ctl.fire and typ.shots_ray and bot.load > ray_charge_per_tick and bot.is_firing:
+            elif wants_fire and typ.shots_ray and bot.load > typ.shot_energy / tps and bot.is_firing:
                 # ray should already be in rays dict
                 pass
-            elif ctl.fire and typ.shots_ray and bot.load > Constants.ray_min_load_required:
+            elif wants_fire and typ.shots_ray and bot.load > Constants.ray_min_load_required:
                 if bot.id not in self._rays:
                     bullet = BulletModel(
                         typ, b_id, bot.orientation + bot.tower_orientation,
@@ -379,19 +392,19 @@ class StbEngine:
                 bot.is_firing = True
             else:
                 if bot.load < 1:
-                    if ctl.shield:
-                        coeff = load_with_shield
+                    if ctl.action != Action.IDLE and ctl.action != Action.FIRE:
+                        coeff = load_with_action
                     else:
                         coeff = 1.0
-                    bot.load += coeff / (typ.cd_period * tps)
+                    bot.load += coeff / (typ.reload_period * tps)
                 bot.is_firing = False
 
         # update rays
         for ray in self._rays.values():
             bot = self._bots.get(ray.origin_id)
-            if bot is None or bot.load < 0 or not self._controls[bot.id].fire:
+            if bot is None or bot.load < 0 or self._controls[bot.id].action != Action.FIRE:
                 continue
-            bot.load -= ray_charge_per_tick
+            bot.load -= bot.type.shot_energy / tps
             next_rays[bot.id] = ray
             position_ray(bot, ray)
 
@@ -571,8 +584,7 @@ class StbEngine:
         if self.win_condition_reached:
             if self.stop_all_after_finish:
                 for ctl in self._controls.values():
-                    ctl.fire = False
-                    ctl.shield = False
+                    ctl.action = Action.IDLE
                     ctl.move = 0
                     ctl.rotate = 0
                     ctl.tower_rotate = 0
@@ -663,19 +675,24 @@ BotTypeProperties = collections.namedtuple(
         'code',
         'max_hp',
         'mass',
-        'cd_period',  # sec
+        'reload_period',  # sec
         'acc',
+        'bonus_acc',
         'max_ahead_speed',  # points / sec
+        'bonus_max_speed',  # points / sec
         'max_back_speed',  # points / sec
         'rot_speed',  # radian / sec
+        'bonus_rot_speed',  # radian / sec
         'gun_rot_speed',  # radian / sec
-        'shots_ray',  # boolean; all rays beam during 1 sec
+        'shots_ray',  # boolean
         'shot_range',
+        'shot_energy',  # for rays it is discharge per sec
         'fire_scatter',  # sigma of bullet direction distribution
         'damage',  # per-shot or per-second if ray
         'shield_warmup_period',  # sec
         'shield_energy',
         'shield_regen',  # hp / sec
+        'bonus_shield_regen',  # hp / sec
     ]
 )
 
@@ -686,55 +703,70 @@ class BotType(BotTypeProperties, enum.Enum):
         code=1,
         max_hp=1000,
         mass=100,
-        cd_period=5,
+        reload_period=5,
         acc=17,
+        bonus_acc=10,
         max_ahead_speed=55,
         max_back_speed=50,
+        bonus_max_speed=20,
         rot_speed=pi / 4,
+        bonus_rot_speed=pi / 4,
         gun_rot_speed=1.1 * 2 * pi / 3,
         shots_ray=False,
         shot_range=250,
+        shot_energy=0.99,
         fire_scatter=2 * pi / 180,
-        damage=130,
+        damage=200,
         shield_warmup_period=0.5,
         shield_energy=1200,
         shield_regen=50,
+        bonus_shield_regen=20,
     )
     Raider = BotTypeProperties(
         code=2,
         max_hp=400,
         mass=50,
-        cd_period=0.25,
+        reload_period=0.75,
         acc=75,
+        bonus_acc=25,
         max_ahead_speed=160,
         max_back_speed=30,
+        bonus_max_speed=40,
         rot_speed=pi,
+        bonus_rot_speed=pi / 2,
         gun_rot_speed=pi,
         shots_ray=False,
         shot_range=200,
+        shot_energy=0.33,
         fire_scatter=4 * pi / 180,
         damage=16,
         shield_warmup_period=0.8,
         shield_energy=200,
         shield_regen=20,
+        bonus_shield_regen=20,
     )
     Sniper = BotTypeProperties(
         code=3,
         max_hp=250,
         mass=80,
-        cd_period=10,
+        reload_period=10,
         acc=15,
+        bonus_acc=12,
         max_ahead_speed=80,
         max_back_speed=40,
+        bonus_max_speed=10,
         rot_speed=pi / 8,
+        bonus_rot_speed=pi / 12,
         gun_rot_speed=pi / 6,
         shots_ray=True,
         shot_range=400,
+        shot_energy=1,
         fire_scatter=0,
         damage=500,
         shield_warmup_period=0.1,
         shield_energy=500,
         shield_regen=75,
+        bonus_shield_regen=10,
     )
 
     @classmethod
@@ -782,11 +814,11 @@ class BotModel:
 
     @property
     def shot_ready(self):
-        return self.load > 0.999
+        return self.load >= self.type.shot_energy
 
     @property
     def has_shield(self):
-        return self.shield_warmup > 0.99 and self.shield > 0
+        return self.shield_warmup > Constants.minimum_shield_warmup and self.shield > 0
 
 
 class BulletModel:
@@ -903,16 +935,23 @@ def little_noise(x):
     return random.gauss(x, x/10)
 
 
+class Action:
+    IDLE = 0
+    FIRE = 1
+    SHIELD_WARMUP = 2
+    SHIELD_REGEN = 3
+    ACCELERATION = 4
+
+
 class BotControl:
 
-    __slots__ = ['move', 'rotate', 'tower_rotate', 'fire', 'shield']
+    __slots__ = ['move', 'rotate', 'tower_rotate', 'action']
 
-    def __init__(self, move=0, rotate=0, tower_rotate=0, fire=False, shield=False):
+    def __init__(self, move=0, rotate=0, tower_rotate=0, action=Action.IDLE):
         self.move = move
         self.rotate = rotate
         self.tower_rotate = tower_rotate
-        self.fire = fire
-        self.shield = shield
+        self.action = action
 
     def __eq__(self, other):
         return all(
@@ -921,8 +960,8 @@ class BotControl:
         )
 
     def __repr__(self):
-        return 'BotControl(move={}, rotate={}, tower_rotate={}, fire={}, shield={})'.format(
-            self.move, self.rotate, self.tower_rotate, self.fire, self.shield
+        return 'BotControl(move={}, rotate={}, tower_rotate={}, action={})'.format(
+            self.move, self.rotate, self.tower_rotate, self.action
         )
 
 

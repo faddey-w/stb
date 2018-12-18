@@ -1,6 +1,6 @@
 from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
 from strateobots.engine import dist_points, vec_len, dist_line, vec_dot
-from strateobots.engine import Constants, BotType
+from strateobots.engine import Constants, BotType, Action
 from strateobots.util import objedict
 from . import base
 import logging
@@ -55,8 +55,16 @@ class CloseDistanceAttack(_BaseFunction):
 
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
         ctl.tower_rotate = navigate_gun(bot, enemy)
-        ctl.fire = should_fire(bot, enemy, bottype.shot_range, dist)
-        ctl.shield = not ctl.fire and should_fire(enemy, bot, 1.5 * enemytype.shot_range, dist)
+        if should_fire(bot, enemy, bottype.shot_range, dist):
+            action = Action.FIRE
+        elif should_fire(enemy, bot, 1.5 * enemytype.shot_range, dist):
+            action = Action.SHIELD_WARMUP
+        else:
+            if dist > 1.5 * orbit:
+                action = Action.ACCELERATION
+            else:
+                action = Action.IDLE
+        ctl.action = action
         ctl.update(move_to_back(bot, enemy, orbit))
 
 
@@ -68,13 +76,22 @@ class LongDistanceAttack(_BaseFunction):
         ctl.tower_rotate = navigate_gun(bot, enemy)
         ctl.rotate = ctl.tower_rotate
 
-        # decide if we should fire
-        ctl.fire = fire = should_fire(bot, enemy, bottype.shot_range)
+        action = Action.IDLE
 
         # decide if we should turn on the shield
         is_at_danger = should_fire(enemy, bot, 1.8 * enemytype.shot_range)
         potentially_can_fire = should_fire(bot, enemy, 1.2 * bottype.shot_range)
-        ctl.shield = is_at_danger and not potentially_can_fire or bot.shot_ready and not fire
+        if is_at_danger and not potentially_can_fire or bot.shot_ready:
+            if bot.shield > 0.1:
+                action = Action.SHIELD_WARMUP
+            else:
+                action = Action.ACCELERATION
+
+        # decide if we should fire
+        if should_fire(bot, enemy, bottype.shot_range):
+            action = Action.FIRE
+
+        ctl.action = action
 
 
 class RammingAttack(_BaseFunction):
@@ -89,9 +106,11 @@ class RammingAttack(_BaseFunction):
         else:
             last_v = self.last_v
 
+        max_acc = bottype.acc + bottype.bonus_acc
+
         limit_speed = bottype.max_ahead_speed / 2
         almost_zero_speed = bottype.acc * 0.2
-        full_acc_dist = bottype.max_ahead_speed ** 2 / (2 * bottype.acc)
+        full_acc_dist = bottype.max_ahead_speed ** 2 / (2 * max_acc)
         dist_k = 1
         ramming_dist = dist_k * full_acc_dist
 
@@ -109,13 +128,13 @@ class RammingAttack(_BaseFunction):
         enemy_dir_sin = (enemy.y - bot.y) / dist
         v_r_len = vec_len(bot.vx * enemy_dir_cos, bot.vy * enemy_dir_sin)
         v_r = v_r_len * (+1 if cos(bot.orientation - enemy_angle) > 0 else -1)
-        time_to_max_speed = (bottype.max_ahead_speed - v_r) / bottype.acc
+        time_to_max_speed = (bottype.max_ahead_speed - v_r) / max_acc
         dist_to_max_speed = time_to_max_speed * (bottype.max_ahead_speed + v_r) / 2
         contact_dist = dist - Constants.bot_radius
         if dist_to_max_speed > contact_dist:
-            ts = solve_square_equation(bottype.acc / 2, v_r, -contact_dist)
+            ts = solve_square_equation(max_acc / 2, v_r, -contact_dist)
             contact_time = max(ts)
-            contact_speed = v_r + bottype.acc * contact_time
+            contact_speed = v_r + max_acc * contact_time
         else:
             contact_time = time_to_max_speed + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
             contact_speed = bottype.max_ahead_speed
@@ -133,11 +152,17 @@ class RammingAttack(_BaseFunction):
         else:
             self.is_ramming = do_ramming = dist > ramming_dist
 
+        action = Action.IDLE
+
         can_ram_with_shield = shield_start_time + 0.1 < contact_time < shield_start_time + 0.9 * shield_max_time
         if can_ram_with_shield and do_ramming:
-            ctl.shield = shield_start_time + 0.1 < contact_time < shield_start_time + min(1, 0.9 * shield_max_time)
+            shield = shield_start_time + 0.1 < contact_time < shield_start_time + min(1, 0.9 * shield_max_time)
         else:
-            ctl.shield = False
+            shield = False
+        if shield:
+            action = Action.SHIELD_WARMUP
+        elif do_ramming:
+            action = Action.ACCELERATION
 
         if do_ramming:
             ctl.move = +1
@@ -146,7 +171,10 @@ class RammingAttack(_BaseFunction):
             ctl.move = -1
             ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
         ctl.tower_rotate = navigate_shortest(bot, enemy_angle, with_gun=True)
-        ctl.fire = should_fire(bot, enemy, bottype.shot_range, dist)
+        if should_fire(bot, enemy, bottype.shot_range, dist) and not shield:
+            action = Action.FIRE
+
+        ctl.action = action
 
 
 class HoldPosition(LongDistanceAttack):
