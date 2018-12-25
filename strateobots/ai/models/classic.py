@@ -125,7 +125,7 @@ class Model:
         self.init_op = tf.variables_initializer(self.var_list)
 
     def encode_prev_state(self, bot, enemy, bot_bullet, enemy_bullet):
-        return COORDINATE_SCALE(data.coordinates_fields(enemy))
+        return COORDINATE_SCALE(coordinates_fields(enemy))
 
     def encode_state(self, bot, enemy, bot_bullet, enemy_bullet):
         # prepare data of optional objects

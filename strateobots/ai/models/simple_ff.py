@@ -56,7 +56,7 @@ extra_fields = data.FeatureSet([
 ])
 
 
-class Model(model_function.VectorGeneratorDataEncoderMixin):
+class Model(model_function.TwoStepDataEncoderMixin):
 
     _prev_state_dimension = coordinates_fields.dimension
     _current_state_dimension = sum((

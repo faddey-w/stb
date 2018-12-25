@@ -111,13 +111,12 @@ class FeatureSet:
             return np.array([], dtype=np.float)
 
 
-ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'fire', 'shield'
+ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'action'
 
 ctl_move = CategoricalFeature(['move'], [-1, 0, +1])
 ctl_rotate = CategoricalFeature(['rotate'], [-1, 0, +1])
 ctl_tower_rotate = CategoricalFeature(['tower_rotate'], [-1, 0, +1])
-ctl_fire = CategoricalFeature(['fire'], [False, True])
-ctl_shield = CategoricalFeature(['shield'], [False, True])
+ctl_action = CategoricalFeature(['shield'], [0, 1, 2, 3, 4])
 
 
 BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'

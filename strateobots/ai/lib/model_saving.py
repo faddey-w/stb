@@ -43,15 +43,13 @@ class ModelManager:
             save_path = self.save_path
         model = self.model
         os.makedirs(save_path, exist_ok=True)
-        hasher = hashlib.md5()
         with open(_get_construct_params_filepath(save_path), 'w') as f:
             construct_params = getattr(model, 'construct_params', {})
             params_str = json.dumps(construct_params, indent=4, sort_keys=True)
-            hasher.update(params_str.encode('utf-8'))
             f.write(params_str)
         shutil.copy(self._src_filepath, _get_sourcecode_filepath(save_path))
         with open(_get_hash_filepath(save_path), 'w') as f:
-            f.write(hasher.hexdigest())
+            f.write(generate_model_hash(self.model, self._src_filepath))
 
     @classmethod
     def load_existing_model(cls, save_path, name_scope=None):
@@ -102,6 +100,20 @@ class ModelManager:
         self.saver.restore(session, ckpt.model_checkpoint_path)
         log.info('loaded model "%s" from %s at step=%s',
                  self.model.name, ckpt.model_checkpoint_path, self.step_counter)
+
+
+def generate_model_hash(model, model_source_path):
+    hasher = hashlib.md5()
+    construct_params = getattr(model, 'construct_params', {})
+    params_str = json.dumps(construct_params, sort_keys=True)
+    hasher.update(params_str.encode('utf-8'))
+    with open(model_source_path, 'rb') as f:
+        while True:
+            chunk = f.read(4096)
+            if not chunk:
+                break
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def _get_step_filepath(save_path):

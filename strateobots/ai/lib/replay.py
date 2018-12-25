@@ -14,6 +14,9 @@ class ReplayMemory:
 
     def __init__(self, storage_directory, model, props_function,
                  load_winner_data=False, load_loser_data=True,
+                 cache_key=None, force_generate_cache=False,
+                 load_predicate=None,
+                 rotate_storage=False,
                  max_games_keep=100):
         self._rds = ReplayDataStorage(storage_directory)
         self.model = model
@@ -23,21 +26,32 @@ class ReplayMemory:
         self.props_function = props_function
         self._data = []
         self._prepared_epoch = None
+        self._cache_key = cache_key
+        self.rotate_storage = rotate_storage
 
         log.info('Loading data from storage')
-        for key in self._rds.list_keys()[-self.max_games_keep:]:
+        remaining = self.max_games_keep
+        keys = self._rds.list_keys()
+        while remaining > 0 and keys:
+            key = keys.pop(-1)
+            if load_predicate:
+                ok = load_predicate(self._rds.load_metadata(key))
+                if not ok:
+                    continue
             rd = _ReplayData(key)
-            self._load_numpy(rd)
+            self._load_numpy(rd, force_generate_cache)
             self._data.append(rd)
+            remaining -= 1
 
     def add_replay(self, metadata, replay_data):
         key = time.strftime('%Y%m%d_%H%M%S')
         self._rds.save_replay(key, metadata, replay_data)
         rd = _ReplayData(key)
-        self._load_numpy(rd)
+        self._load_numpy(rd, True)
         self._data.append(rd)
         if len(self._data) > self.max_games_keep:
-            # self._rds.remove_replay(self._data[0].key)
+            if self.rotate_storage:
+                self._rds.remove_replay(self._data[0].key)
             del self._data[0]
 
     def total_items(self):
@@ -146,31 +160,47 @@ class ReplayMemory:
 
         return props_buffer, actions_buffer, states_buffer, next_states_buffer
 
-    def _load_numpy(self, rd):
-        rd.json_data = self._rds.load_replay_data(rd.key)
-        team1, team2 = rd.json_data[-1]['bots'].keys()
-        if not rd.json_data[-1]['bots'][team1]:
-            winner_team = team2
-            loser_team = team1
-        elif not rd.json_data[-1]['bots'][team2]:
-            winner_team = team1
-            loser_team = team2
-        else:
-            winner_team = None
-            loser_team = team1
-        rd.winner_team = winner_team
-        rd.loser_team = loser_team
+    def _load_numpy(self, rd, force_generate_cache):
+        need_loser_data = self._load_loser_data
+        need_winner_data = self._load_winner_data
+        if not force_generate_cache and self._cache_key is not None:
+            if need_loser_data:
+                need_loser_data, rd.loser_state_data, rd.loser_action_idx = \
+                    self._try_load_from_cache(rd, 'loser')
+            if need_winner_data:
+                need_winner_data, rd.winner_state_data, rd.winner_action_idx = \
+                    self._try_load_from_cache(rd, 'winner')
 
-        last_tick = next(i for i in range(len(rd.json_data)-1, -1, -1)
-                         if rd.json_data[i]['controls'][team1] is not None)
+        if need_winner_data or need_loser_data:
+            rd.json_data = self._rds.load_replay_data(rd.key)
+            team1, team2 = rd.json_data[-1]['bots'].keys()
+            if not rd.json_data[-1]['bots'][team1]:
+                winner_team = team2
+                loser_team = team1
+            elif not rd.json_data[-1]['bots'][team2]:
+                winner_team = team1
+                loser_team = team2
+            else:
+                winner_team = None
+                loser_team = team1
+            rd.winner_team = winner_team
+            rd.loser_team = loser_team
 
-        if self._load_loser_data:
-            rd.loser_state_data, rd.loser_action_idx = \
-                self._load_numpy_data_for_team(rd, loser_team, winner_team, last_tick+1)
-        if self._load_winner_data and winner_team is not None:
-            rd.winner_state_data, rd.winner_action_idx = \
-                self._load_numpy_data_for_team(rd, winner_team, loser_team, last_tick+1)
-        rd.ticks = np.arange(last_tick+1)
+            last_tick = next(i for i in range(len(rd.json_data)-1, -1, -1)
+                             if rd.json_data[i]['controls'][team1] is not None)
+
+            if need_loser_data:
+                rd.loser_state_data, rd.loser_action_idx = \
+                    self._load_numpy_data_for_team(rd, loser_team, winner_team, last_tick+1)
+            if need_winner_data and winner_team is not None:
+                rd.winner_state_data, rd.winner_action_idx = \
+                    self._load_numpy_data_for_team(rd, winner_team, loser_team, last_tick+1)
+            rd.ticks = np.arange(last_tick+1)
+
+        if need_winner_data:
+            self._save_cache(rd, 'winner')
+        if need_loser_data:
+            self._save_cache(rd, 'loser')
 
     def _load_numpy_data_for_team(self, rd, team, opponent_team, end_t):
         state_array = np.empty([end_t, self.model.state_dimension], dtype=np.float32)
@@ -192,6 +222,48 @@ class ReplayMemory:
 
         return state_array, action_arrays
 
+    def _try_load_from_cache(self, rd, winner_or_loser):
+        state_cache_path = self._rds.get_path_for_extra_data(
+            rd.key,
+            'cache_{}_{}_state.npy'.format(self._cache_key, winner_or_loser)
+        )
+        idx_cache_path = self._rds.get_path_for_extra_data(
+            rd.key,
+            'cache_{}_{}_actionidx.npy'.format(self._cache_key, winner_or_loser)
+        )
+        state = idx = None
+        try:
+            with open(state_cache_path, 'rb') as f:
+                f.seek(0, 2)
+                if f.tell() > 0:
+                    f.seek(0, 0)
+                    state = np.load(f)
+
+            if state is not None:
+                idx = np.load(idx_cache_path)
+
+            need_load = False
+        except:
+            need_load = True
+        return need_load, state, idx
+
+    def _save_cache(self, rd, winner_or_loser):
+        state_cache_path = self._rds.get_path_for_extra_data(
+            rd.key,
+            'cache_{}_{}_state.npy'.format(self._cache_key, winner_or_loser)
+        )
+        idx_cache_path = self._rds.get_path_for_extra_data(
+            rd.key,
+            'cache_{}_{}_actionidx.npy'.format(self._cache_key, winner_or_loser)
+        )
+
+        with open(state_cache_path, 'wb') as sf, open(idx_cache_path, 'wb') as af:
+            state = rd.get_state_data(winner_or_loser)
+            idx = rd.get_action_idx(winner_or_loser)
+            if state is not None:
+                np.save(sf, state)
+                np.save(af, idx)
+
 
 class _ReplayData:
 
@@ -205,6 +277,12 @@ class _ReplayData:
         self.winner_action_idx = None
         self.loser_action_idx = None
         self.ticks = None
+
+    def get_state_data(self, winner_or_loser):
+        return getattr(self, '{}_state_data'.format(winner_or_loser))
+
+    def get_action_idx(self, winner_or_loser):
+        return getattr(self, '{}_action_idx'.format(winner_or_loser))
 
 
 class NotEnoughData(Exception):

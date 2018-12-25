@@ -949,6 +949,8 @@ class Action:
     SHIELD_REGEN = 3
     ACCELERATION = 4
 
+    ALL = IDLE, FIRE, SHIELD_WARMUP, SHIELD_REGEN, ACCELERATION
+
 
 class BotControl:
 

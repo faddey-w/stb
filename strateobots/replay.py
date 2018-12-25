@@ -17,6 +17,10 @@ class ReplayDataStorage:
         with open(replay_path, 'w') as f:
             json.dump(replay_data, f, separators=(',', ':'))
 
+    def get_path_for_extra_data(self, key, name):
+        dir_path, _, _ = self._prepare_paths(key, False)
+        return os.path.join(dir_path, '_extra_' + name)
+
     def list_keys(self):
         keys = os.listdir(self.storage_directory)
         return [

@@ -61,7 +61,7 @@ def encode_vector_for_model(encoder, state, team=None, opponent_team=None):
     )
 
 
-class VectorGeneratorDataEncoderMixin:
+class TwoStepDataEncoderMixin:
     @data.generator_encoder
     def data_encoder(self):
         state = yield

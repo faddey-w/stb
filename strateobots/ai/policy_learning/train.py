@@ -6,7 +6,7 @@ import time
 from collections import defaultdict
 from strateobots.ai.lib import replay, data, model_saving
 from strateobots.ai.policy_learning.core import PolicyLearning
-from strateobots.ai.models import simple_ff, classic
+from strateobots.ai.models import simple_ff, classic, radar
 
 
 log = logging.getLogger(__name__)
@@ -17,14 +17,20 @@ class PLTraining:
     def __init__(self, session, storage_directory):
         self.sess = session
 
-        self.model = simple_ff.Model('PLModel')
-        # self.model = classic.Model('PLModel')
+        model_module = radar
+        src_path = model_module.__file__
 
-        self.replay_memory = replay.ReplayMemory(storage_directory, self.model,
-                                                 _props_function,
-                                                 load_winner_data=True,
-                                                 load_loser_data=False,
-                                                 )
+        self.model = model_module.Model('PLModel')
+
+        cache_key = model_saving.generate_model_hash(self.model, src_path)
+
+        self.replay_memory = replay.ReplayMemory(
+            storage_directory, self.model, _props_function,
+            load_winner_data=True,
+            load_loser_data=False,
+            cache_key=cache_key,
+            load_predicate=lambda md: 'Close distance attack' in (md['ai1_name'], md['ai2_name'])
+        )
         # import code; code.interact(local=dict(**locals(), **globals()))
         self.pl = PolicyLearning(
             self.model,
@@ -89,7 +95,7 @@ def _props_function(replay_data, team, is_win):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data-dir', default='_data/RWR')
+    parser.add_argument('--data-dir', default='_data/PL')
     parser.add_argument('--n-batches', '-n', type=int)
     parser.add_argument('--max-accuracy', '-A', type=float)
     parser.add_argument('--max-time', '-t', type=float)
