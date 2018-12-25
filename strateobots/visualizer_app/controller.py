@@ -23,11 +23,9 @@ class ServerState:
         self.ai_function_descriptors = []
         self.storage = storage
         self._request_queue = []
+        self.ai_modules = ai_modules
 
-        for ai_m in ai_modules:
-            self.bot_initializers.extend(ai_m.list_bot_initializers())
-            for func_name, params in ai_m.list_ai_function_descriptions():
-                self.ai_function_descriptors.append((func_name, params, ai_m))
+        self.refresh_launch_params()
 
     def add_game_simulation(self, bot_initializer_id, ai1_id, ai2_id) -> 'SimulationState':
         try:
@@ -103,6 +101,15 @@ class ServerState:
                 return
         else:
             self.storage.remove_replay(sim_id)
+
+    def refresh_launch_params(self):
+        self.bot_initializers = []
+        self.ai_function_descriptors = []
+
+        for ai_m in self.ai_modules:
+            self.bot_initializers.extend(ai_m.list_bot_initializers())
+            for func_name, params in ai_m.list_ai_function_descriptions():
+                self.ai_function_descriptors.append((func_name, params, ai_m))
 
     @property
     def queue_size(self):

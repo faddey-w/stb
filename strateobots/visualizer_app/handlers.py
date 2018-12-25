@@ -24,13 +24,14 @@ def noop_auth_handler(request):
 
 
 class _BaseHandler(web.RequestHandler):
-    def initialize(self, serverstate=None, auth_handler=None):
+    def initialize(self, serverstate=None, auth_handler=None, program_storage=None):
         """
         :type serverstate: strateobots.engine_server.controller.ServerState
         :type auth_handler: callable
         """
         self.state = serverstate
         self.authenticate = auth_handler
+        self.program_storage = program_storage
 
     def api_respond(self, data, http_code=200):
         self.set_status(http_code)
@@ -139,3 +140,12 @@ class GameViewHandler(_BaseHandler):
             raise exceptions.SimulationNotFound(snf.key)
         self.set_status(204)
 
+
+class UserProgramsViewHandler(_BaseHandler):
+
+    def post(self, program_name):
+        if self.program_storage is None:
+            raise web.HTTPError(404)
+        self.authenticate(self.request)
+        self.program_storage.save_program(program_name, self.request.body.decode('utf-8'))
+        self.state.refresh_launch_params()

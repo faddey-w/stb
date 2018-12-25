@@ -59,16 +59,24 @@ def main(argv=None):
 
     if args.user_programs_dir is not None:
         from strateobots.ai import user_program
-        ai_modules.append(user_program.AIModule(user_program.ProgramStorage(args.user_programs_dir)))
+        program_storage = user_program.ProgramStorage(args.user_programs_dir)
+        ai_modules.append(user_program.AIModule(program_storage))
+    else:
+        program_storage = None
 
     storage = CachedReplayDataStorage(args.storage_dir)
     state = ServerState(ai_modules, storage)
-    initargs = dict(serverstate=state, auth_handler=handlers.noop_auth_handler)
+    initargs = dict(
+        serverstate=state,
+        auth_handler=handlers.noop_auth_handler,
+        program_storage=program_storage,
+    )
     fileserver_args = dict(path=args.static_dir, default_filename='index.html')
     app = web.Application([
         ('/api/v1/launch-params', handlers.GameLaunchParametersHandler, initargs),
         ('/api/v1/game', handlers.GameListHandler, initargs),
         ('/api/v1/game/([0-9a-zA-Z_-]+)', handlers.GameViewHandler, initargs),
+        ('/api/v1/programs/([0-9a-zA-Z_-]+)', handlers.UserProgramsViewHandler, initargs),
         ('/(.*)', web.StaticFileHandler, fileserver_args)
     ], debug=args.debug)
     app.listen(args.port)
