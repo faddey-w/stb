@@ -589,15 +589,22 @@ class StbEngine:
                     ctl.rotate = 0
                     ctl.tower_rotate = 0
             return None
-        controls = ai({
+        result = ai({
             'tick': self.nticks,
             'friendly_bots': friendly_bots,
             'enemy_bots': enemy_bots,
             'bullets': bullets,
             'rays': rays,
         })
+        if isinstance(result, dict):
+            controls = result['controls']
+        else:
+            controls = result
+        allowed_ids = {bot['id'] for bot in friendly_bots}
         for ctl_data in controls:
             bot_id = ctl_data['id']
+            if bot_id not in allowed_ids:
+                continue
             ctl = self._controls[bot_id]
             for attr in BotControl.__slots__:
                 value = ctl_data.get(attr)

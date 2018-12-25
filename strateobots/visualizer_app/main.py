@@ -20,9 +20,10 @@ def main(argv=None):
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--static-dir', default=static_dir)
-    parser.add_argument('--port', '-P', default=9999, type=int)
+    parser.add_argument('--port', '-p', default=9999, type=int)
     parser.add_argument('--storage-dir', '-S', required=True)
     parser.add_argument('--saved-models-dir', '-M')
+    parser.add_argument('--user-programs-dir', '-P')
     parser.add_argument('--debug', '-d', action='store_true')
     args = parser.parse_args(argv)
     logging.config.dictConfig(config.DEBUG_LOGGING if args.debug else config.LOGGING)
@@ -49,12 +50,16 @@ def main(argv=None):
         default_module,
         physics_demo.AIModule(),
         simple_duel.AIModule(),
-        treesearch.AIModule(),
+        # treesearch.AIModule(),
     ]
 
     if args.saved_models_dir is not None:
         from strateobots.ai import models
         ai_modules.append(models.AIModule(args.saved_models_dir))
+
+    if args.user_programs_dir is not None:
+        from strateobots.ai import user_program
+        ai_modules.append(user_program.AIModule(user_program.ProgramStorage(args.user_programs_dir)))
 
     storage = CachedReplayDataStorage(args.storage_dir)
     state = ServerState(ai_modules, storage)
