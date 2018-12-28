@@ -99,23 +99,17 @@ class Model(model_function.TwoStepDataEncoderMixin):
                 (data.ctl_tower_rotate.dimension, tf.identity),
                 # (data.ctl_tower_rotate.dimension, tf.sin),
             )
-            self.fire_block = nn.LayerChain(
-                nn.Linear.chain_factory(internal_repr_size, 'FireBlock'),
+            self.action_block = nn.LayerChain(
+                nn.Linear.chain_factory(internal_repr_size, 'ActionBlock'),
                 (25, tf.sigmoid),
-                (data.ctl_fire.dimension, tf.identity),
-            )
-            self.shield_block = nn.LayerChain(
-                nn.Linear.chain_factory(internal_repr_size, 'ShieldBlock'),
-                (25, tf.sigmoid),
-                (data.ctl_shield.dimension, tf.identity),
+                (data.ctl_action.dimension, tf.identity),
             )
         self.var_list = sum([
             self.main_block.var_list,
             self.move_block.var_list,
             self.rotate_block.var_list,
             self.tower_rotate_block.var_list,
-            self.fire_block.var_list,
-            self.shield_block.var_list,
+            self.action_block.var_list,
         ], [])
         self.init_op = tf.variables_initializer(self.var_list)
 
@@ -176,25 +170,22 @@ class Model(model_function.TwoStepDataEncoderMixin):
         move = self.move_block.apply(internal_repr)
         rotate = self.rotate_block.apply(internal_repr)
         tower_rotate = self.tower_rotate_block.apply(state_vector_array)
-        fire = self.fire_block.apply(internal_repr)
-        shield = self.shield_block.apply(internal_repr)
+        action = self.action_block.apply(internal_repr)
         return self._Apply(state_vector_array, main,
-                           move, rotate, tower_rotate, fire, shield)
+                           move, rotate, tower_rotate, action)
 
     class _Apply:
 
-        def __init__(self, state, main, move, rotate, tower_rotate, fire, shield):
+        def __init__(self, state, main, move, rotate, tower_rotate, action):
             self.state = state
             self.main = main
             self.move = move
             self.rotate = rotate
             self.tower_rotate = tower_rotate
-            self.fire = fire
-            self.shield = shield
+            self.action = action
             self.controls = {
                 'move': self.move[-1].out,
                 'rotate': self.rotate[-1].out,
                 'tower_rotate': self.tower_rotate[-1].out,
-                'fire': self.fire[-1].out,
-                'shield': self.shield[-1].out,
+                'action': self.action[-1].out,
             }

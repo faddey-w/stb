@@ -126,7 +126,7 @@ BULLET_FIELDS = 'present', 'x', 'y', 'orientation'
 
 def generator_encoder(function):
     @wraps(function)
-    def wrapper(*args, **kwargs):
+    def encoder_factory(*args, **kwargs):
         generator = function(*args, **kwargs)
         generator.send(None)
 
@@ -134,4 +134,13 @@ def generator_encoder(function):
             state = bot, enemy, bot_bullet, enemy_bullet
             return generator.send(state)
         return encode
-    return wrapper
+    return encoder_factory
+
+
+def function_encoder(function):
+    @wraps(function)
+    def encoder_factory(*args, **kwargs):
+        def encode(*encode_args):
+            return function(*args, *encode_args, **kwargs)
+        return encode
+    return encoder_factory

@@ -18,8 +18,10 @@ class PLTraining:
         self.sess = session
 
         model_module = radar
+        # model_module = simple_ff
         src_path = model_module.__file__
 
+        # import pdb; pdb.set_trace()
         self.model = model_module.Model('PLModel')
 
         cache_key = model_saving.generate_model_hash(self.model, src_path)
@@ -46,7 +48,7 @@ class PLTraining:
             _, (act_idx, ctl_val) = self.pl.compute_on_sample(
                 self.sess,
                 self.replay_memory,
-                [self.pl.train_steps['tower_rotate'], extra_t],
+                [self.pl.train_steps['rotate'], extra_t],
                 i,
             )
             for ctl in data.ALL_CONTROLS:
@@ -89,8 +91,8 @@ class PLTraining:
                     break
 
 
-def _props_function(replay_data, team, is_win):
-    return np.zeros(len(replay_data)-1)
+def _props_function(replay_data, n, team, is_win):
+    return np.zeros(n)
 
 
 def main():
@@ -113,13 +115,15 @@ def main():
 
     plt = pl_train
     if opts.interactive:
-        interactive(globals(), locals())
+        with session.as_default():
+            interactive(globals(), locals())
     try:
         pl_train.train_loop(opts.max_accuracy, opts.n_batches, opts.max_time)
     except KeyboardInterrupt:
         pass
     if opts.interactive_after:
-        interactive(globals(), locals())
+        with session.as_default():
+            interactive(globals(), locals())
 
     if opts.save_dir:
         mgr = model_saving.ModelManager(pl_train.model, opts.save_dir)

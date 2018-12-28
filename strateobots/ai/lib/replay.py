@@ -133,7 +133,7 @@ class ReplayMemory:
             action_idx = getattr(rd, side + '_action_idx')
             state_data = getattr(rd, side + '_state_data')
 
-            props = self.props_function(rd.json_data, team, side == 'winner')[:-1]
+            props = self.props_function(rd.json_data, n, team, side == 'winner')[:n]
             if np.ndim(props) == 1:
                 props = np.reshape(props, (props.size, 1))
             props_buffer[i:i+n] = props
@@ -171,7 +171,19 @@ class ReplayMemory:
                 need_winner_data, rd.winner_state_data, rd.winner_action_idx = \
                     self._try_load_from_cache(rd, 'winner')
 
-        if need_winner_data or need_loser_data:
+        n_ticks_path = self._rds.get_path_for_extra_data(
+            rd.key,
+            'cache_{}_nticks'.format(self._cache_key)
+        )
+        try:
+            with open(n_ticks_path) as ntf:
+                n_ticks = int(ntf.read())
+            need_n_ticks = False
+        except:
+            need_n_ticks = True
+            n_ticks = None
+
+        if need_winner_data or need_loser_data or need_n_ticks:
             rd.json_data = self._rds.load_replay_data(rd.key)
             team1, team2 = rd.json_data[-1]['bots'].keys()
             if not rd.json_data[-1]['bots'][team1]:
@@ -195,7 +207,13 @@ class ReplayMemory:
             if need_winner_data and winner_team is not None:
                 rd.winner_state_data, rd.winner_action_idx = \
                     self._load_numpy_data_for_team(rd, winner_team, loser_team, last_tick+1)
-            rd.ticks = np.arange(last_tick+1)
+
+            n_ticks = last_tick + 1
+            if need_n_ticks:
+                with open(n_ticks_path, 'w') as ntf:
+                    ntf.write(str(n_ticks))
+
+        rd.ticks = np.arange(n_ticks)
 
         if need_winner_data:
             self._save_cache(rd, 'winner')
@@ -237,10 +255,14 @@ class ReplayMemory:
                 f.seek(0, 2)
                 if f.tell() > 0:
                     f.seek(0, 0)
-                    state = np.load(f)
+                    state = np.load(f, allow_pickle=False)
 
             if state is not None:
-                idx = np.load(idx_cache_path)
+                idx = np.load(idx_cache_path, allow_pickle=False)
+                idx_dict = {}
+                for i, ctl in enumerate(data.ALL_CONTROLS):
+                    idx_dict[ctl] = idx[i]
+                idx = idx_dict
 
             need_load = False
         except:
@@ -259,10 +281,14 @@ class ReplayMemory:
 
         with open(state_cache_path, 'wb') as sf, open(idx_cache_path, 'wb') as af:
             state = rd.get_state_data(winner_or_loser)
-            idx = rd.get_action_idx(winner_or_loser)
+            idx_dict = rd.get_action_idx(winner_or_loser)
             if state is not None:
-                np.save(sf, state)
-                np.save(af, idx)
+                idx = np.stack([
+                    idx_dict[ctl]
+                    for ctl in data.ALL_CONTROLS
+                ])
+                np.save(sf, state, allow_pickle=False)
+                np.save(af, idx, allow_pickle=False)
 
 
 class _ReplayData:
