@@ -54,7 +54,7 @@ class CloseDistanceAttack(_BaseFunction):
         orbit = bottype.shot_range / 3
 
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
-        ctl.tower_rotate = navigate_gun(bot, enemy)
+        ctl.tower_rotate, ctl.gun_orientation = navigate_gun(bot, enemy)
         if should_fire(bot, enemy, bottype.shot_range, dist):
             action = Action.FIRE
         elif should_fire(enemy, bot, 1.5 * enemytype.shot_range, dist):
@@ -73,8 +73,9 @@ class LongDistanceAttack(_BaseFunction):
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
 
         ctl.update(keep_distance(bot, enemy, bottype))
-        ctl.tower_rotate = navigate_gun(bot, enemy)
+        ctl.tower_rotate, ctl.gun_orientation = navigate_gun(bot, enemy)
         ctl.rotate = ctl.tower_rotate
+        ctl.orientation = ctl.orientation
 
         action = Action.IDLE
 
@@ -167,10 +168,13 @@ class RammingAttack(_BaseFunction):
         if do_ramming:
             ctl.move = +1
             ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+            ctl.orientation = enemy_angle
         else:
             ctl.move = -1
             ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+            ctl.orientation = enemy_angle
         ctl.tower_rotate = navigate_shortest(bot, enemy_angle, with_gun=True)
+        ctl.gun_orientation = enemy_angle
         if should_fire(bot, enemy, bottype.shot_range, dist) and not shield:
             action = Action.FIRE
 
@@ -215,7 +219,7 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
         move = 0
         rotate = 0
         target_orientation = ori_angle
-    return dict(move=move, rotate=rotate, target_orientation=target_orientation)
+    return dict(move=move, rotate=rotate, orientation=target_orientation)
 
 
 def keep_distance(bot, enemy, bottype, max_ahead_v=100):
@@ -235,7 +239,7 @@ def keep_distance(bot, enemy, bottype, max_ahead_v=100):
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
 
-    return dict(move=move, rotate=rotate)
+    return dict(move=move, rotate=rotate, orientation=enemy_angle)
 
 
 def norm_angle(angle):
@@ -283,9 +287,9 @@ def navigate_gun(bot, enemy):
     # if abs(delta_angle) < limit_angle:
     #     return 0
     if delta_angle > 0:
-        return +1
+        return +1, enemy_angle
     else:
-        return -1
+        return -1, enemy_angle
 
 
 def solve_square_equation(a, b, c):

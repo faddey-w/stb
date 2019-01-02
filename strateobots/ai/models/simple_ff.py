@@ -67,6 +67,7 @@ class Model(model_function.TwoStepDataEncoderMixin):
     ))
     state_dimension = _prev_state_dimension + _current_state_dimension
     name = 'NNModel'
+    control_set = data.ALL_CONTROLS_V2
 
     def __init__(self, name=None):
         if name is not None:
@@ -86,17 +87,17 @@ class Model(model_function.TwoStepDataEncoderMixin):
                 (10, tf.nn.relu),
                 (data.ctl_move.dimension, tf.identity),
             )
-            self.rotate_block = nn.LayerChain(
-                nn.Residual.chain_factory(internal_repr_size, 'RotateBlock', allow_skip_transform=True),
+            self.orientation_block = nn.LayerChain(
+                nn.Residual.chain_factory(internal_repr_size, 'OrientationBlock', allow_skip_transform=True),
                 (20, tf.tanh),
                 (20, tf.nn.relu),
-                (data.ctl_rotate.dimension+1, tf.identity),
+                (data.ctl_orientation.dimension+1, tf.identity),
             )
-            self.tower_rotate_block = nn.LayerChain(
-                nn.Linear.chain_factory(self.state_dimension, 'TowerBlock'),
+            self.gun_orientation_block = nn.LayerChain(
+                nn.Linear.chain_factory(self.state_dimension, 'GunOrientationBlock'),
                 (20, tf.tanh),
                 (20, tf.nn.relu),
-                (data.ctl_tower_rotate.dimension, tf.identity),
+                (data.ctl_gun_orientation.dimension, tf.identity),
                 # (data.ctl_tower_rotate.dimension, tf.sin),
             )
             self.action_block = nn.LayerChain(
@@ -107,8 +108,8 @@ class Model(model_function.TwoStepDataEncoderMixin):
         self.var_list = sum([
             self.main_block.var_list,
             self.move_block.var_list,
-            self.rotate_block.var_list,
-            self.tower_rotate_block.var_list,
+            self.orientation_block.var_list,
+            self.gun_orientation_block.var_list,
             self.action_block.var_list,
         ], [])
         self.init_op = tf.variables_initializer(self.var_list)
@@ -168,25 +169,24 @@ class Model(model_function.TwoStepDataEncoderMixin):
         main = self.main_block.apply(state_vector_array)
         internal_repr = main[-1].out
         move = self.move_block.apply(internal_repr)
-        rotate = self.rotate_block.apply(internal_repr)
-        tower_rotate = self.tower_rotate_block.apply(state_vector_array)
+        orientation = self.orientation_block.apply(internal_repr)
+        gun_orientation = self.gun_orientation_block.apply(state_vector_array)
         action = self.action_block.apply(internal_repr)
         return self._Apply(state_vector_array, main,
-                           move, rotate, tower_rotate, action)
+                           move, orientation, gun_orientation, action)
 
     class _Apply:
 
-        def __init__(self, state, main, move, rotate, tower_rotate, action):
+        def __init__(self, state, main, move, orientation, gun_orientation, action):
             self.state = state
             self.main = main
             self.move = move
-            self.rotate = rotate
-            self.tower_rotate = tower_rotate
+            self.orientation = orientation
+            self.gun_orientation = gun_orientation
             self.action = action
             self.controls = {
                 'move': self.move[-1].out,
-                'rotate': self.rotate[-1].out[:, 1:],
-                'tower_rotate': self.tower_rotate[-1].out,
+                'orientation': self.orientation[-1].out[:, 0],
+                'gun_orientation': self.gun_orientation[-1].out[:, 0],
                 'action': self.action[-1].out,
-                'target_orientation': self.rotate[-1].out[:, 0]
             }

@@ -15,7 +15,7 @@ class ReplayMemory:
     def __init__(self, storage_directory, model, props_function,
                  load_winner_data=False, load_loser_data=True,
                  cache_key=None, force_generate_cache=False,
-                 load_predicate=None,
+                 load_predicate=None, controls=data.ALL_CONTROLS,
                  rotate_storage=False,
                  max_games_keep=100):
         self._rds = ReplayDataStorage(storage_directory)
@@ -28,6 +28,7 @@ class ReplayMemory:
         self._prepared_epoch = None
         self._cache_key = cache_key
         self.rotate_storage = rotate_storage
+        self.controls = controls
 
         log.info('Loading data from storage')
         remaining = self.max_games_keep
@@ -84,7 +85,7 @@ class ReplayMemory:
         props, actions, st_before, st_after = epoch_data
         actions = {
             ctl: actions[ctl][start:end]
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
+            for ctl in self.controls
         }
         return props[start:end], actions, st_before[start:end], st_after[start:end]
 
@@ -121,7 +122,7 @@ class ReplayMemory:
             size -= least_size  # least_size is negative
 
         props_buffer = np.empty([size, getattr(self.props_function, 'dimension', 1)])
-        actions_buffer = {ctl: np.empty([size]) for ctl in (*data.ALL_CONTROLS, 'target_orientation')}
+        actions_buffer = {ctl: np.empty([size]) for ctl in self.controls}
         states_buffer = np.empty([size, self.model.state_dimension])
         next_states_buffer = np.empty([size, self.model.state_dimension])
 
@@ -137,7 +138,7 @@ class ReplayMemory:
             if np.ndim(props) == 1:
                 props = np.reshape(props, (props.size, 1))
             props_buffer[i:i+n] = props
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+            for ctl in self.controls:
                 actions_buffer[ctl][i:i+n] = action_idx[ctl][:-1]
             states_buffer[i:i+n] = state_data[:-1]
             next_states_buffer[i:i+n] = state_data[1:]
@@ -147,13 +148,13 @@ class ReplayMemory:
             indices = np.arange(size)
             np.random.shuffle(indices)
             props_buffer = props_buffer[indices]
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+            for ctl in self.controls:
                 actions_buffer[ctl] = actions_buffer[ctl][indices]
             states_buffer = states_buffer[indices]
             next_states_buffer = next_states_buffer[indices]
         if requested_size != size:
             props_buffer = props_buffer[:requested_size]
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+            for ctl in self.controls:
                 actions_buffer[ctl] = actions_buffer[ctl][:requested_size]
             states_buffer = states_buffer[:requested_size]
             next_states_buffer = next_states_buffer[:requested_size]
@@ -225,23 +226,21 @@ class ReplayMemory:
         encoder = self.model.data_encoder()
         action_arrays = {
             ctl: np.empty([end_t], dtype=np.float32)
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
+            for ctl in self.controls
         }
         for i in range(end_t):
             item = rd.json_data[i]
             state_vector = encode_vector_for_model(
                 encoder, item, team, opponent_team)
             state_array[i] = state_vector
-        for ctl in data.ALL_CONTROLS:
+        for ctl in self.controls:
             act_arr = action_arrays[ctl]
-            get_idx = getattr(data, 'ctl_'+ctl).categories.index
+            if data.is_categorical(ctl):
+                get_value = getattr(data, 'ctl_'+ctl).categories.index
+            else:
+                get_value = lambda x: x
             for i in range(end_t):
-                act_arr[i] = get_idx(rd.json_data[i]['controls'][team][0][ctl])
-
-        action_arrays['target_orientation'] = np.array([
-            rd.json_data[i]['controls'][team][0]['target_orientation']
-            for i in range(end_t)
-        ], dtype=np.float32)
+                act_arr[i] = get_value(rd.json_data[i]['controls'][team][0][ctl])
 
         return state_array, action_arrays
 
@@ -265,7 +264,7 @@ class ReplayMemory:
             if state is not None:
                 idx = np.load(idx_cache_path, allow_pickle=False)
                 idx_dict = {}
-                for i, ctl in enumerate((*data.ALL_CONTROLS, 'target_orientation')):
+                for i, ctl in enumerate(self.controls):
                     idx_dict[ctl] = idx[i]
                 idx = idx_dict
 
@@ -290,7 +289,7 @@ class ReplayMemory:
             if state is not None:
                 idx = np.stack([
                     idx_dict[ctl]
-                    for ctl in (*data.ALL_CONTROLS, 'target_orientation')
+                    for ctl in self.controls
                 ])
                 np.save(sf, state, allow_pickle=False)
                 np.save(af, idx, allow_pickle=False)

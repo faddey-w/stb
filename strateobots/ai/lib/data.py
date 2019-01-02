@@ -118,10 +118,19 @@ ctl_rotate = CategoricalFeature(['rotate'], [-1, 0, +1])
 ctl_tower_rotate = CategoricalFeature(['tower_rotate'], [-1, 0, +1])
 ctl_action = CategoricalFeature(['action'], [0, 1, 2, 3, 4])
 
+ALL_CONTROLS_V2 = 'move', 'orientation', 'gun_orientation', 'action'
+
+ctl_orientation = Feature(['orientation'])
+ctl_gun_orientation = Feature(['gun_orientation'])
+
 
 BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'
 BOT_PRIVATE_FIELDS = 'vx', 'vy', 'load', 'shot_ready', 'shield_warmup'
 BULLET_FIELDS = 'present', 'x', 'y', 'orientation'
+
+
+def is_categorical(control):
+    return isinstance(globals()['ctl_'+control], CategoricalFeature)
 
 
 def generator_encoder(function):

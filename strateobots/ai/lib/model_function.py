@@ -1,6 +1,8 @@
 import tensorflow as tf
 import numpy as np
+from math import pi
 from strateobots.ai.lib import data
+from strateobots.engine import BotType
 
 
 class ModelAiFunction:
@@ -21,13 +23,29 @@ class ModelAiFunction:
                 self.state_ph: [state_vector],
             }
         )
+
+        rotate = ctl_vectors.get('rotate', [None])[0]
+        tower_rotate = ctl_vectors.get('tower_rotate', [None])[0]
+        orientation = ctl_vectors.get('orientation', [None])[0]
+        gun_orientation = ctl_vectors.get('gun_orientation', [None])[0]
+
+        rotate, tower_rotate = _optimal_rotations(
+            rotate, tower_rotate,
+            orientation, gun_orientation,
+            bot_data,
+        )
+
         ctl_dict = {
             'id': bot_data['id'],
             'move': data.ctl_move.decode(ctl_vectors['move'][0]),
-            'rotate': data.ctl_rotate.decode(ctl_vectors['rotate'][0]),
-            'tower_rotate': data.ctl_tower_rotate.decode(ctl_vectors['tower_rotate'][0]),
+            'rotate': rotate,
+            'tower_rotate': tower_rotate,
             'action': data.ctl_action.decode(ctl_vectors['action'][0]),
         }
+        if orientation is not None:
+            ctl_dict['orientation'] = orientation
+        if gun_orientation is not None:
+            ctl_dict['gun_orientation'] = gun_orientation
         return [ctl_dict]
 
     def on_new_game(self):
@@ -79,3 +97,45 @@ class TwoStepDataEncoderMixin:
     @staticmethod
     def _encode_state(bot, enemy, bot_bullet, enemy_bullet):
         raise NotImplementedError
+
+
+def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
+    if rotate is None:
+        delta_angle = (orientation - bot['orientation']) % (2 * pi)
+        rotate = -1 if delta_angle > pi else +1
+
+    if tower_rotate is None:
+        curr_gun_orientation = bot['orientation'] + bot['tower_orientation']
+        # delta_angle = (gun_orientation - curr_gun_orientation) % (2 * pi)
+        # tower_rotate = -1 if delta_angle > pi else +1
+        bottype = BotType.by_code(bot['type'])
+
+        right_gun_rot_speed = bottype.gun_rot_speed + rotate * bottype.rot_speed
+        right_path = (gun_orientation - curr_gun_orientation) % (2 * pi)
+        if right_gun_rot_speed < 0:
+            right_path = 2 * pi - right_path
+            right_gun_rot_speed = -right_gun_rot_speed
+        right_time = right_path / max(right_gun_rot_speed, 0.0001)
+
+        left_gun_rot_speed = -bottype.gun_rot_speed + rotate * bottype.rot_speed
+        left_path = (curr_gun_orientation - gun_orientation) % (2 * pi)
+        if left_gun_rot_speed < 0:
+            left_path = 2 * pi - left_path
+            left_gun_rot_speed = -left_gun_rot_speed
+        left_time = left_path / max(left_gun_rot_speed, 0.0001)
+
+        tower_rotate = +1 if right_time < left_time else -1
+
+    return rotate, tower_rotate
+
+
+if __name__ == '__main__':
+    r = BotType.Raider.code
+    assert (+1, +1) == _optimal_rotations(
+        None, None, 1, 1,
+        {'type': r, 'orientation': 0, 'tower_orientation': 0}
+    )
+    assert (+1, -1) == _optimal_rotations(
+        None, None, 1, -0.1,
+        {'type': r, 'orientation': 0, 'tower_orientation': 0}
+    )

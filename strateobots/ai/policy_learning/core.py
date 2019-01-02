@@ -10,10 +10,12 @@ class PolicyLearning:
 
         self.state_ph = tf.placeholder(tf.float32, [batch_size, model.state_dimension])
         self.action_idx_ph = {
-            ctl: tf.placeholder(tf.int32, [batch_size])
-            for ctl in data.ALL_CONTROLS
+            ctl: tf.placeholder(
+                tf.int32 if data.is_categorical(ctl) else tf.float32,
+                [batch_size]
+            )
+            for ctl in self.model.control_set
         }
-        self.target_orientation_ph = tf.placeholder(tf.float32, [batch_size])
         self.inference = self.model.apply(self.state_ph)
 
         # self.optimizer = tf.train.RMSPropOptimizer(0.001)
@@ -25,11 +27,11 @@ class PolicyLearning:
         self.accuracies = {}
         self.train_steps = {}
         self.vars_grads = {}
-        for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+        for ctl in self.model.control_set:
             quality = self.inference.controls[ctl]
-            if ctl == 'target_orientation':
-                loss_vector = tf.square(quality - self.target_orientation_ph)
-                accuracy = tf.reduce_mean(tf.abs(quality - self.target_orientation_ph))
+            if not data.is_categorical(ctl):
+                loss_vector = tf.square(quality - self.action_idx_ph[ctl])
+                accuracy = tf.reduce_mean(tf.abs(quality - self.action_idx_ph[ctl]))
             else:
                 n_actions = tf.shape(quality)[1]
                 action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
@@ -47,10 +49,11 @@ class PolicyLearning:
 
             self.accuracies[ctl] = accuracy
 
-        # self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
-        # self.loss = tf.reduce_mean(self.full_loss_vector)
+        self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
+        self.loss = tf.reduce_mean(self.full_loss_vector)
+        self.train_step = self.optimizer.minimize(self.loss)
 
-        self.train_step = tuple(self.train_steps.values())
+        # self.train_step = tuple(self.train_steps.values())
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
@@ -69,7 +72,6 @@ class PolicyLearning:
 
         return session.run(tensors, {
             self.state_ph: states,
-            self.target_orientation_ph: actions['target_orientation'],
             **{self.action_idx_ph[ctl]: actions[ctl]
-               for ctl in data.ALL_CONTROLS},
+               for ctl in self.model.control_set},
         })

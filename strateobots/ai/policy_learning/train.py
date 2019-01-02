@@ -23,7 +23,7 @@ class PLTraining:
         src_path = model_module.__file__
 
         # import pdb; pdb.set_trace()
-        self.model = model_module.Model('PLModel')
+        self.model = model_module.Model()
 
         cache_key = model_saving.generate_model_hash(self.model, src_path)
 
@@ -40,6 +40,7 @@ class PLTraining:
             load_loser_data=False,
             cache_key=cache_key,
             load_predicate=load_predicate,
+            controls=self.model.control_set,
         )
         # import code; code.interact(local=dict(**locals(), **globals()))
         self.pl = PolicyLearning(
@@ -55,14 +56,14 @@ class PLTraining:
             _, acc = self.pl.compute_on_sample(
                 self.sess,
                 self.replay_memory,
-                [self.pl.train_steps['target_orientation'], self.pl.accuracies],
+                [self.pl.train_step, self.pl.accuracies],
                 i,
             )
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+            for ctl in self.model.control_set:
                 accuracies[ctl] += acc[ctl] / n_batches
         message = '#{}: {}'.format((step_idx+1) * n_batches, ' '.join(
-            '{}={:.2f}'.format(ctl, accuracies[ctl])
-            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
+            '{}={:.4f}'.format(ctl, accuracies[ctl])
+            for ctl in self.model.control_set
         ))
         log.info(message)
         return accuracies
