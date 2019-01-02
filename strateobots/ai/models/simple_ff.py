@@ -90,7 +90,7 @@ class Model(model_function.TwoStepDataEncoderMixin):
                 nn.Residual.chain_factory(internal_repr_size, 'RotateBlock', allow_skip_transform=True),
                 (20, tf.tanh),
                 (20, tf.nn.relu),
-                (data.ctl_rotate.dimension, tf.identity),
+                (data.ctl_rotate.dimension+1, tf.identity),
             )
             self.tower_rotate_block = nn.LayerChain(
                 nn.Linear.chain_factory(self.state_dimension, 'TowerBlock'),
@@ -185,7 +185,8 @@ class Model(model_function.TwoStepDataEncoderMixin):
             self.action = action
             self.controls = {
                 'move': self.move[-1].out,
-                'rotate': self.rotate[-1].out,
+                'rotate': self.rotate[-1].out[:, 1:],
                 'tower_rotate': self.tower_rotate[-1].out,
                 'action': self.action[-1].out,
+                'target_orientation': self.rotate[-1].out[:, 0]
             }

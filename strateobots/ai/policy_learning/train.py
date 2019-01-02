@@ -6,7 +6,7 @@ import time
 from collections import defaultdict
 from strateobots.ai.lib import replay, data, model_saving
 from strateobots.ai.policy_learning.core import PolicyLearning
-from strateobots.ai.models import simple_ff, classic, radar
+from strateobots.ai.models import simple_ff, classic, radar, visual
 
 
 log = logging.getLogger(__name__)
@@ -17,8 +17,9 @@ class PLTraining:
     def __init__(self, session, storage_directory):
         self.sess = session
 
-        model_module = radar
-        # model_module = simple_ff
+        # model_module = visual
+        # model_module = radar
+        model_module = simple_ff
         src_path = model_module.__file__
 
         # import pdb; pdb.set_trace()
@@ -26,38 +27,42 @@ class PLTraining:
 
         cache_key = model_saving.generate_model_hash(self.model, src_path)
 
+        def load_predicate(metadata):
+            winner = metadata['winner']
+            if winner is None:
+                return False
+            team_id = 1 if winner == metadata['team1'] else 2
+            return 'Close distance attack' == metadata['ai{}_name'.format(team_id)]
+
         self.replay_memory = replay.ReplayMemory(
             storage_directory, self.model, _props_function,
             load_winner_data=True,
             load_loser_data=False,
             cache_key=cache_key,
-            load_predicate=lambda md: 'Close distance attack' in (md['ai1_name'], md['ai2_name'])
+            load_predicate=load_predicate,
         )
         # import code; code.interact(local=dict(**locals(), **globals()))
         self.pl = PolicyLearning(
             self.model,
-            batch_size=300
+            batch_size=50
         )
 
     def train_once(self, step_idx, n_batches):
         self.replay_memory.prepare_epoch(self.pl.batch_size, 0, n_batches, True)
-        extra_t = self.pl.action_idx_ph, self.pl.inference.controls
         accuracies = defaultdict(float)
 
         for i in range(n_batches):
-            _, (act_idx, ctl_val) = self.pl.compute_on_sample(
+            _, acc = self.pl.compute_on_sample(
                 self.sess,
                 self.replay_memory,
-                [self.pl.train_steps['rotate'], extra_t],
+                [self.pl.train_steps['target_orientation'], self.pl.accuracies],
                 i,
             )
-            for ctl in data.ALL_CONTROLS:
-                pred_idx = np.argmax(ctl_val[ctl], 1)
-                correct = act_idx[ctl] == pred_idx
-                accuracies[ctl] += np.sum(correct) / np.size(pred_idx) / n_batches
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
+                accuracies[ctl] += acc[ctl] / n_batches
         message = '#{}: {}'.format((step_idx+1) * n_batches, ' '.join(
             '{}={:.2f}'.format(ctl, accuracies[ctl])
-            for ctl in data.ALL_CONTROLS
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
         ))
         log.info(message)
         return accuracies
@@ -81,7 +86,7 @@ class PLTraining:
             stop_time = None
         log.info('Start training')
         for i in iterator():
-            accuracies = self.train_once(i, 20)
+            accuracies = self.train_once(i, 50)
             if target_accuracy is not None:
                 if min(accuracies.values()) >= target_accuracy:
                     break
@@ -120,7 +125,7 @@ def main():
     try:
         pl_train.train_loop(opts.max_accuracy, opts.n_batches, opts.max_time)
     except KeyboardInterrupt:
-        pass
+        log.info('interrupted')
     if opts.interactive_after:
         with session.as_default():
             interactive(globals(), locals())

@@ -203,6 +203,7 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
             rotate = +1
         else:
             rotate = -1
+        target_orientation = pt_angle
 
         # always move ahead
         # limit speed if already at orbit to avoid drift
@@ -213,7 +214,8 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
     else:
         move = 0
         rotate = 0
-    return dict(move=move, rotate=rotate)
+        target_orientation = ori_angle
+    return dict(move=move, rotate=rotate, target_orientation=target_orientation)
 
 
 def keep_distance(bot, enemy, bottype, max_ahead_v=100):

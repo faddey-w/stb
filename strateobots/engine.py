@@ -648,6 +648,7 @@ class StbEngine:
                 'type': bullet.type.code,
                 'x': bullet.x,
                 'y': bullet.y,
+                'range': bullet.remaining_range,
                 'orientation': bullet.orientation,
             })
         for ray in self.iter_rays():
@@ -674,6 +675,12 @@ class StbEngine:
 
     def get_constants(self):
         return Constants
+
+    def get_any_nonloser_team(self):
+        for team in self.teams:
+            n = self._n_bots.get(team, 0)
+            if n > 0:
+                return team
 
 
 BotTypeProperties = collections.namedtuple(

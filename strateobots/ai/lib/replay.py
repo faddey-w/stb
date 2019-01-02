@@ -84,7 +84,7 @@ class ReplayMemory:
         props, actions, st_before, st_after = epoch_data
         actions = {
             ctl: actions[ctl][start:end]
-            for ctl in data.ALL_CONTROLS
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
         }
         return props[start:end], actions, st_before[start:end], st_after[start:end]
 
@@ -121,7 +121,7 @@ class ReplayMemory:
             size -= least_size  # least_size is negative
 
         props_buffer = np.empty([size, getattr(self.props_function, 'dimension', 1)])
-        actions_buffer = {ctl: np.empty([size]) for ctl in data.ALL_CONTROLS}
+        actions_buffer = {ctl: np.empty([size]) for ctl in (*data.ALL_CONTROLS, 'target_orientation')}
         states_buffer = np.empty([size, self.model.state_dimension])
         next_states_buffer = np.empty([size, self.model.state_dimension])
 
@@ -137,7 +137,7 @@ class ReplayMemory:
             if np.ndim(props) == 1:
                 props = np.reshape(props, (props.size, 1))
             props_buffer[i:i+n] = props
-            for ctl in data.ALL_CONTROLS:
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
                 actions_buffer[ctl][i:i+n] = action_idx[ctl][:-1]
             states_buffer[i:i+n] = state_data[:-1]
             next_states_buffer[i:i+n] = state_data[1:]
@@ -147,13 +147,13 @@ class ReplayMemory:
             indices = np.arange(size)
             np.random.shuffle(indices)
             props_buffer = props_buffer[indices]
-            for ctl in data.ALL_CONTROLS:
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
                 actions_buffer[ctl] = actions_buffer[ctl][indices]
             states_buffer = states_buffer[indices]
             next_states_buffer = next_states_buffer[indices]
         if requested_size != size:
             props_buffer = props_buffer[:requested_size]
-            for ctl in data.ALL_CONTROLS:
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
                 actions_buffer[ctl] = actions_buffer[ctl][:requested_size]
             states_buffer = states_buffer[:requested_size]
             next_states_buffer = next_states_buffer[:requested_size]
@@ -225,7 +225,7 @@ class ReplayMemory:
         encoder = self.model.data_encoder()
         action_arrays = {
             ctl: np.empty([end_t], dtype=np.float32)
-            for ctl in data.ALL_CONTROLS
+            for ctl in (*data.ALL_CONTROLS, 'target_orientation')
         }
         for i in range(end_t):
             item = rd.json_data[i]
@@ -237,6 +237,11 @@ class ReplayMemory:
             get_idx = getattr(data, 'ctl_'+ctl).categories.index
             for i in range(end_t):
                 act_arr[i] = get_idx(rd.json_data[i]['controls'][team][0][ctl])
+
+        action_arrays['target_orientation'] = np.array([
+            rd.json_data[i]['controls'][team][0]['target_orientation']
+            for i in range(end_t)
+        ], dtype=np.float32)
 
         return state_array, action_arrays
 
@@ -260,7 +265,7 @@ class ReplayMemory:
             if state is not None:
                 idx = np.load(idx_cache_path, allow_pickle=False)
                 idx_dict = {}
-                for i, ctl in enumerate(data.ALL_CONTROLS):
+                for i, ctl in enumerate((*data.ALL_CONTROLS, 'target_orientation')):
                     idx_dict[ctl] = idx[i]
                 idx = idx_dict
 
@@ -285,7 +290,7 @@ class ReplayMemory:
             if state is not None:
                 idx = np.stack([
                     idx_dict[ctl]
-                    for ctl in data.ALL_CONTROLS
+                    for ctl in (*data.ALL_CONTROLS, 'target_orientation')
                 ])
                 np.save(sf, state, allow_pickle=False)
                 np.save(af, idx, allow_pickle=False)

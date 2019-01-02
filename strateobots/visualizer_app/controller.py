@@ -121,6 +121,8 @@ class ServerState:
 
     def _make_simulation(self, metadata, params):
         engine = StbEngine(**params)
+        metadata['team1'] = engine.team1
+        metadata['team2'] = engine.team2
         sim_id = time.strftime('%Y%m%d_%H%M%S')
         ex_keys = self._list_used_keys()
         suffix = 0
@@ -142,6 +144,10 @@ class ServerState:
                 log.debug('TICK %r: %s', simul.sim_id, simul.engine.nticks)
         yield
         simul.metadata['nticks'] = simul.engine.nticks
+        if simul.engine.win_condition_reached:
+            simul.metadata['winner'] = simul.engine.get_any_nonloser_team()
+        else:
+            simul.metadata['winner'] = None
         log.info('FINISH simulation %r %s', simul.sim_id, '(cancelled)' if simul.cancelled else '')
         if not simul.cancelled:
             self.storage.save_replay(simul.sim_id, simul.metadata, simul.engine.replay)

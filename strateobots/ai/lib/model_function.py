@@ -26,8 +26,7 @@ class ModelAiFunction:
             'move': data.ctl_move.decode(ctl_vectors['move'][0]),
             'rotate': data.ctl_rotate.decode(ctl_vectors['rotate'][0]),
             'tower_rotate': data.ctl_tower_rotate.decode(ctl_vectors['tower_rotate'][0]),
-            'shield': data.ctl_shield.decode(ctl_vectors['shield'][0]),
-            'fire': data.ctl_fire.decode(ctl_vectors['fire'][0]),
+            'action': data.ctl_action.decode(ctl_vectors['action'][0]),
         }
         return [ctl_dict]
 

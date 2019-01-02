@@ -7,7 +7,7 @@ from strateobots.ai.lib import data, nn
 from strateobots.ai.simple_duel import norm_angle
 
 
-IMAGE_DIM = 120
+IMAGE_DIM = 40
 POINT_DIM = 1 + 2 * 2
 # enemy direction, (orientation, tower_orientation) x 2
 

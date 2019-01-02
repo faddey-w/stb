@@ -13,6 +13,7 @@ class PolicyLearning:
             ctl: tf.placeholder(tf.int32, [batch_size])
             for ctl in data.ALL_CONTROLS
         }
+        self.target_orientation_ph = tf.placeholder(tf.float32, [batch_size])
         self.inference = self.model.apply(self.state_ph)
 
         # self.optimizer = tf.train.RMSPropOptimizer(0.001)
@@ -24,22 +25,26 @@ class PolicyLearning:
         self.accuracies = {}
         self.train_steps = {}
         self.vars_grads = {}
-        for ctl in data.ALL_CONTROLS:
+        for ctl in (*data.ALL_CONTROLS, 'target_orientation'):
             quality = self.inference.controls[ctl]
-            n_actions = tf.shape(quality)[1]
-            action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
-            loss_vector = tf.nn.softmax_cross_entropy_with_logits_v2(
-                labels=tf.stop_gradient(action_labels),
-                logits=quality,
-            )
+            if ctl == 'target_orientation':
+                loss_vector = tf.square(quality - self.target_orientation_ph)
+                accuracy = tf.reduce_mean(tf.abs(quality - self.target_orientation_ph))
+            else:
+                n_actions = tf.shape(quality)[1]
+                action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
+                loss_vector = tf.nn.softmax_cross_entropy_with_logits_v2(
+                    labels=tf.stop_gradient(action_labels),
+                    logits=quality,
+                )
+                predicted_idx = tf.argmax(quality, 1, output_type=tf.int32)
+                match_flags = tf.equal(predicted_idx, self.action_idx_ph[ctl])
+                accuracy = tf.reduce_mean(tf.to_float(match_flags))
             self.loss_vectors[ctl] = loss_vector
             self.losses[ctl] = tf.reduce_mean(loss_vector)
             self.vars_grads[ctl] = self.optimizer.compute_gradients(self.losses[ctl], model.var_list)
             self.train_steps[ctl] = self.optimizer.apply_gradients(self.vars_grads[ctl])
 
-            predicted_idx = tf.argmax(quality, 1, output_type=tf.int32)
-            match_flags = tf.equal(predicted_idx, self.action_idx_ph[ctl])
-            accuracy = tf.reduce_mean(tf.to_float(match_flags))
             self.accuracies[ctl] = accuracy
 
         # self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
@@ -64,6 +69,7 @@ class PolicyLearning:
 
         return session.run(tensors, {
             self.state_ph: states,
+            self.target_orientation_ph: actions['target_orientation'],
             **{self.action_idx_ph[ctl]: actions[ctl]
                for ctl in data.ALL_CONTROLS},
         })
