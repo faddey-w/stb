@@ -15,17 +15,23 @@ function Renderer(container) {
     var _tanks = {keys: []};
     var _bullets = {}, _rays = {};
     var _explosions = [];
+    var _aims = [];
     [HEAVY, RAIDER, SNIPER].forEach(function(t) {
         _bullets[t] = [];
         _rays[t] = [];
     });
 
-    this.addDataFrame = function(bots, bullets, rays, explosions) {
+    var params = {
+        show_aims: false,
+    };
+
+    this.addDataFrame = function(bots, bullets, rays, explosions, aims) {
         _frames.push({
             bots: bots,
             bullets: bullets,
             rays: rays,
-            explosions: explosions
+            explosions: explosions,
+            aims: aims || [],
         });
     };
     this.clearDataFrames = function() {
@@ -35,8 +41,14 @@ function Renderer(container) {
         var bots = _frames[frameId].bots,
             bullets = _frames[frameId].bullets,
             rays = _frames[frameId].rays,
-            explosions = _frames[frameId].explosions;
-        var botCounters = {}, i, bulletCounters = {}, rayCounters = {}, explosionCounter = 0;
+            explosions = _frames[frameId].explosions,
+            aims = _frames[frameId].aims;
+        var botCounters = {},
+            i,
+            bulletCounters = {},
+            rayCounters = {},
+            explosionCounter = 0,
+            aimsCounter = 0;
 
         for (i = 0; i < bots.length; i++) {
             var bot = bots[i];
@@ -141,6 +153,21 @@ function Renderer(container) {
             expl.setState(explosion.size, explosion.t / explosion.duration);
             expl.getThreeJsObject().visible = true;
         });
+        if (params.show_aims) {
+            aims.forEach(function(aim) {
+                var aimObj;
+                if (aimsCounter < _aims.length) {
+                    aimObj = _aims[aimsCounter];
+                } else {
+                    aimObj = new Aim();
+                    _aims.push(aimObj);
+                    scene.add(aimObj.object);
+                }
+                aimsCounter++;
+                aimObj.object.visible = true;
+                aimObj.update(aim.x, aim.y, aim.color);
+            });
+        }
 
         // hide everything we don't need
         _tanks.keys.forEach(function(key) {
@@ -162,6 +189,9 @@ function Renderer(container) {
         for (i = explosionCounter; i < _explosions.length; i++) {
             _explosions[i].getThreeJsObject().visible = false;
         }
+        for (i = aimsCounter; i < _aims.length; i++) {
+            _aims[i].object.visible = false;
+        }
 
         // do render
 //        camera.lookAt(scene.position);
@@ -170,6 +200,9 @@ function Renderer(container) {
     this.getFramesCount = function() {
         return _frames.length;
     };
+    this.showAims = function(value) {
+        params.show_aims = value;
+    }
 
     init();
     function init() {
@@ -688,3 +721,24 @@ Explosion.prototype = {
         return this.object;
     }
 };
+
+
+function Aim() {
+    this.object = new THREE.Mesh(
+        this._edgeGeometry,
+        new THREE.MeshBasicMaterial({color: 0x000000})
+    );
+    this.object.position.z = 950;
+    this.object.scale.x = 3;
+    this.object.scale.y = 3;
+}
+
+Aim.prototype = {
+    constructor: Aim,
+    _edgeGeometry: new THREE.RingBufferGeometry(3, 4, 8),
+    update: function(x, y, color) {
+        this.object.position.x = x;
+        this.object.position.y = y;
+        this.object.material.color.setHex(color);
+    }
+}

@@ -12,6 +12,9 @@ angular.module("StrateobotsApp", [
         ai1FunctionId: null,
         ai2FunctionId: null,
     };
+    $scope.viewParams = {
+        show_aims: false,
+    };
     $scope.status = {
         is_currently_loading: false,
         isAnimRunning: function () {
@@ -51,6 +54,10 @@ angular.module("StrateobotsApp", [
         } else {
             loadGameToRenderer(sim);
         }
+    };
+    $scope.updateViewParams = function() {
+        renderer.showAims($scope.viewParams.show_aims);
+        animator.update();
     };
     $scope.toggleAnimation = function () {
         if (animator.isRunning()) {
@@ -161,7 +168,7 @@ angular.module("StrateobotsApp", [
         renderer.clearDataFrames();
         for(var i = 0; i < sim.frames.length; i++) {
 
-            var bots = []
+            var bots = [], aims = [];
             Object.keys(sim.frames[i].bots).forEach(function(team) {
                 var team_int = team | 0;
                 sim.frames[i].bots[team].forEach(function(bot) {
@@ -169,12 +176,33 @@ angular.module("StrateobotsApp", [
                     bots.push(bot);
                 });
             });
+            Object.keys(sim.frames[i].controls).forEach(function(team) {
+                if (!sim.frames[i].controls[team]) return;
+                var team_int = team | 0;
+                sim.frames[i].controls[team].forEach(function(ctl) {
+                    if (!!ctl.gun_aim_x && !!ctl.gun_aim_y) {
+                        aims.push({
+                            x: ctl.gun_aim_x,
+                            y: ctl.gun_aim_y,
+                            color: team_int,
+                        });
+                    }
+                    if (!!ctl.move_aim_x && !!ctl.move_aim_y) {
+                        aims.push({
+                            x: ctl.move_aim_x,
+                            y: ctl.move_aim_y,
+                            color: (team_int + 0x888888) / 2,
+                        });
+                    }
+                });
+            });
 
             renderer.addDataFrame(
                 bots,
                 sim.frames[i].bullets,
                 sim.frames[i].rays,
-                sim.frames[i].explosions
+                sim.frames[i].explosions,
+                aims,
             );
         }
         animator = new Animator(renderer, 50);

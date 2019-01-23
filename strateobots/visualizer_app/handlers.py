@@ -66,6 +66,7 @@ class _BaseHandler(web.RequestHandler):
 
 class GameLaunchParametersHandler(_BaseHandler):
     def get(self):
+        self.state.refresh_launch_params()
         self.api_respond({
             'bot_initializers': [
                 {

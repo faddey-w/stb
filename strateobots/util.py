@@ -117,3 +117,23 @@ def interrupt_atomic():
         raise KeyboardInterrupt
 
 
+def make_metadata_before_game(init_name, ai1_module, ai1_name, ai2_module, ai2_name):
+    return dict(
+        init_name=init_name,
+        ai1_module=ai1_module,
+        ai1_name=ai1_name,
+        ai2_module=ai2_module,
+        ai2_name=ai2_name,
+    )
+
+
+def fill_metadata_after_game(metadata, engine):
+    metadata['team1'] = engine.team1
+    metadata['team2'] = engine.team2
+    metadata['nticks'] = engine.nticks
+    if engine.win_condition_reached:
+        metadata['winner'] = engine.get_any_nonloser_team()
+    else:
+        metadata['winner'] = None
+    return metadata
+

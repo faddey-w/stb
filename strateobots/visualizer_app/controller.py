@@ -4,6 +4,8 @@ from tornado import gen
 from strateobots.engine import StbEngine
 from strateobots.util import replay_descriptor_from_simulation
 from strateobots.util import replay_descriptor_from_storage
+from strateobots.util import make_metadata_before_game
+from strateobots.util import fill_metadata_after_game
 from strateobots.visualizer_app.exceptions import BotInitializerNotFound
 from strateobots.visualizer_app.exceptions import AiModuleNotFound
 from strateobots.visualizer_app.exceptions import SimulationNotFound
@@ -46,7 +48,7 @@ class ServerState:
         ai2 = ai2_mod.construct_ai_function(team2, params2)
 
         simul = self._make_simulation(
-            metadata=dict(
+            metadata=make_metadata_before_game(
                 init_name=bot_init_name,
                 ai1_module=ai1_mod.name,
                 ai1_name=func_name1,
@@ -121,8 +123,6 @@ class ServerState:
 
     def _make_simulation(self, metadata, params):
         engine = StbEngine(**params)
-        metadata['team1'] = engine.team1
-        metadata['team2'] = engine.team2
         sim_id = time.strftime('%Y%m%d_%H%M%S')
         ex_keys = self._list_used_keys()
         suffix = 0
@@ -143,11 +143,7 @@ class ServerState:
             if simul.engine.nticks % 100 == 0:
                 log.debug('TICK %r: %s', simul.sim_id, simul.engine.nticks)
         yield
-        simul.metadata['nticks'] = simul.engine.nticks
-        if simul.engine.win_condition_reached:
-            simul.metadata['winner'] = simul.engine.get_any_nonloser_team()
-        else:
-            simul.metadata['winner'] = None
+        fill_metadata_after_game(simul.metadata, simul.engine)
         log.info('FINISH simulation %r %s', simul.sim_id, '(cancelled)' if simul.cancelled else '')
         if not simul.cancelled:
             self.storage.save_replay(simul.sim_id, simul.metadata, simul.engine.replay)

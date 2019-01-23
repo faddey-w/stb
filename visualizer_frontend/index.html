@@ -113,6 +113,7 @@
                 <button ng-click="goToFrameRel(-1)" ng-disabled="!currentSim || status.is_currently_loading">
                     -
                 </button>
+                aims: <input type="checkbox" ng-model="viewParams.show_aims" ng-change="updateViewParams()"/>
             </div>
         </div>
     </div>
