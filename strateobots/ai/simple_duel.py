@@ -54,7 +54,7 @@ class CloseDistanceAttack(_BaseFunction):
         orbit = bottype.shot_range / 3
 
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
-        ctl.tower_rotate, ctl.gun_orientation = navigate_gun(bot, enemy)
+        navigate_gun(bot, enemy, ctl)
         if should_fire(bot, enemy, bottype.shot_range, dist):
             action = Action.FIRE
         elif should_fire(enemy, bot, 1.5 * enemytype.shot_range, dist):
@@ -73,9 +73,7 @@ class LongDistanceAttack(_BaseFunction):
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
 
         ctl.update(keep_distance(bot, enemy, bottype))
-        ctl.tower_rotate, ctl.gun_orientation = navigate_gun(bot, enemy)
-        ctl.rotate = ctl.tower_rotate
-        ctl.orientation = ctl.orientation
+        navigate_gun(bot, enemy, ctl)
 
         action = Action.IDLE
 
@@ -173,8 +171,7 @@ class RammingAttack(_BaseFunction):
             ctl.move = -1
             ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
             ctl.orientation = enemy_angle
-        ctl.tower_rotate = navigate_shortest(bot, enemy_angle, with_gun=True)
-        ctl.gun_orientation = enemy_angle
+        navigate_gun(bot, enemy, ctl)
         if should_fire(bot, enemy, bottype.shot_range, dist) and not shield:
             action = Action.FIRE
 
@@ -215,11 +212,22 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
             move = +1
         else:
             move = 0
+
+        pt_dist = abs(dist**2 - orbit_radius**2) ** 0.5
+        move_aim = (
+            bot.x + pt_dist * cos(pt_angle),
+            bot.y + pt_dist * sin(pt_angle),
+        )
     else:
         move = 0
         rotate = 0
         target_orientation = ori_angle
-    return dict(move=move, rotate=rotate, orientation=target_orientation)
+        move_aim = bot.x, bot.y
+    return dict(move=move, rotate=rotate,
+                orientation=target_orientation,
+                move_aim_x=move_aim[0],
+                move_aim_y=move_aim[1],
+                )
 
 
 def keep_distance(bot, enemy, bottype, max_ahead_v=100):
@@ -239,7 +247,8 @@ def keep_distance(bot, enemy, bottype, max_ahead_v=100):
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
 
-    return dict(move=move, rotate=rotate, orientation=enemy_angle)
+    return dict(move=move, rotate=rotate, orientation=enemy_angle,
+                move_aim_x=enemy.x, move_aim_y=enemy.y)
 
 
 def norm_angle(angle):
@@ -276,7 +285,7 @@ def navigate_shortest(bot, enemy_angle, with_gun=True):
     return +1 if need_to_rotate > 0 else -1
 
 
-def navigate_gun(bot, enemy):
+def navigate_gun(bot, enemy, ctl):
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     gun_angle = norm_angle(bot.orientation + bot.tower_orientation)
     delta_angle = norm_angle(enemy_angle - gun_angle)
@@ -286,10 +295,9 @@ def navigate_gun(bot, enemy):
     #     limit_angle = pi / 6
     # if abs(delta_angle) < limit_angle:
     #     return 0
-    if delta_angle > 0:
-        return +1, enemy_angle
-    else:
-        return -1, enemy_angle
+    ctl.tower_rotate = +1 if delta_angle > 0 else -1
+    ctl.gun_orientation = enemy_angle
+    ctl.gun_aim_x, ctl.gun_aim_y = enemy.x, enemy.y
 
 
 def solve_square_equation(a, b, c):

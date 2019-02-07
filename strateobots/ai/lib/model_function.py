@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from math import pi
+from math import pi, atan2
 from strateobots.ai.lib import data
 from strateobots.engine import BotType
 
@@ -29,6 +29,24 @@ class ModelAiFunction:
         orientation = ctl_vectors.get('orientation', [None])[0]
         gun_orientation = ctl_vectors.get('gun_orientation', [None])[0]
 
+        try:
+            move_aim_x = ctl_vectors['move_aim_x'][0]
+            move_aim_y = ctl_vectors['move_aim_y'][0]
+        except KeyError:
+            move_aim_x = move_aim_y = None
+        else:
+            orientation = atan2(move_aim_y - bot_data['y'],
+                                move_aim_x - bot_data['x'])
+
+        try:
+            gun_aim_x = ctl_vectors['gun_aim_x'][0]
+            gun_aim_y = ctl_vectors['gun_aim_y'][0]
+        except KeyError:
+            gun_aim_x = gun_aim_y = None
+        else:
+            gun_orientation = atan2(gun_aim_y - bot_data['y'],
+                                    gun_aim_x - bot_data['x'])
+
         rotate, tower_rotate = _optimal_rotations(
             rotate, tower_rotate,
             orientation, gun_orientation,
@@ -42,9 +60,15 @@ class ModelAiFunction:
             'tower_rotate': tower_rotate,
             'action': data.ctl_action.decode(ctl_vectors['action'][0]),
         }
-        if orientation is not None:
+        if move_aim_x is not None:
+            ctl_dict['move_aim_x'] = move_aim_x
+            ctl_dict['move_aim_y'] = move_aim_y
+        elif orientation is not None:
             ctl_dict['orientation'] = orientation
-        if gun_orientation is not None:
+        if gun_aim_x is not None:
+            ctl_dict['gun_aim_x'] = gun_aim_x
+            ctl_dict['gun_aim_y'] = gun_aim_y
+        elif gun_orientation is not None:
             ctl_dict['gun_orientation'] = gun_orientation
         return [ctl_dict]
 

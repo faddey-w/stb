@@ -122,6 +122,10 @@ ALL_CONTROLS_V2 = 'move', 'orientation', 'gun_orientation', 'action'
 
 ctl_orientation = Feature(['orientation'])
 ctl_gun_orientation = Feature(['gun_orientation'])
+ctl_move_aim_x = Feature(['move_aim_x'])
+ctl_move_aim_y = Feature(['move_aim_y'])
+ctl_gun_aim_x = Feature(['gun_aim_x'])
+ctl_gun_aim_y = Feature(['gun_aim_y'])
 
 
 BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'
