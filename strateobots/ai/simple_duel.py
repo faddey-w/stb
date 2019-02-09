@@ -31,6 +31,9 @@ class AIModule(base.AIModule):
     def construct_ai_function(self, team, parameters):
         return self.config[parameters][0]()
 
+    def get_close_distance_attack(self):
+        return self.construct_ai_function(None, 'short')
+
 
 class _BaseFunction:
 

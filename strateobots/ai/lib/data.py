@@ -110,6 +110,12 @@ class FeatureSet:
         else:
             return np.array([], dtype=np.float)
 
+    def find(self, path, converter=None):
+        for i, f in enumerate(self.features):
+            if list(f.path) == list(path) and f.converter == converter:
+                return i
+        raise ValueError(path)
+
 
 ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'action'
 

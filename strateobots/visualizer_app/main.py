@@ -9,7 +9,7 @@ from strateobots.ai.lib.bot_initializers import random_bot_initializer, duel_bot
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
-from strateobots.ai import base, physics_demo, simple_duel, treesearch
+from strateobots.ai import base, physics_demo, simple_duel, guided_by
 
 
 log = logging.getLogger(__name__)
@@ -46,16 +46,18 @@ def main(argv=None):
         *duel_matchups,
         *random_matchups,
     ])
+    simple_ais = simple_duel.AIModule()
     ai_modules = [
         default_module,
         physics_demo.AIModule(),
-        simple_duel.AIModule(),
-        # treesearch.AIModule(),
+        simple_ais,
     ]
 
     if args.saved_models_dir is not None:
         from strateobots.ai import models
-        ai_modules.append(models.AIModule(args.saved_models_dir))
+        models_ais = models.AIModule(args.saved_models_dir)
+        ai_modules.append(models_ais)
+        ai_modules.append(guided_by.AIModule(simple_ais, models_ais))
 
     if args.user_programs_dir is not None:
         from strateobots.ai import user_program

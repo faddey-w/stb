@@ -2,7 +2,7 @@ import tensorflow as tf
 import os
 from strateobots.ai import base
 from strateobots.ai.lib import model_function, model_saving
-from strateobots.ai.models import simple_ff
+from strateobots.ai.models import ff_aim_angle
 
 
 class AIModule(base.AIModule):
@@ -32,7 +32,7 @@ class AIModule(base.AIModule):
 
     def _get_untrained(self):
         if self._untrained is None:
-            self._untrained = simple_ff.Model('Untrained')
+            self._untrained = ff_aim_angle.Model('Untrained')
             self.sess.run(self._untrained.init_op)
 
         return model_function.ModelAiFunction(self._untrained, self.sess)
@@ -52,3 +52,6 @@ class AIModule(base.AIModule):
 
     def list_bot_initializers(self):
         return []
+
+    def load(self, name):
+        return self._get_saved(os.path.join(self._saved_models_dir, name))

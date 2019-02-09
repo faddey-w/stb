@@ -34,12 +34,12 @@ class ReplayMemory:
         while remaining > 0 and keys:
             key = keys.pop(-1)
             metadata = self._rds.load_metadata(key)
-            if load_predicate:
-                ok = load_predicate(metadata)
-                if not ok:
-                    continue
             team1, team2 = metadata['team1'], metadata['team2']
             for t1, t2 in [(team1, team2), (team2, team1)]:
+                if load_predicate:
+                    ok = load_predicate(metadata, t1, t2)
+                    if not ok:
+                        continue
                 rd = _ReplayData(key, metadata, t1, t2)
                 self._ensure_numpy_loaded(rd, force_generate_cache)
                 self._data.append(rd)
@@ -64,7 +64,14 @@ class ReplayMemory:
     def total_items(self):
         return sum(rd.ticks.size-1 for rd in self._data)
 
-    def prepare_epoch(self, batch_size, n_batches, shuffle=False, selector=None):
+    def prepare_epoch(self, batch_size, n_batches, shuffle=False, selector=None,
+                      replay_predicate=None):
+        if replay_predicate is not None:
+            assert selector is None
+
+            def selector(games):
+                return [rd for rd in games if replay_predicate(rd)]
+
         epoch = self._get_data_flat(n_batches * batch_size, shuffle, selector)
         self._prepared_epoch = batch_size, n_batches, epoch
 
@@ -119,7 +126,7 @@ class ReplayMemory:
             # as single entry of training
             n = rd.ticks.size - 1
 
-            props = self.props_function(rd.json_data, n, rd.team)
+            props = self.props_function(rd)
             if not isinstance(props, np.ndarray):
                 props = np.array(props)
             assert props.shape[0] == n

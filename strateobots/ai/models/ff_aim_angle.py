@@ -1,13 +1,19 @@
 import tensorflow as tf
 import numpy as np
 from collections import defaultdict
-from strateobots.ai.lib import data, nn, model_function
+from strateobots.ai.lib import data, model_function
 from strateobots.ai.simple_duel import norm_angle
+from tensorflow.python.keras.layers import Dense, InputLayer, Input, Lambda
+from tensorflow.python.keras.models import Sequential, Model as KerasModel
 
 
 coord_scale = lambda x: x * 0.001
 velocity_scale = lambda x: x * 0.01
 
+angle_base_fields = data.FeatureSet([
+    data.Feature(['orientation']),
+    data.Feature(['tower_orientation']),
+])
 bot_visible_fields = data.FeatureSet([
     data.Feature(['x'], coord_scale),
     data.Feature(['y'], coord_scale),
@@ -65,54 +71,54 @@ class Model(model_function.TwoStepDataEncoderMixin):
         2 * bullet_fields.dimension,
         extra_fields.dimension,
     ))
-    state_dimension = _prev_state_dimension + _current_state_dimension
+    _real_state_dim = _prev_state_dimension + _current_state_dimension
+    state_dimension = angle_base_fields.dimension + _real_state_dim
     name = 'NNModel'
-    control_set = data.ALL_CONTROLS_V2
 
     def __init__(self, name=None):
         if name is not None:
             self.name = name
 
-        internal_repr_size = 50
-        with tf.variable_scope(self.name):
-            self.main_block = nn.LayerChain(
-                nn.Linear.chain_factory(self.state_dimension, 'MainBlock'),
-                (20, tf.nn.relu),
-                (20, tf.nn.relu),
-                (internal_repr_size, tf.nn.relu),
-            )
-            self.move_block = nn.LayerChain(
-                nn.Linear.chain_factory(internal_repr_size, 'MoveBlock'),
-                (20, tf.sigmoid),
-                (10, tf.nn.relu),
-                (data.ctl_move.dimension, tf.identity),
-            )
-            self.orientation_block = nn.LayerChain(
-                nn.Residual.chain_factory(internal_repr_size, 'OrientationBlock', allow_skip_transform=True),
-                (20, tf.tanh),
-                (20, tf.nn.relu),
-                (data.ctl_orientation.dimension+1, tf.identity),
-            )
-            self.gun_orientation_block = nn.LayerChain(
-                nn.Linear.chain_factory(self.state_dimension, 'GunOrientationBlock'),
-                (20, tf.tanh),
-                (20, tf.nn.relu),
-                (data.ctl_gun_orientation.dimension, tf.identity),
-                # (data.ctl_tower_rotate.dimension, tf.sin),
-            )
-            self.action_block = nn.LayerChain(
-                nn.Linear.chain_factory(internal_repr_size, 'ActionBlock'),
-                (25, tf.sigmoid),
-                (data.ctl_action.dimension, tf.identity),
-            )
-        self.var_list = sum([
-            self.main_block.var_list,
-            self.move_block.var_list,
-            self.orientation_block.var_list,
-            self.gun_orientation_block.var_list,
-            self.action_block.var_list,
-        ], [])
+        self.main_block = Sequential([
+            Dense(100, 'relu', input_shape=(self._real_state_dim,)),
+            # Dense(20, 'relu'),
+        ], name='MainBlock')
+        self.spatial_block = Sequential([
+            self.main_block,
+            Dense(100, tf.nn.leaky_relu),
+            Dense(2, tf.atan),
+            # Dense(2, tf.identity),
+        ], name='SpatialBlock')
+
+        self.output_blocks = dict(
+            move=Sequential([
+                self.main_block,
+                # Dense(20, 'sigmoid'),
+                # Dense(10, 'relu'),
+                Dense(data.ctl_move.dimension),
+            ], name='MainBlock'),
+            orientation=IndexModel(0, self.spatial_block, 'MoveAimXBlock'),
+            gun_orientation=IndexModel(1, self.spatial_block, 'MoveAimYBlock'),
+            action=Sequential([
+                self.main_block,
+                Dense(25, 'sigmoid'),
+                Dense(data.ctl_action.dimension),
+            ], name='ActionBlock'),
+        )
+
+        var_set = set()
+        for seq_m in [self.main_block,
+                      self.spatial_block,
+                      *self.output_blocks.values()]:
+            seq_m.build()
+            var_set.update(seq_m.variables)
+
+        self.var_list = list(var_set)
         self.init_op = tf.variables_initializer(self.var_list)
+
+    @property
+    def control_set(self):
+        return tuple(sorted(self.output_blocks.keys()))
 
     @staticmethod
     def _encode_prev_state(bot, enemy, bot_bullet, enemy_bullet):
@@ -137,17 +143,16 @@ class Model(model_function.TwoStepDataEncoderMixin):
         angle_to_enemy = np.arctan2(dy, dx)
         bot_gun_orientation = bot['orientation'] + bot['tower_orientation']
         enemy_gun_orientation = enemy['orientation'] + enemy['tower_orientation']
-        # tower_rot_solution = np.sin(angle_to_enemy - bot['orientation'] - bot['tower_orientation'])
         extra = {
             'bot_gun_orientation': bot_gun_orientation,
             'enemy_gun_orientation': enemy_gun_orientation,
             'angle_to_enemy': angle_to_enemy,
             'distance_to_enemy': distance_to_enemy,
             'recipr_distance_to_enemy': 1 / coord_scale(distance_to_enemy),
-            # 'torotsol': tower_rot_solution,
         }
 
         # do encoding
+        angle_bases = angle_base_fields(bot)
         bot_vector = np.concatenate([
              bot_visible_fields(bot),
              bot_private_fields(bot),
@@ -158,6 +163,7 @@ class Model(model_function.TwoStepDataEncoderMixin):
         extra_vector = extra_fields(extra)
 
         return np.concatenate([
+            angle_bases,
             bot_vector,
             enemy_vector,
             bot_bullet_vector,
@@ -166,27 +172,36 @@ class Model(model_function.TwoStepDataEncoderMixin):
         ])
 
     def apply(self, state_vector_array):
-        main = self.main_block.apply(state_vector_array)
-        internal_repr = main[-1].out
-        move = self.move_block.apply(internal_repr)
-        orientation = self.orientation_block.apply(internal_repr)
-        gun_orientation = self.gun_orientation_block.apply(state_vector_array)
-        action = self.action_block.apply(internal_repr)
-        return self._Apply(state_vector_array, main,
-                           move, orientation, gun_orientation, action)
+        assert angle_base_fields.dimension == 2
 
-    class _Apply:
+        orientation = state_vector_array[..., 0]
+        gun_orientation = state_vector_array[..., 1]
+        state_vector_array = state_vector_array[..., angle_base_fields.dimension:]
 
-        def __init__(self, state, main, move, orientation, gun_orientation, action):
-            self.state = state
-            self.main = main
-            self.move = move
-            self.orientation = orientation
-            self.gun_orientation = gun_orientation
-            self.action = action
-            self.controls = {
-                'move': self.move[-1].out,
-                'orientation': self.orientation[-1].out[:, 0],
-                'gun_orientation': self.gun_orientation[-1].out[:, 0],
-                'action': self.action[-1].out,
-            }
+        inputs = Input(tensor=state_vector_array)
+        model = KerasModel(
+            inputs=[inputs],
+            outputs=[
+                self.output_blocks[key](state_vector_array)
+                for key in self.control_set
+            ],
+            name=self.name
+        )
+        kwargs = {
+            key: model.output[i]
+            for i, key in enumerate(self.control_set)
+        }
+
+        kwargs['orientation'] = orientation + 2.01 * kwargs['orientation']
+        kwargs['gun_orientation'] = gun_orientation + 2.01 * kwargs['gun_orientation']
+
+        model.controls = kwargs
+        return model
+
+
+def Index(i, name=None):
+    return Lambda(lambda x: x[..., i], output_shape=(), name=name)
+
+
+def IndexModel(i, input, name=None):
+    return Sequential([input, Index(i)], name)

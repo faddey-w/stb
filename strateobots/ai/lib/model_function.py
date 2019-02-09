@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from math import pi, atan2
+from math import pi, atan2, sin, cos
 from strateobots.ai.lib import data
 from strateobots.engine import BotType
 
@@ -33,19 +33,29 @@ class ModelAiFunction:
             move_aim_x = ctl_vectors['move_aim_x'][0]
             move_aim_y = ctl_vectors['move_aim_y'][0]
         except KeyError:
-            move_aim_x = move_aim_y = None
+            if orientation is None:
+                move_aim_x = move_aim_y = None
+            else:
+                move_aim_x = bot_data['x'] + 100 * cos(orientation)
+                move_aim_y = bot_data['y'] + 100 * sin(orientation)
         else:
-            orientation = atan2(move_aim_y - bot_data['y'],
-                                move_aim_x - bot_data['x'])
+            if orientation is None:
+                orientation = atan2(move_aim_y - bot_data['y'],
+                                    move_aim_x - bot_data['x'])
 
         try:
             gun_aim_x = ctl_vectors['gun_aim_x'][0]
             gun_aim_y = ctl_vectors['gun_aim_y'][0]
         except KeyError:
-            gun_aim_x = gun_aim_y = None
+            if gun_orientation is None:
+                gun_aim_x = gun_aim_y = None
+            else:
+                gun_aim_x = bot_data['x'] + 100 * cos(gun_orientation)
+                gun_aim_y = bot_data['y'] + 100 * sin(gun_orientation)
         else:
-            gun_orientation = atan2(gun_aim_y - bot_data['y'],
-                                    gun_aim_x - bot_data['x'])
+            if gun_orientation is None:
+                gun_orientation = atan2(gun_aim_y - bot_data['y'],
+                                        gun_aim_x - bot_data['x'])
 
         rotate, tower_rotate = _optimal_rotations(
             rotate, tower_rotate,

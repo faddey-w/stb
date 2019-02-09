@@ -49,10 +49,12 @@ function Renderer(container) {
             rayCounters = {},
             explosionCounter = 0,
             aimsCounter = 0;
+        var botsById = {};
 
         for (i = 0; i < bots.length; i++) {
             var bot = bots[i];
             var key = [bot.type, bot.team];
+            botsById[bot.id] = bot;
             var collection;
             if (key in _tanks) {
                 collection = _tanks[key];
@@ -165,7 +167,7 @@ function Renderer(container) {
                 }
                 aimsCounter++;
                 aimObj.object.visible = true;
-                aimObj.update(aim.x, aim.y, aim.color);
+                aimObj.update(botsById[aim.bot_id], aim.x, aim.y, aim.color);
             });
         }
 
@@ -725,7 +727,7 @@ Explosion.prototype = {
 
 function Aim() {
     this.object = new THREE.Mesh(
-        this._edgeGeometry,
+        this._geometry,
         new THREE.MeshBasicMaterial({color: 0x000000})
     );
     this.object.position.z = 950;
@@ -735,10 +737,13 @@ function Aim() {
 
 Aim.prototype = {
     constructor: Aim,
-    _edgeGeometry: new THREE.RingBufferGeometry(3, 4, 8),
-    update: function(x, y, color) {
-        this.object.position.x = x;
-        this.object.position.y = y;
+    _geometry: new THREE.PlaneBufferGeometry(1, 1),
+    update: function(bot, x, y, color) {
+        this.object.position.x = (bot.x + x) / 2;
+        this.object.position.y = (bot.y + y) / 2;
+        var dx = x - bot.x, dy = y - bot.y;
+        this.object.scale.x = Math.sqrt(dx*dx + dy*dy);
+        this.object.setRotationFromAxisAngle(axisZ, Math.atan2(dy, dx));
         this.object.material.color.setHex(color);
     }
 }

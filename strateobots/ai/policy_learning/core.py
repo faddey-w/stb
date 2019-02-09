@@ -19,7 +19,7 @@ class PolicyLearning:
         self.inference = self.model.apply(self.state_ph)
 
         # self.optimizer = tf.train.RMSPropOptimizer(0.001)
-        self.optimizer = tf.train.AdamOptimizer()
+        self.optimizer = tf.train.AdamOptimizer(learning_rate=0.001)
         # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
 
         self.loss_vectors = {}
@@ -27,31 +27,34 @@ class PolicyLearning:
         self.accuracies = {}
         self.train_steps = {}
         self.vars_grads = {}
+        self.regularizer = 0.00 * tf.add_n([tf.nn.l2_loss(v) for v in self.model.var_list])
         for ctl in self.model.control_set:
-            quality = self.inference.controls[ctl]
+            value = self.inference.controls[ctl]
             if not data.is_categorical(ctl):
-                loss_vector = tf.square(quality - self.action_idx_ph[ctl])
-                accuracy = tf.reduce_mean(tf.abs(quality - self.action_idx_ph[ctl]))
+                target = self.action_idx_ph[ctl]
+                # if ctl in ('gun_orientation', '')
+                loss_vector = tf.square(value - target)
+                accuracy = tf.reduce_mean(tf.abs(value - target))
             else:
-                n_actions = tf.shape(quality)[1]
+                n_actions = tf.shape(value)[1]
                 action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
                 loss_vector = tf.nn.softmax_cross_entropy_with_logits_v2(
                     labels=tf.stop_gradient(action_labels),
-                    logits=quality,
+                    logits=value,
                 )
-                predicted_idx = tf.argmax(quality, 1, output_type=tf.int32)
+                predicted_idx = tf.argmax(value, 1, output_type=tf.int32)
                 match_flags = tf.equal(predicted_idx, self.action_idx_ph[ctl])
                 accuracy = tf.reduce_mean(tf.to_float(match_flags))
             self.loss_vectors[ctl] = loss_vector
             self.losses[ctl] = tf.reduce_mean(loss_vector)
-            self.vars_grads[ctl] = self.optimizer.compute_gradients(self.losses[ctl], model.var_list)
+            self.vars_grads[ctl] = self.optimizer.compute_gradients(self.losses[ctl] + self.regularizer, model.var_list)
             self.train_steps[ctl] = self.optimizer.apply_gradients(self.vars_grads[ctl])
 
             self.accuracies[ctl] = accuracy
 
         self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
         self.loss = tf.reduce_mean(self.full_loss_vector)
-        self.train_step = self.optimizer.minimize(self.loss)
+        self.train_step = self.optimizer.minimize(self.loss + self.regularizer)
 
         # self.train_step = tuple(self.train_steps.values())
 

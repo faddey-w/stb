@@ -182,6 +182,7 @@ angular.module("StrateobotsApp", [
                 sim.frames[i].controls[team].forEach(function(ctl) {
                     if (!!ctl.gun_aim_x && !!ctl.gun_aim_y) {
                         aims.push({
+                            bot_id: ctl.id,
                             x: ctl.gun_aim_x,
                             y: ctl.gun_aim_y,
                             color: team_int,
@@ -189,6 +190,7 @@ angular.module("StrateobotsApp", [
                     }
                     if (!!ctl.move_aim_x && !!ctl.move_aim_y) {
                         aims.push({
+                            bot_id: ctl.id,
                             x: ctl.move_aim_x,
                             y: ctl.move_aim_y,
                             color: (team_int + 0x888888) / 2,
