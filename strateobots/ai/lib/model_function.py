@@ -137,6 +137,8 @@ def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
     if rotate is None:
         delta_angle = (orientation - bot['orientation']) % (2 * pi)
         rotate = -1 if delta_angle > pi else +1
+    else:
+        rotate = data.ctl_rotate.decode(rotate)
 
     if tower_rotate is None:
         curr_gun_orientation = bot['orientation'] + bot['tower_orientation']
@@ -159,6 +161,8 @@ def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
         left_time = left_path / max(left_gun_rot_speed, 0.0001)
 
         tower_rotate = +1 if right_time < left_time else -1
+    else:
+        tower_rotate = data.ctl_rotate.decode(tower_rotate)
 
     return rotate, tower_rotate
 

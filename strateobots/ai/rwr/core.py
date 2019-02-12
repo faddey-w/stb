@@ -4,14 +4,18 @@ from strateobots.ai.lib import data
 
 class RewardWeightedRegression:
 
-    def __init__(self, model, batch_size=10):
+    def __init__(self, model, batch_size=10, entropy_coeff=None):
         self.model = model
         self.batch_size = batch_size
+        self.entropy_coeff = entropy_coeff  # type: float
 
         self.state_ph = tf.placeholder(tf.float32, [batch_size, model.state_dimension])
         self.action_idx_ph = {
-            ctl: tf.placeholder(tf.int32, [batch_size])
-            for ctl in data.ALL_CONTROLS
+            ctl: tf.placeholder(
+                tf.int32 if data.is_categorical(ctl) else tf.float32,
+                [batch_size]
+            )
+            for ctl in self.model.control_set
         }
         self.reward_ph = tf.placeholder(tf.float32, [batch_size])
         self.inference = self.model.apply(self.state_ph)
@@ -21,21 +25,39 @@ class RewardWeightedRegression:
         # self.optimizer = tf.train.GradientDescentOptimizer(0.001)
 
         self.loss_vectors = {}
-        for ctl in data.ALL_CONTROLS:
-            quality = self.inference.controls[ctl]
-            quality_safe = quality - tf.reduce_max(quality, axis=1, keepdims=True)
-            clip_epsilon = +0.00001
-            loss_vector = self.reward_ph * tf.log(
-                tf.clip_by_value(tf.gather_nd(
-                    1-tf.nn.softmax(quality_safe, axis=1),
-                    tf.stack([tf.range(batch_size), self.action_idx_ph[ctl]], axis=1)
-                ), clip_epsilon, 1-clip_epsilon)
-            )
-            self.loss_vectors[ctl] = loss_vector
+        self.entropy = {}
+        for ctl in self.model.control_set:
+            value = self.inference.controls[ctl]
+            if data.is_categorical(ctl):
+                value_safe = value - tf.reduce_max(value, axis=1, keepdims=True)
+                eps = +0.0001
+                value_softmax = eps + (1-2*eps)*tf.nn.softmax(value_safe, axis=1)
+                loss = self.reward_ph * tf.log(
+                    tf.gather_nd(
+                        1-value_softmax,
+                        tf.stack([tf.range(batch_size), self.action_idx_ph[ctl]], axis=1)
+                    )
+                )
+                entropy = tf.reduce_mean(- value_softmax * tf.log(value_softmax))
+                self.entropy[ctl] = entropy
+            else:
+                loss = self.reward_ph * tf.square(value - self.action_idx_ph[ctl])
+
+            self.loss_vectors[ctl] = loss
+        self.full_entropy = tf.add_n(list(self.entropy.values()))
         self.full_loss_vector = tf.add_n(list(self.loss_vectors.values()))
         self.loss = tf.reduce_mean(self.full_loss_vector)
 
-        self.train_step = self.optimizer.minimize(self.loss, var_list=model.var_list)
+        loss = self.loss
+        if self.entropy_coeff is not None:
+            loss -= self.entropy_coeff * self.full_entropy
+        self.grads_raw, _ = zip(*self.optimizer.compute_gradients(loss, model.var_list))
+        self.grads_clip, self.grads_norm = tf.clip_by_global_norm(self.grads_raw, 20.0)
+        self.vars_norm = tf.global_norm(model.var_list)
+
+        self.train_step = self.optimizer.apply_gradients(list(zip(
+            self.grads_clip, model.var_list,
+        )))
 
         self.init_op = tf.variables_initializer(self.optimizer.variables())
 
@@ -57,5 +79,5 @@ class RewardWeightedRegression:
             self.state_ph: states,
             self.reward_ph: reward,
             **{self.action_idx_ph[ctl]: actions[ctl]
-               for ctl in data.ALL_CONTROLS},
+               for ctl in self.model.control_set},
         })

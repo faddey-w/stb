@@ -45,21 +45,28 @@ class ReplayMemory:
                 self._data.append(rd)
                 remaining -= 1
 
-    def add_replay(self, metadata, replay_data):
+    def add_replay(self, metadata, replay_data, load_predicate=None):
         key = time.strftime('%Y%m%d_%H%M%S')
         self._rds.save_replay(key, metadata, replay_data)
 
-        team1, team2 = replay_data['bots'][0].keys()
+        team1, team2 = replay_data[0]['bots'].keys()
 
+        results = []
         for t1, t2 in [(team1, team2), (team2, team1)]:
+            if load_predicate:
+                ok = load_predicate(metadata, t1, t2)
+                if not ok:
+                    continue
             rd = _ReplayData(key, metadata, t1, t2)
             self._load_numpy_data(rd, replay_data)
             self._save_cache(rd)
             self._data.append(rd)
+            results.append(rd)
         while len(self._data) > self.max_games_keep:
             if self.rotate_storage:
                 self._rds.remove_replay(self._data[0].key)
             del self._data[0]
+        return results
 
     def total_items(self):
         return sum(rd.ticks.size-1 for rd in self._data)
