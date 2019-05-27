@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 class Config:
-    
+
     memory_capacity = 20000
 
     new_model_cls = model.classic.QualityFunctionModelset.AllTheSame
@@ -29,40 +29,30 @@ class Config:
         # angle_cfg=[8] * 4,
         # fc_cfg=[20] * (8 - 1) + [8],
         # exp_layers=[4],
-
         # fc_cfg=[8]*7 + [6]*16 + [8],
         # exp_layers=[],
         # pool_layers=[2, 4, 5, 9, 12],
         # join_point=7,
-
         # lin_h=20,
         # log_h=20,
         # lin_o=40,
         # n_evt=30,
-
         # linear_cfg=[(30, 50), (30, 50), (20, 20)],
         # linear_cfg=[(30, 50), (30, 50), (30, 50), (30, 50), (20, 20)],
         # logical_cfg=[40, 40, 20],
         # values_cfg=[(10, 20), (10, 20)],
-
         # vec2d_cfg=[(7, 11)] * 3,
         # fc_cfg=[40, 60],
-
         # n_parts=30,
         # cfg=[4] * 10,
-
         # cfg=[5],
-
         angle_sections=36,
-        layer_sizes=[75, 75, 75, 1]
+        layer_sizes=[75, 75, 75, 1],
     )
 
     batch_size = 50
     sampling = dict(
-        n_seq_samples=0,
-        seq_sample_size=0,
-        n_rnd_entries=50,
-        n_last_entries=0,
+        n_seq_samples=0, seq_sample_size=0, n_rnd_entries=50, n_last_entries=0
     )
     reward_prediction = 0.90
     steps_between_games = 100
@@ -71,7 +61,6 @@ class Config:
 
 
 class GameReporter:
-
     def __init__(self, reward_prediction):
         self.step = 0
 
@@ -90,12 +79,14 @@ class GameReporter:
         self.final_hp2_ph = tf.placeholder(tf.float32)
         self.loss_ph = tf.placeholder(tf.float32)
         self.q_dev_ph = tf.placeholder(tf.float32)
-        self.summaries = tf.summary.merge([
-            tf.summary.scalar('hp1', self.final_hp1_ph),
-            tf.summary.scalar('hp2', self.final_hp2_ph),
-            tf.summary.scalar('loss', self.loss_ph),
-            tf.summary.scalar('Q_dev', self.q_dev_ph),
-        ])
+        self.summaries = tf.summary.merge(
+            [
+                tf.summary.scalar("hp1", self.final_hp1_ph),
+                tf.summary.scalar("hp2", self.final_hp2_ph),
+                tf.summary.scalar("loss", self.loss_ph),
+                tf.summary.scalar("Q_dev", self.q_dev_ph),
+            ]
+        )
 
     def __call__(self, engine):
         if self._rew_comp is None:
@@ -121,12 +112,15 @@ class GameReporter:
         q_target_avg = q_target_sum / len(self._rewards)
         q_nn_avg = sum(self._q_values) / len(self._q_values)
 
-        sumry = session.run(self.summaries, {
-            self.final_hp1_ph: self.final_hp1,
-            self.final_hp2_ph: self.final_hp2,
-            self.loss_ph: self.loss,
-            self.q_dev_ph: q_nn_avg - q_target_avg,
-        })
+        sumry = session.run(
+            self.summaries,
+            {
+                self.final_hp1_ph: self.final_hp1,
+                self.final_hp2_ph: self.final_hp2,
+                self.loss_ph: self.loss,
+                self.q_dev_ph: q_nn_avg - q_target_avg,
+            },
+        )
         writer.add_summary(sumry, self.step)
 
     def add_loss(self, value):
@@ -144,26 +138,32 @@ class GameReporter:
         self._q_values[:] = []
 
     def print_report(self):
-        log.info('Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}'.format(
-            self.step,
-            self.final_hp1,
-            self.final_hp2,
-            self.loss,
-        ))
+        log.info(
+            "Game #{}: hp1={:.2f} hp2={:.2f} loss={:.4f}".format(
+                self.step, self.final_hp1, self.final_hp2, self.loss
+            )
+        )
 
 
-def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
-               n_full_explore, n_decreasing_explore):
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
+def entrypoint(
+    save_model,
+    save_logs,
+    save_dir,
+    max_games,
+    eval_train_ratio,
+    n_full_explore,
+    n_decreasing_explore,
+):
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     cfg = Config()
 
     save_dir_was_none = save_dir is None
     if save_dir is None:
-        run_name = datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
-        save_dir = os.path.join(REPO_ROOT, '_data', 'DQN', run_name)
-    logs_dir = os.path.join(save_dir, 'logs')
-    model_dir = os.path.join(save_dir, 'model', '')
-    replay_dir = os.path.join(save_dir, 'replay')
+        run_name = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        save_dir = os.path.join(REPO_ROOT, "_data", "DQN", run_name)
+    logs_dir = os.path.join(save_dir, "logs")
+    model_dir = os.path.join(save_dir, "model", "")
+    replay_dir = os.path.join(save_dir, "replay")
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(model_dir, exist_ok=True)
     os.makedirs(replay_dir, exist_ok=True)
@@ -189,33 +189,29 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
     )
     try:
         replay_memory.load(replay_dir)
-        log.info('replay memory buffer loaded from %s', replay_dir)
+        log.info("replay memory buffer loaded from %s", replay_dir)
     except FileNotFoundError:
-        log.info('collect new replay memory buffer')
+        log.info("collect new replay memory buffer")
 
-    log.info('construct computation graphs')
+    log.info("construct computation graphs")
     rl = ReinforcementLearning(
-        model,
-        batch_size=cfg.batch_size,
-        reward_prediction=cfg.reward_prediction,
+        model, batch_size=cfg.batch_size, reward_prediction=cfg.reward_prediction
     )
     bot_func = model.make_function(sess)
     noised_bot_func = noised_ai_func(bot_func, 0.1)
 
-    log.info('initialize model variables')
+    log.info("initialize model variables")
     sess.run(rl.init_op)
 
-    log.info('start training')
+    log.info("start training")
     n_evals, n_total_cycle = eval_train_ratio
     try:
         if save_logs:
             train_log_writer = tf.summary.FileWriter(
-                os.path.join(logs_dir, 'train'),
-                sess.graph
+                os.path.join(logs_dir, "train"), sess.graph
             )
             eval_log_writer = tf.summary.FileWriter(
-                os.path.join(logs_dir, 'eval'),
-                sess.graph
+                os.path.join(logs_dir, "eval"), sess.graph
             )
         else:
             train_log_writer = None
@@ -231,7 +227,10 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
                 log_writer = eval_log_writer
                 run_func = bot_func
             else:
-                prob = 1.0 - (model_mgr.step_counter - n_full_explore) / n_decreasing_explore
+                prob = (
+                    1.0
+                    - (model_mgr.step_counter - n_full_explore) / n_decreasing_explore
+                )
                 noised_bot_func.noise_prob = max(0.1, min(1.0, prob))
                 log_writer = train_log_writer
                 run_func = noised_bot_func
@@ -246,11 +245,7 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
 
             for _ in range(cfg.steps_between_games):
                 [loss] = rl.do_train_step(
-                    sess, replay_memory,
-                    extra_tensors=[
-                        rl.total_loss,
-                    ],
-                    **cfg.sampling,
+                    sess, replay_memory, extra_tensors=[rl.total_loss], **cfg.sampling
                 )
                 reporter.add_loss(loss)
             if save_logs:
@@ -269,9 +264,9 @@ def entrypoint(save_model, save_logs, save_dir, max_games, eval_train_ratio,
 
 def main(cmdline=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--no-save', action='store_false', dest='save')
-    parser.add_argument('--save-dir', default=None)
-    parser.add_argument('--max-games', default=None, type=int)
+    parser.add_argument("--no-save", action="store_false", dest="save")
+    parser.add_argument("--save-dir", default=None)
+    parser.add_argument("--max-games", default=None, type=int)
     opts = parser.parse_args(cmdline)
     entrypoint(
         save_model=opts.save,
@@ -281,6 +276,5 @@ def main(cmdline=None):
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

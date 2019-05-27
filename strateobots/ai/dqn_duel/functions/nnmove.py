@@ -6,16 +6,20 @@ from .util import SelectOneAction
 
 
 class QualityFunction:
-
     def __init__(self, move, rotate, shield):
         self.move = move
         self.rotate = rotate
         self.shield = shield
-        self.quality = tf.add_n([
-            self.move.get_quality(),
-            self.rotate.get_quality(),
-            self.shield.get_quality(),
-        ]) / 3.0
+        self.quality = (
+            tf.add_n(
+                [
+                    self.move.get_quality(),
+                    self.rotate.get_quality(),
+                    self.shield.get_quality(),
+                ]
+            )
+            / 3.0
+        )
 
     def get_quality(self):
         return self.quality
@@ -33,18 +37,16 @@ class QualityFunctionModelset:
 
     def __init__(self, move, rotate, shield):
         with tf.variable_scope(self.name):
-            with tf.variable_scope('move'):
+            with tf.variable_scope("move"):
                 self.move = self.node_cls(3, **move)
-            with tf.variable_scope('rotate'):
+            with tf.variable_scope("rotate"):
                 self.rotate = self.node_cls(3, **rotate)
-            with tf.variable_scope('shield'):
+            with tf.variable_scope("shield"):
                 self.shield = self.node_cls(2, **shield)
 
     @classmethod
     def AllTheSame(cls, **kwargs):
-        return cls(move=kwargs,
-                   rotate=kwargs,
-                   shield=kwargs)
+        return cls(move=kwargs, rotate=kwargs, shield=kwargs)
 
     def apply(self, state, action):
         move_action = action[..., 0:3]
@@ -58,11 +60,7 @@ class QualityFunctionModelset:
 
     @property
     def var_list(self):
-        return [
-            *self.move.var_list,
-            *self.rotate.var_list,
-            *self.shield.var_list,
-        ]
+        return [*self.move.var_list, *self.rotate.var_list, *self.shield.var_list]
 
     def make_selector(self, state):
         return SelectAction(self, state)
@@ -72,7 +70,6 @@ class QualityFunctionModelset:
 
 
 class SelectAction:
-
     def __init__(self, qfunc_modelset, state):
         """
         :type qfunc_modelset: QualityFunctionModelset
@@ -84,20 +81,27 @@ class SelectAction:
         self.select_rotate = SelectOneAction(qfunc_modelset.rotate, state)
         self.select_shield = SelectOneAction(qfunc_modelset.shield, state)
 
-        self.action = tf.concat([
-            self.select_move.action,
-            self.select_rotate.action,
-            self.select_shield.action,
-        ], -1)
-        self.max_q = tf.add_n([
-            self.select_move.max_q,
-            self.select_rotate.max_q,
-            self.select_shield.max_q,
-        ]) / 3.0
+        self.action = tf.concat(
+            [
+                self.select_move.action,
+                self.select_rotate.action,
+                self.select_shield.action,
+            ],
+            -1,
+        )
+        self.max_q = (
+            tf.add_n(
+                [
+                    self.select_move.max_q,
+                    self.select_rotate.max_q,
+                    self.select_shield.max_q,
+                ]
+            )
+            / 3.0
+        )
 
 
 class ModelbasedFunction:
-
     def __init__(self, modelset, session):
         self.modelset = modelset
         self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])

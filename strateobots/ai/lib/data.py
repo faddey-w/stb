@@ -5,7 +5,7 @@ from functools import wraps
 def _try_int(x):
     try:
         x = int(x)
-    except:
+    except (ValueError, TypeError):
         pass
     return x
 
@@ -16,14 +16,14 @@ class Feature:
 
     def __init__(self, path, converter=None):
         if isinstance(path, str):
-            path = map(_try_int, path.split('.'))
+            path = map(_try_int, path.split("."))
         self.path = tuple(path)
         self.dimension = 1
         self.converter = converter
 
     def _get_value(self, value, variable_keys):
         for item in self.path:
-            if item.startswith('$'):
+            if item.startswith("$"):
                 item = variable_keys[item[1:]]
             value = value[item]
         return value
@@ -39,7 +39,6 @@ class Feature:
 
 
 class CategoricalFeature(Feature):
-
     def __init__(self, path, categories, converter=None):
         super().__init__(path, converter)
         self.categories = tuple(categories)
@@ -51,12 +50,11 @@ class CategoricalFeature(Feature):
         return result
 
     def decode(self, array):
-        cat_idx = np.argmax(array, -1)
+        cat_idx = int(np.argmax(array, -1))
         return self.categories[cat_idx]
 
 
 class IntervalFeature(Feature):
-
     def __init__(self, path, boundaries, converter=None):
         super().__init__(path, converter)
         self.boundaries = tuple(sorted(boundaries))
@@ -75,7 +73,6 @@ class IntervalFeature(Feature):
 
 
 class RangeSensorFeature(Feature):
-
     def __init__(self, path, min_value, max_value, n_sensors, converter=None):
         super().__init__(path, converter)
         self.min_value = min_value
@@ -95,7 +92,7 @@ class RangeSensorFeature(Feature):
             lower_prop = index - lower
             higher_prop = 1 - lower_prop
             result[lower] = lower_prop
-            result[lower+1] = higher_prop
+            result[lower + 1] = higher_prop
         return result
 
 
@@ -117,30 +114,39 @@ class FeatureSet:
         raise ValueError(path)
 
 
-ALL_CONTROLS = 'move', 'rotate', 'tower_rotate', 'action'
+ALL_CONTROLS = "move", "rotate", "tower_rotate", "action"
 
-ctl_move = CategoricalFeature(['move'], [-1, 0, +1])
-ctl_rotate = CategoricalFeature(['rotate'], [-1, 0, +1])
-ctl_tower_rotate = CategoricalFeature(['tower_rotate'], [-1, 0, +1])
-ctl_action = CategoricalFeature(['action'], [0, 1, 2, 3, 4])
+ctl_move = CategoricalFeature(["move"], [-1, 0, +1])
+ctl_rotate = CategoricalFeature(["rotate"], [-1, 0, +1])
+ctl_tower_rotate = CategoricalFeature(["tower_rotate"], [-1, 0, +1])
+ctl_action = CategoricalFeature(["action"], [0, 1, 2, 3, 4])
 
-ALL_CONTROLS_V2 = 'move', 'orientation', 'gun_orientation', 'action'
+ALL_CONTROLS_V2 = "move", "orientation", "gun_orientation", "action"
 
-ctl_orientation = Feature(['orientation'])
-ctl_gun_orientation = Feature(['gun_orientation'])
-ctl_move_aim_x = Feature(['move_aim_x'])
-ctl_move_aim_y = Feature(['move_aim_y'])
-ctl_gun_aim_x = Feature(['gun_aim_x'])
-ctl_gun_aim_y = Feature(['gun_aim_y'])
+ctl_orientation = Feature(["orientation"])
+ctl_gun_orientation = Feature(["gun_orientation"])
+ctl_move_aim_x = Feature(["move_aim_x"])
+ctl_move_aim_y = Feature(["move_aim_y"])
+ctl_gun_aim_x = Feature(["gun_aim_x"])
+ctl_gun_aim_y = Feature(["gun_aim_y"])
 
 
-BOT_VISIBLE_FIELDS = 'x', 'y', 'hp', 'orientation', 'tower_orientation', 'shield', 'has_shield', 'is_firing'
-BOT_PRIVATE_FIELDS = 'vx', 'vy', 'load', 'shot_ready', 'shield_warmup'
-BULLET_FIELDS = 'present', 'x', 'y', 'orientation'
+BOT_VISIBLE_FIELDS = (
+    "x",
+    "y",
+    "hp",
+    "orientation",
+    "tower_orientation",
+    "shield",
+    "has_shield",
+    "is_firing",
+)
+BOT_PRIVATE_FIELDS = "vx", "vy", "load", "shot_ready", "shield_warmup"
+BULLET_FIELDS = "present", "x", "y", "orientation"
 
 
 def is_categorical(control):
-    return isinstance(globals()['ctl_'+control], CategoricalFeature)
+    return isinstance(globals()["ctl_" + control], CategoricalFeature)
 
 
 def generator_encoder(function):
@@ -152,7 +158,9 @@ def generator_encoder(function):
         def encode(bot, enemy, bot_bullet, enemy_bullet):
             state = bot, enemy, bot_bullet, enemy_bullet
             return generator.send(state)
+
         return encode
+
     return encoder_factory
 
 
@@ -161,5 +169,7 @@ def function_encoder(function):
     def encoder_factory(*args, **kwargs):
         def encode(*encode_args):
             return function(*args, *encode_args, **kwargs)
+
         return encode
+
     return encoder_factory

@@ -15,15 +15,11 @@ log = logging.getLogger(__name__)
 
 
 class AIModule(base.AIModule):
-
     def __init__(self, program_storage):
         self.program_storage = program_storage
 
     def list_ai_function_descriptions(self):
-        return [
-            (name, name)
-            for name in self.program_storage.list_program_names()
-        ]
+        return [(name, name) for name in self.program_storage.list_program_names()]
 
     def list_bot_initializers(self):
         return []
@@ -34,7 +30,6 @@ class AIModule(base.AIModule):
 
 
 class ProgramStorage:
-
     def __init__(self, directory):
         self.directory = directory
 
@@ -46,12 +41,11 @@ class ProgramStorage:
             return f.read()
 
     def save_program(self, name, program_text):
-        with open(os.path.join(self.directory, name), 'w') as f:
+        with open(os.path.join(self.directory, name), "w") as f:
             f.write(program_text)
 
 
 class ProgramBasedFunction:
-
     def __init__(self, program_code):
         self._program = _program_coroutine(program_code)
         self._initialized = False
@@ -63,27 +57,23 @@ class ProgramBasedFunction:
 
         ok, ctldict, debug = self._program.send(state)
         if not ok:
-            raise Exception('User program failed:\n{}'.format(debug))
-        ctllist = [
-            {'id': bot_id, **ctl}
-            for bot_id, ctl in ctldict.items()
-        ]
-        return {'controls': ctllist, 'debug': debug}
+            raise Exception("User program failed:\n{}".format(debug))
+        ctllist = [{"id": bot_id, **ctl} for bot_id, ctl in ctldict.items()]
+        return {"controls": ctllist, "debug": debug}
 
 
 class _MType(enum.Enum):
-    CONTROL = '\0\1'
-    END = '\0\0'
+    CONTROL = "\0\1"
+    END = "\0\0"
 
     def get_content(self, line):
-        return line[len(self.value):]
+        return line[len(self.value) :]
 
 
 class _WorkerWrapper:
-
     def __init__(self):
         self.proc = subprocess.Popen(
-            [sys.executable, '-u', '-m', 'strateobots.ai.user_program.worker'],
+            [sys.executable, "-u", "-m", "strateobots.ai.user_program.worker"],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE,
@@ -94,18 +84,18 @@ class _WorkerWrapper:
         self.reader_thread.start()
 
     def send(self, text):
-        self.proc.stdin.write(base64.b64encode(text.encode('utf-8')) + b'\n')
+        self.proc.stdin.write(base64.b64encode(text.encode("utf-8")) + b"\n")
         self.proc.stdin.flush()
 
     def receive(self, timeout):
         try:
-            return self.queue.get(timeout=timeout).decode('utf-8')
+            return self.queue.get(timeout=timeout).decode("utf-8")
         except queue.Empty:
             return None
 
     def _reader_thread_main(self):
         for line in self.proc.stdout:
-            if line.endswith(b'\n'):
+            if line.endswith(b"\n"):
                 line = line[:-1]
             self.queue.put(line)
 
@@ -133,38 +123,42 @@ def _program_coroutine(program_txt):
             line = worker.receive(0.05)
             if log.isEnabledFor(logging.DEBUG):
                 now = time.time()
-                log.debug('worker: t={:4f} dt={:4f} line={!r}'
-                          .format(now-deadline+timeout, now, line))
+                log.debug(
+                    "worker: t={:4f} dt={:4f} line={!r}".format(
+                        now - deadline + timeout, now, line
+                    )
+                )
             if line is None:
                 continue
             if not line:
                 break
 
             if line.startswith(_MType.CONTROL.value):
-                log.debug('interpreted as CONTROL')
+                log.debug("interpreted as CONTROL")
                 value = _MType.CONTROL.get_content(line)
-                bot_id, _, value = value.partition(';')
+                bot_id, _, value = value.partition(";")
                 bot_id = int(bot_id)
-                key, _, value = value.partition(';')
+                key, _, value = value.partition(";")
                 value = int(value)
                 ctls[bot_id][key] = value
             elif line.startswith(_MType.END.value):
-                log.debug('interpreted as END')
+                log.debug("interpreted as END")
                 tick = int(_MType.END.get_content(line))
-                if tick != state['tick']:
-                    log.debug('old tick (now=%s, got=%s), clearing data',
-                              state['tick'], tick)
+                if tick != state["tick"]:
+                    log.debug(
+                        "old tick (now=%s, got=%s), clearing data", state["tick"], tick
+                    )
                     ctls.clear()
                     output = []
                 else:
-                    log.debug('program done, exiting loop')
+                    log.debug("program done, exiting loop")
                     tick_ended = True
             else:
-                log.debug('interpreted as DEBUG')
+                log.debug("interpreted as DEBUG")
                 output.append(line)
 
-        log.debug('worker: done in {:4f} sec'.format(time.time()-deadline+timeout))
+        log.debug("worker: done in {:4f} sec".format(time.time() - deadline + timeout))
         ok = worker.proc.poll() is None
         if not ok:
             output.extend(worker.proc.stdout)
-        result = ok, ctls, '\n'.join(output)
+        result = ok, ctls, "\n".join(output)

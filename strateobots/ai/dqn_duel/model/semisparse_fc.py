@@ -9,14 +9,13 @@ log = logging.getLogger(__name__)
 
 
 class QualityFunctionModel:
-
     def __new__(cls, **kwargs):
         self = super().__new__(cls)
         self.construct_params = kwargs
         return self
 
     def __init__(self, cfg, n_parts):
-        self.name = 'QFuncSemiSparse'
+        self.name = "QFuncSemiSparse"
         self.var_list = []
         self.n_parts = n_parts
 
@@ -26,13 +25,15 @@ class QualityFunctionModel:
             for i, out_dim in enumerate(cfg):
                 if i != 0:
                     in_dim *= 2
-                self.node_lists.append([
-                    layers.Linear('Lin{}_{}'.format(i, j), in_dim, out_dim)
-                    for j in range(n_parts)
-                ])
+                self.node_lists.append(
+                    [
+                        layers.Linear("Lin{}_{}".format(i, j), in_dim, out_dim)
+                        for j in range(n_parts)
+                    ]
+                )
                 in_dim = out_dim
 
-            self.regress = layers.Linear('Regress', n_parts * cfg[-1], 1)
+            self.regress = layers.Linear("Regress", n_parts * cfg[-1], 1)
 
         self.var_list.extend(
             var
@@ -58,11 +59,11 @@ class QualityFunction:
         self.state = state  # type: tf.Tensor
         self.action = action
 
-        x0 = select_features(state, state2vec, (0, 'x'))
-        y0 = select_features(state, state2vec, (0, 'y'))
-        x1 = select_features(state, state2vec, (1, 'x'))
-        y1 = select_features(state, state2vec, (1, 'y'))
-        to_enemy = tf.atan2(y1-y0, x1-x0)
+        x0 = select_features(state, state2vec, (0, "x"))
+        y0 = select_features(state, state2vec, (0, "y"))
+        x1 = select_features(state, state2vec, (1, "x"))
+        y1 = select_features(state, state2vec, (1, "y"))
+        to_enemy = tf.atan2(y1 - y0, x1 - x0)
 
         self.inputs = tf.concat([state, action, to_enemy], -1)
 
@@ -74,7 +75,7 @@ class QualityFunction:
                 if len(vector_array) == 1:
                     vec = vector_array[0]
                 else:
-                    v1 = vector_array[i-1]
+                    v1 = vector_array[i - 1]
                     v2 = vector_array[i]
                     vec = tf.concat([v1, v2], -1)
                 out_array.append(node.apply(vec, tf.sigmoid))
@@ -94,15 +95,14 @@ class QualityFunction:
         return self.quality
 
     def call(self, state, action, session):
-        return session.run(self.quality, feed_dict={
-            self.state: state,
-            self.action: action,
-        })
+        return session.run(
+            self.quality, feed_dict={self.state: state, self.action: action}
+        )
 
 
 def select_features(tensor, mapper, *feature_names):
     feature_tensors = []
     for ftr_name in feature_names:
         idx = mapper[ftr_name]
-        feature_tensors.append(tensor[..., idx:idx+1])
+        feature_tensors.append(tensor[..., idx : idx + 1])
     return tf.concat(feature_tensors, -1)

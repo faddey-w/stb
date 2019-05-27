@@ -12,7 +12,6 @@ def generate_keypair():
 
 
 class using_key:
-
     def __init__(self, key_pem):
         self.key_pem = key_pem
         self._key = RSA.importKey(key_pem)

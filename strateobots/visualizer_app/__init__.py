@@ -14,4 +14,3 @@ from strateobots import cryptoutil
 
 
 log = logging.getLogger(__name__)
-

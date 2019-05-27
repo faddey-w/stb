@@ -5,31 +5,14 @@ from strateobots.ai.lib import layers, stable
 from strateobots.ai.lib.data import state2vec
 from strateobots.ai.ain_duel.model.base import BaseActionInferenceModel
 
-X_FEATURES = (
-    (0, 'x'),
-    (0, 'vx'),
-    (1, 'x'),
-    (1, 'vx'),
-    (2, 'x'),
-    (3, 'x'),
-)
-Y_FEATURES = (
-    (0, 'y'),
-    (0, 'vy'),
-    (1, 'y'),
-    (1, 'vy'),
-    (2, 'y'),
-    (3, 'y'),
-)
+X_FEATURES = ((0, "x"), (0, "vx"), (1, "x"), (1, "vx"), (2, "x"), (3, "x"))
+Y_FEATURES = ((0, "y"), (0, "vy"), (1, "y"), (1, "vy"), (2, "y"), (3, "y"))
 OTHER_FEATURES = tuple(
-    fn for fn in state2vec.field_names
-    if fn not in X_FEATURES
-    if fn not in Y_FEATURES
+    fn for fn in state2vec.field_names if fn not in X_FEATURES if fn not in Y_FEATURES
 )
 
 
 class ActionInferenceModel(BaseActionInferenceModel):
-
     def _create_layers(self, coord_cfg, angle_cfg, fc_cfg, n_residual=0):
         assert len(coord_cfg) == len(angle_cfg)
         assert len(fc_cfg) >= n_residual
@@ -46,36 +29,40 @@ class ActionInferenceModel(BaseActionInferenceModel):
         coord_in = len(X_FEATURES) + len(OTHER_FEATURES)
         angle_in = state2vec.vector_length
         for i, (coord_out, angle_out) in enumerate(self.vec2d_cfg):
-            lx = layers.Linear('L{}x'.format(i), coord_in, coord_out)
-            ly = layers.Linear('L{}y'.format(i), coord_in, coord_out, lx.weight)
-            la = layers.ResidualV2('L{}a'.format(i), coord_in + angle_in, angle_out // 2, angle_out)
+            lx = layers.Linear("L{}x".format(i), coord_in, coord_out)
+            ly = layers.Linear("L{}y".format(i), coord_in, coord_out, lx.weight)
+            la = layers.ResidualV2(
+                "L{}a".format(i), coord_in + angle_in, angle_out // 2, angle_out
+            )
             self.vec2d_layers.append((lx, ly, la))
             vec2d_layers_flat.extend((lx, ly, la))
             coord_in, angle_in = coord_out, angle_out
 
         fc_in = 3 * coord_in + angle_in
         for i, fc_out in enumerate(self.fc_cfg):
-            fc = layers.Linear('FC{}'.format(i), fc_in, fc_out)
+            fc = layers.Linear("FC{}".format(i), fc_in, fc_out)
             self.fc_layers.append(fc)
             fc_in = fc_out
         return fc_in, vec2d_layers_flat + self.fc_layers
 
     def create_inference(self, inference, state):
 
-        inference.x0 = select_features(
-            state, state2vec,
-            *X_FEATURES,
-            *OTHER_FEATURES,
+        inference.x0 = select_features(state, state2vec, *X_FEATURES, *OTHER_FEATURES)
+        inference.y0 = tf.concat(
+            [
+                select_features(state, state2vec, *Y_FEATURES),
+                tf.ones_like(state[..., : len(OTHER_FEATURES)]),
+            ],
+            -1,
         )
-        inference.y0 = tf.concat([
-            select_features(state, state2vec, *Y_FEATURES),
-            tf.ones_like(state[..., :len(OTHER_FEATURES)])
-        ], -1)
-        inference.a0 = tf.concat([
-            state,
-            # stable.atan2(inference.y0, inference.x0)
-            tf.atan2(inference.y0, inference.x0)
-        ], -1)
+        inference.a0 = tf.concat(
+            [
+                state,
+                # stable.atan2(inference.y0, inference.x0)
+                tf.atan2(inference.y0, inference.x0),
+            ],
+            -1,
+        )
 
         inference.vec2d_levels = []
         vectors = (inference.x0, inference.y0, inference.a0)
@@ -87,7 +74,7 @@ class ActionInferenceModel(BaseActionInferenceModel):
             lx = mx.apply(x, tf.identity)
             ly = my.apply(y, tf.identity)
             la = ma.apply(a, tf.nn.relu)
-            angles = la.out[..., :lx.out.get_shape().as_list()[-1]]
+            angles = la.out[..., : lx.out.get_shape().as_list()[-1]]
             a_cos = tf.cos(angles)
             a_sin = tf.sin(angles)
             new_x = lx.out * a_cos - ly.out * a_sin
@@ -108,6 +95,7 @@ class ActionInferenceModel(BaseActionInferenceModel):
 
         return fc_vec
 
+
 Model = ActionInferenceModel
 
 
@@ -115,5 +103,5 @@ def select_features(tensor, mapper, *feature_names):
     feature_tensors = []
     for ftr_name in feature_names:
         idx = mapper[ftr_name]
-        feature_tensors.append(tensor[..., idx:idx+1])
+        feature_tensors.append(tensor[..., idx : idx + 1])
     return tf.concat(feature_tensors, -1)

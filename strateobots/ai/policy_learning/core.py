@@ -3,7 +3,6 @@ from strateobots.ai.lib import data
 
 
 class PolicyLearning:
-
     def __init__(self, model, batch_size=10):
         self.model = model
         self.batch_size = batch_size
@@ -11,8 +10,7 @@ class PolicyLearning:
         self.state_ph = tf.placeholder(tf.float32, [batch_size, model.state_dimension])
         self.action_idx_ph = {
             ctl: tf.placeholder(
-                tf.int32 if data.is_categorical(ctl) else tf.float32,
-                [batch_size]
+                tf.int32 if data.is_categorical(ctl) else tf.float32, [batch_size]
             )
             for ctl in self.model.control_set
         }
@@ -27,7 +25,9 @@ class PolicyLearning:
         self.accuracies = {}
         self.train_steps = {}
         self.vars_grads = {}
-        self.regularizer = 0.00 * tf.add_n([tf.nn.l2_loss(v) for v in self.model.var_list])
+        self.regularizer = 0.00 * tf.add_n(
+            [tf.nn.l2_loss(v) for v in self.model.var_list]
+        )
         for ctl in self.model.control_set:
             value = self.inference.controls[ctl]
             if not data.is_categorical(ctl):
@@ -39,15 +39,16 @@ class PolicyLearning:
                 n_actions = tf.shape(value)[1]
                 action_labels = tf.one_hot(self.action_idx_ph[ctl], n_actions)
                 loss_vector = tf.nn.softmax_cross_entropy_with_logits_v2(
-                    labels=tf.stop_gradient(action_labels),
-                    logits=value,
+                    labels=tf.stop_gradient(action_labels), logits=value
                 )
                 predicted_idx = tf.argmax(value, 1, output_type=tf.int32)
                 match_flags = tf.equal(predicted_idx, self.action_idx_ph[ctl])
                 accuracy = tf.reduce_mean(tf.to_float(match_flags))
             self.loss_vectors[ctl] = loss_vector
             self.losses[ctl] = tf.reduce_mean(loss_vector)
-            self.vars_grads[ctl] = self.optimizer.compute_gradients(self.losses[ctl] + self.regularizer, model.var_list)
+            self.vars_grads[ctl] = self.optimizer.compute_gradients(
+                self.losses[ctl] + self.regularizer, model.var_list
+            )
             self.train_steps[ctl] = self.optimizer.apply_gradients(self.vars_grads[ctl])
 
             self.accuracies[ctl] = accuracy
@@ -62,10 +63,7 @@ class PolicyLearning:
 
     def do_train_step(self, session, replay_memory, batch_index, extra_tensors=()):
         _, extra_results = self.compute_on_sample(
-            session,
-            replay_memory,
-            [self.train_step, extra_tensors],
-            batch_index,
+            session, replay_memory, [self.train_step, extra_tensors], batch_index
         )
         return extra_results
 
@@ -73,8 +71,13 @@ class PolicyLearning:
 
         props, actions, states, _ = replay_memory.get_prepared_epoch_batch(batch_index)
 
-        return session.run(tensors, {
-            self.state_ph: states,
-            **{self.action_idx_ph[ctl]: actions[ctl]
-               for ctl in self.model.control_set},
-        })
+        return session.run(
+            tensors,
+            {
+                self.state_ph: states,
+                **{
+                    self.action_idx_ph[ctl]: actions[ctl]
+                    for ctl in self.model.control_set
+                },
+            },
+        )

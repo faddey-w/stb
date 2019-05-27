@@ -18,13 +18,13 @@ class AIModule(base.AIModule):
             saved = []
         else:
             saved = [
-                ('saved: '+name, (self._get_saved, (os.path.join(self._saved_models_dir, name), )))
+                (
+                    "saved: " + name,
+                    (self._get_saved, (os.path.join(self._saved_models_dir, name),)),
+                )
                 for name in os.listdir(self._saved_models_dir)
             ]
-        return [
-            ('Untrained', (self._get_untrained, ())),
-            *saved
-        ]
+        return [("Untrained", (self._get_untrained, ())), *saved]
 
     def construct_ai_function(self, team, parameters):
         ctor, args = parameters
@@ -32,7 +32,7 @@ class AIModule(base.AIModule):
 
     def _get_untrained(self):
         if self._untrained is None:
-            self._untrained = ff_aim_angle.Model('Untrained')
+            self._untrained = ff_aim_angle.Model("Untrained")
             self.sess.run(self._untrained.init_op)
 
         return model_function.ModelAiFunction(self._untrained, self.sess)
@@ -41,9 +41,11 @@ class AIModule(base.AIModule):
         if save_path in self._saved_model_managers:
             model = self._saved_model_managers[save_path].model
         else:
-            namescope = 'model-{}'.format(self._namescope_counter)
+            namescope = "model-{}".format(self._namescope_counter)
             self._namescope_counter += 1
-            mgr = model_saving.ModelManager.load_existing_model(save_path, name_scope=namescope)
+            mgr = model_saving.ModelManager.load_existing_model(
+                save_path, name_scope=namescope
+            )
             mgr.load_vars(self.sess)
             self._saved_model_managers[save_path] = mgr
             model = mgr.model

@@ -1,27 +1,25 @@
-
-
 class _SimpleObject:
     def __init__(self, selfdict):
         self.__dict__.update(selfdict)
 
     def __repr__(self):
-        return '{}({})'.format(self.__class__.__name__, repr(self.__dict__))
+        return "{}({})".format(self.__class__.__name__, repr(self.__dict__))
 
 
 def _act(bot, key, value):
-    print('\0\1{};{};{}'.format(bot.id, key, repr(value)), flush=True)
+    print("\0\1{};{};{}".format(bot.id, key, repr(value)), flush=True)
 
 
 def move_ahead(bot):
-    _act(bot, 'move', +1)
+    _act(bot, "move", +1)
 
 
 def move_back(bot):
-    _act(bot, 'move', -1)
+    _act(bot, "move", -1)
 
 
 def stay(bot):
-    _act(bot, 'move', 0)
+    _act(bot, "move", 0)
 
 
 # NOTE: rotation +1 does rotation clockwise in coordinate system,
@@ -32,27 +30,27 @@ def stay(bot):
 
 
 def rotate_left(bot):
-    _act(bot, 'rotate', +1)
+    _act(bot, "rotate", +1)
 
 
 def rotate_right(bot):
-    _act(bot, 'rotate', -1)
+    _act(bot, "rotate", -1)
 
 
 def no_rotate(bot):
-    _act(bot, 'rotate', 0)
+    _act(bot, "rotate", 0)
 
 
 def rotate_gun_left(bot):
-    _act(bot, 'tower_rotate', +1)
+    _act(bot, "tower_rotate", +1)
 
 
 def rotate_gun_right(bot):
-    _act(bot, 'tower_rotate', -1)
+    _act(bot, "tower_rotate", -1)
 
 
 def no_rotate_gun(bot):
-    _act(bot, 'tower_rotate', 0)
+    _act(bot, "tower_rotate", 0)
 
 
 class _EngineActionConstants:
@@ -64,23 +62,23 @@ class _EngineActionConstants:
 
 
 def idle(bot):
-    _act(bot, 'action', _EngineActionConstants.IDLE)
+    _act(bot, "action", _EngineActionConstants.IDLE)
 
 
 def fire(bot):
-    _act(bot, 'action', _EngineActionConstants.FIRE)
+    _act(bot, "action", _EngineActionConstants.FIRE)
 
 
 def shield_regen(bot):
-    _act(bot, 'action', _EngineActionConstants.SHIELD_REGEN)
+    _act(bot, "action", _EngineActionConstants.SHIELD_REGEN)
 
 
 def shield_warmup(bot):
-    _act(bot, 'action', _EngineActionConstants.SHIELD_WARMUP)
+    _act(bot, "action", _EngineActionConstants.SHIELD_WARMUP)
 
 
 def accelerate(bot):
-    _act(bot, 'action', _EngineActionConstants.ACCELERATION)
+    _act(bot, "action", _EngineActionConstants.ACCELERATION)
 
 
 def new_object(**attrs):
@@ -88,9 +86,8 @@ def new_object(**attrs):
 
 
 class _DummyImportable:
-
     def __getattr__(self, item):
-        if item == '__all__':
+        if item == "__all__":
             return []
         return getattr(__builtins__, item)
 
@@ -98,7 +95,9 @@ class _DummyImportable:
 def __import__(*args, **kwargs):
     """Just to help user to write code with smart editors"""
     return _DummyImportable()
-__builtins__['__import__'] = __import__
+
+
+__builtins__["__import__"] = __import__
 del __import__
 
 data = {}

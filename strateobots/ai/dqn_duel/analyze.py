@@ -22,20 +22,17 @@ class Config:
 
     batch_size = 120
     sampling = dict(
-        n_seq_samples=0,
-        seq_sample_size=0,
-        n_rnd_entries=120,
-        n_last_entries=0,
+        n_seq_samples=0, seq_sample_size=0, n_rnd_entries=120, n_last_entries=0
     )
     reward_prediction = 0.97
 
 
 def entrypoint(save_dir):
-    logging.basicConfig(level=logging.INFO, format='%(message)s')
+    logging.basicConfig(level=logging.INFO, format="%(message)s")
     cfg = Config()
 
-    model_dir = os.path.join(save_dir, 'model', '')
-    replay_dir = os.path.join(save_dir, 'replay')
+    model_dir = os.path.join(save_dir, "model", "")
+    replay_dir = os.path.join(save_dir, "replay")
 
     sess = tf.Session()
     model_mgr = model_saving.ModelManager.load_existing_model(model_dir)
@@ -48,32 +45,28 @@ def entrypoint(save_dir):
         state2vec.vector_length,
     )
     mem.load(replay_dir)
-    log.info('replay memory buffer loaded from %s', replay_dir)
+    log.info("replay memory buffer loaded from %s", replay_dir)
 
-    log.info('construct computation graphs')
+    log.info("construct computation graphs")
     rl = ReinforcementLearning(
-        mdl,
-        batch_size=cfg.batch_size,
-        reward_prediction=cfg.reward_prediction,
+        mdl, batch_size=cfg.batch_size, reward_prediction=cfg.reward_prediction
     )
     bot_func = ModelbasedFunction(mdl, sess)
 
-    log.info('initialize model variables')
+    log.info("initialize model variables")
     sess.run(rl.init_op)
 
     import code
+
     code.interact(local=dict(globals(), **locals()))
 
 
 def main(cmdline=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('--save-dir', required=True)
+    parser.add_argument("--save-dir", required=True)
     opts = parser.parse_args(cmdline)
-    entrypoint(
-        save_dir=opts.save_dir,
-    )
+    entrypoint(save_dir=opts.save_dir)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
-

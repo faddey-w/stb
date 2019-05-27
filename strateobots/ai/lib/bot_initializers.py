@@ -13,7 +13,7 @@ def duel_bot_initializer(type1, type2, distance_ratio):
             x=x1,
             y=y,
             orientation=0,
-            tower_orientation=0
+            tower_orientation=0,
         )
         engine.add_bot(
             bottype=type2,
@@ -21,8 +21,9 @@ def duel_bot_initializer(type1, type2, distance_ratio):
             x=x2,
             y=y,
             orientation=math.pi,
-            tower_orientation=0
+            tower_orientation=0,
         )
+
     return initialize_bots_for_duel
 
 
@@ -41,4 +42,5 @@ def random_bot_initializer(team1_types, team2_types):
                 orientation=random.random() * 2 * math.pi,
                 tower_orientation=random.random() * 2 * math.pi,
             )
+
     return initialize_bots_randomly

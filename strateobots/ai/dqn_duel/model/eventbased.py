@@ -1,4 +1,3 @@
-
 import tensorflow as tf
 
 from strateobots.ai.lib import layers, util
@@ -7,7 +6,6 @@ from strateobots.ai.dqn_duel import functions
 
 
 class EventbasedModel:
-
     def __init__(self, n_actions, linear_cfg, logical_cfg, values_cfg):
         assert linear_cfg[-1][1] == logical_cfg[-1] == values_cfg[-1][1]
         self.n_actions = n_actions
@@ -18,27 +16,25 @@ class EventbasedModel:
         self.linear = []
         in_dim = n_lin0
         for i, (hidden_dim, out_dim) in enumerate(linear_cfg):
-            node = layers.ResidualV2('Lin{}'.format(i), in_dim,
-                                     hidden_dim, out_dim)
+            node = layers.ResidualV2("Lin{}".format(i), in_dim, hidden_dim, out_dim)
             self.linear.append(node)
             in_dim = out_dim
 
         self.logical = []
         in_dim = n_lin0
         for i, out_dim in enumerate(logical_cfg):
-            node = layers.Linear('Log{}'.format(i), in_dim, out_dim)
+            node = layers.Linear("Log{}".format(i), in_dim, out_dim)
             self.logical.append(node)
             in_dim = out_dim
 
         self.values = []
         in_dim = n_lin0
         for i, (hidden_dim, out_dim) in enumerate(values_cfg):
-            node = layers.ResidualV2('Val{}'.format(i), in_dim,
-                                     hidden_dim, out_dim)
+            node = layers.ResidualV2("Val{}".format(i), in_dim, hidden_dim, out_dim)
             self.values.append(node)
             in_dim = out_dim
 
-        self.event_weight = layers.Linear('EvtW', values_cfg[-1][1], 1)
+        self.event_weight = layers.Linear("EvtW", values_cfg[-1][1], 1)
 
         self.var_list.extend(
             var
@@ -64,16 +60,21 @@ class QualityFunction:
         :param action: [..., action_vector_len]
         """
         # import pdb; pdb.set_trace()
-        normalizer = tf.one_hot([
-            state2vec[0, 'x'],
-            state2vec[0, 'y'],
-            state2vec[1, 'x'],
-            state2vec[1, 'y'],
-            state2vec[2, 'x'],
-            state2vec[2, 'y'],
-            state2vec[3, 'x'],
-            state2vec[3, 'y'],
-        ], depth=state2vec.vector_length, on_value=1.0 / 1000, off_value=1.0)
+        normalizer = tf.one_hot(
+            [
+                state2vec[0, "x"],
+                state2vec[0, "y"],
+                state2vec[1, "x"],
+                state2vec[1, "y"],
+                state2vec[2, "x"],
+                state2vec[2, "y"],
+                state2vec[3, "x"],
+                state2vec[3, "y"],
+            ],
+            depth=state2vec.vector_length,
+            on_value=1.0 / 1000,
+            off_value=1.0,
+        )
         normalizer = tf.reduce_min(normalizer, 0)
         # import pdb; pdb.set_trace()
         state *= normalizer
@@ -82,19 +83,15 @@ class QualityFunction:
         self.state = state  # type: tf.Tensor
         self.action = action
 
-        x0 = util.select_features(state, state2vec, (0, 'x'))
-        y0 = util.select_features(state, state2vec, (0, 'y'))
-        x1 = util.select_features(state, state2vec, (1, 'x'))
-        y1 = util.select_features(state, state2vec, (1, 'y'))
-        to_enemy = tf.atan2(y1 - y0, x1-x0)
-        load = util.select_features(state, state2vec, (0, 'load'))
+        x0 = util.select_features(state, state2vec, (0, "x"))
+        y0 = util.select_features(state, state2vec, (0, "y"))
+        x1 = util.select_features(state, state2vec, (1, "x"))
+        y1 = util.select_features(state, state2vec, (1, "y"))
+        to_enemy = tf.atan2(y1 - y0, x1 - x0)
+        load = util.select_features(state, state2vec, (0, "load"))
         shot_ready = tf.cast(load > 0.99, tf.float32)
 
-        self.vector0 = tf.concat([
-            state, action,
-            to_enemy,
-            shot_ready,
-        ], -1)
+        self.vector0 = tf.concat([state, action, to_enemy, shot_ready], -1)
 
         self.linear = []
         vector = self.vector0
@@ -138,5 +135,7 @@ class QualityFunction:
 class QualityFunctionModelset(functions.all.QualityFunctionModelset):
 
     node_cls = EventbasedModel
-    name = 'QFuncEB'
+    name = "QFuncEB"
+
+
 Model = QualityFunctionModelset

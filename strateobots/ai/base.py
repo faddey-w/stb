@@ -1,6 +1,4 @@
-
 class AIModule:
-
     @property
     def name(self):
         # cls = self.__class__
@@ -30,7 +28,6 @@ class AIModule:
 
 
 class DefaultAIModule(AIModule):
-
     def __init__(self, bot_initializers):
         self.bot_initializers = bot_initializers
 
@@ -41,4 +38,4 @@ class DefaultAIModule(AIModule):
         return []
 
     def construct_ai_function(self, team, parameters):
-        raise RuntimeError('should never be called')
+        raise RuntimeError("should never be called")

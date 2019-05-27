@@ -11,11 +11,16 @@ log = logging.getLogger(__name__)
 
 
 class ReplayMemory:
-
-    def __init__(self, storage_directory, model, props_function,
-                 cache_key=None, controls=data.ALL_CONTROLS,
-                 rotate_storage=False,
-                 max_games_keep=100):
+    def __init__(
+        self,
+        storage_directory,
+        model,
+        props_function,
+        cache_key=None,
+        controls=data.ALL_CONTROLS,
+        rotate_storage=False,
+        max_games_keep=100,
+    ):
         self._rds = ReplayDataStorage(storage_directory)
         self.model = model
         self.max_games_keep = max_games_keep
@@ -28,13 +33,13 @@ class ReplayMemory:
 
     def reload(self, force_generate_cache=False, load_predicate=None):
         self._data = []
-        log.info('Loading data from storage')
+        log.info("Loading data from storage")
         remaining = self.max_games_keep
         keys = self._rds.list_keys()
         while remaining > 0 and keys:
             key = keys.pop(-1)
             metadata = self._rds.load_metadata(key)
-            team1, team2 = metadata['team1'], metadata['team2']
+            team1, team2 = metadata["team1"], metadata["team2"]
             for t1, t2 in [(team1, team2), (team2, team1)]:
                 if load_predicate:
                     ok = load_predicate(metadata, t1, t2)
@@ -46,10 +51,10 @@ class ReplayMemory:
                 remaining -= 1
 
     def add_replay(self, metadata, replay_data, load_predicate=None):
-        key = time.strftime('%Y%m%d_%H%M%S')
+        key = time.strftime("%Y%m%d_%H%M%S")
         self._rds.save_replay(key, metadata, replay_data)
 
-        team1, team2 = replay_data[0]['bots'].keys()
+        team1, team2 = replay_data[0]["bots"].keys()
 
         results = []
         for t1, t2 in [(team1, team2), (team2, team1)]:
@@ -69,10 +74,11 @@ class ReplayMemory:
         return results
 
     def total_items(self):
-        return sum(rd.ticks.size-1 for rd in self._data)
+        return sum(rd.ticks.size - 1 for rd in self._data)
 
-    def prepare_epoch(self, batch_size, n_batches, shuffle=False, selector=None,
-                      replay_predicate=None):
+    def prepare_epoch(
+        self, batch_size, n_batches, shuffle=False, selector=None, replay_predicate=None
+    ):
         if replay_predicate is not None:
             assert selector is None
 
@@ -87,10 +93,7 @@ class ReplayMemory:
         start = batch_size * batch_index
         end = batch_size * (batch_index + 1)
         props, actions, st_before, st_after = epoch
-        actions = {
-            ctl: actions[ctl][start:end]
-            for ctl in self.controls
-        }
+        actions = {ctl: actions[ctl][start:end] for ctl in self.controls}
         return props[start:end], actions, st_before[start:end], st_after[start:end]
 
     def _get_data_flat(self, size, shuffle, selector):
@@ -113,7 +116,7 @@ class ReplayMemory:
                     # there is minus one because we consider pairs
                     # previous state + current state
                     # as single entry of training
-                    least_size -= games[i].ticks.size-1
+                    least_size -= games[i].ticks.size - 1
                 except IndexError:
                     raise NotEnoughData
                 i += 1
@@ -121,7 +124,7 @@ class ReplayMemory:
             requested_size = size
             size += -least_size  # least_size is negative now
 
-        props_buffer = np.empty([size, getattr(self.props_function, 'dimension', 1)])
+        props_buffer = np.empty([size, getattr(self.props_function, "dimension", 1)])
         actions_buffer = {ctl: np.empty([size]) for ctl in self.controls}
         states_buffer = np.empty([size, self.model.state_dimension])
         next_states_buffer = np.empty([size, self.model.state_dimension])
@@ -139,11 +142,11 @@ class ReplayMemory:
             assert props.shape[0] == n
             if np.ndim(props) == 1:
                 props = np.reshape(props, (props.size, 1))
-            props_buffer[i:i+n] = props
+            props_buffer[i : i + n] = props
             for ctl in self.controls:
-                actions_buffer[ctl][i:i+n] = rd.actions_data_dict[ctl][:-1]
-            states_buffer[i:i+n] = rd.state_data[:-1]
-            next_states_buffer[i:i+n] = rd.state_data[1:]
+                actions_buffer[ctl][i : i + n] = rd.actions_data_dict[ctl][:-1]
+            states_buffer[i : i + n] = rd.state_data[:-1]
+            next_states_buffer[i : i + n] = rd.state_data[1:]
             i += n
 
         if shuffle:
@@ -178,29 +181,32 @@ class ReplayMemory:
         if replay_data is None:
             replay_data = self._rds.load_replay_data(rd.key)
         rd.json_data = replay_data
-        last_tick = next(i for i in range(len(rd.json_data) - 1, -1, -1)
-                         if rd.json_data[i]['controls'][rd.team] is not None)
+        last_tick = next(
+            i
+            for i in range(len(rd.json_data) - 1, -1, -1)
+            if rd.json_data[i]["controls"][rd.team] is not None
+        )
         n_ticks = last_tick + 1
 
         state_array = np.empty([n_ticks, self.model.state_dimension], dtype=np.float32)
         encoder = self.model.data_encoder()
         action_arrays = {
-            ctl: np.empty([n_ticks], dtype=np.float32)
-            for ctl in self.controls
+            ctl: np.empty([n_ticks], dtype=np.float32) for ctl in self.controls
         }
         for i in range(n_ticks):
             item = rd.json_data[i]
             state_vector = encode_vector_for_model(
-                encoder, item, rd.team, rd.opponent_team)
+                encoder, item, rd.team, rd.opponent_team
+            )
             state_array[i] = state_vector
         for ctl in self.controls:
             act_arr = action_arrays[ctl]
             if data.is_categorical(ctl):
-                get_value = getattr(data, 'ctl_'+ctl).categories.index
+                get_value = getattr(data, "ctl_" + ctl).categories.index
             else:
                 get_value = lambda x: x
             for i in range(n_ticks):
-                act_arr[i] = get_value(rd.json_data[i]['controls'][rd.team][0][ctl])
+                act_arr[i] = get_value(rd.json_data[i]["controls"][rd.team][0][ctl])
 
         rd.state_data = state_array
         rd.actions_data_dict = action_arrays
@@ -228,29 +234,28 @@ class ReplayMemory:
         state_cache_path, actions_cache_paths, _ = self._get_cache_paths(rd)
         np.save(state_cache_path, rd.state_data, allow_pickle=False)
         for ctl in self.controls:
-            np.save(actions_cache_paths[ctl], rd.actions_data_dict[ctl], allow_pickle=False)
+            np.save(
+                actions_cache_paths[ctl], rd.actions_data_dict[ctl], allow_pickle=False
+            )
 
     def _get_cache_paths(self, rd):
         state_cache_path = self._rds.get_path_for_extra_data(
-            rd.key,
-            'cache_{}_{}_state.npy'.format(self._cache_key, rd.team)
+            rd.key, "cache_{}_{}_state.npy".format(self._cache_key, rd.team)
         )
         actions_cache_paths = {
             ctl: self._rds.get_path_for_extra_data(
                 rd.key,
-                'cache_{}_{}_action_{}.npy'.format(self._cache_key, rd.team, ctl)
+                "cache_{}_{}_action_{}.npy".format(self._cache_key, rd.team, ctl),
             )
             for ctl in self.controls
         }
         n_ticks_path = self._rds.get_path_for_extra_data(
-            rd.key,
-            'cache_{}_{}_nticks'.format(self._cache_key, rd.key)
+            rd.key, "cache_{}_{}_nticks".format(self._cache_key, rd.key)
         )
         return state_cache_path, actions_cache_paths, n_ticks_path
 
 
 class _ReplayData:
-
     def __init__(self, key, metadata, team, opponent_team):
         self.key = key
         self.metadata = metadata

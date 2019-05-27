@@ -2,7 +2,6 @@ from strateobots.ai.lib.data import action2vec
 
 
 class ExplorationFunction:
-
     def __init__(self, replay_memory):
         self._states_tree = None
         self._actions = None

@@ -11,10 +11,9 @@ def AI(team, engine):
         function = state.function
     else:
         function = adopt_handcrafted_function(handcrafted.distance_attack)
-    return AINDuelAI.parametrize(
-        function=function,
-        bot_type=BotType.Raider,
-    )(team, engine)
+    return AINDuelAI.parametrize(function=function, bot_type=BotType.Raider)(
+        team, engine
+    )
 
 
 class _GlobalState:
@@ -23,7 +22,7 @@ class _GlobalState:
 
     def __init__(self):
         self.session = tf.Session()
-        mgr = model_saving.ModelManager.load_existing_model('_data/AIN')
+        mgr = model_saving.ModelManager.load_existing_model("_data/AIN")
         mgr.load_vars(self.session)
         self.mgr = mgr
         self.model = mgr.model
@@ -35,4 +34,3 @@ class _GlobalState:
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
-

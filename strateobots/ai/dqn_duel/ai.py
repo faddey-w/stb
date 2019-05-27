@@ -55,7 +55,6 @@ class DQNDuelAI(DuelAI):
 
 
 class Mode:
-
     def reset(self):
         pass
 
@@ -80,37 +79,31 @@ class ChaoticMode(Mode):
 
     def on_runtime(self, bot, enemy, ctl, engine):
         if self.chaos is None:
-            self.chaos = StatefulChaotic(bot, ctl, engine,
-                                         shield_period=(1000, 0))
+            self.chaos = StatefulChaotic(bot, ctl, engine, shield_period=(1000, 0))
         self.chaos.run()
 
 
 class NotMovingMode(Mode):
-
     def on_runtime(self, bot, enemy, ctl, engine):
         ctl.move = 0
 
 
 class NotBodyRotatingMode(Mode):
-
     def on_runtime(self, bot, enemy, ctl, engine):
         ctl.rotate = 0
 
 
 class NotTowerRotatingMode(Mode):
-
     def on_runtime(self, bot, enemy, ctl, engine):
         ctl.tower_rotate = 0
 
 
 class NoShieldMode(Mode):
-
     def on_runtime(self, bot, enemy, ctl, engine):
         ctl.shield = False
 
 
 class LocateAtCircleMode(Mode):
-
     def __init__(self, orientation=None, radius_ratio=0.05):
         self.configured_orientation = orientation
         self.orientation = orientation
@@ -134,13 +127,12 @@ class LocateAtCircleMode(Mode):
 
 
 class BackToCenter(Mode):
-
     def on_init(self, bot, team, engine):
         x = bot.x
         y = bot.y
         cx = engine.get_constants().world_width / 2
         cy = engine.get_constants().world_height / 2
-        angle = atan2(y-cy, x-cx)
+        angle = atan2(y - cy, x - cx)
         bot.orientation = angle
 
 
@@ -158,10 +150,9 @@ def AI(team, engine):
 
 
 class RunAI(DQNDuelAI):
-
     class Shared:
         instance = None  # type: RunAI.Shared
-        model_path = os.path.join(REPO_ROOT, '_data/DQN/2018-09-01_00-56-31/model/')
+        model_path = os.path.join(REPO_ROOT, "_data/DQN/2018-09-01_00-56-31/model/")
         self_play = False
         bot_type = BotType.Raider
         modes = [
@@ -174,12 +165,12 @@ class RunAI(DQNDuelAI):
 
         def __init__(self):
             self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])
-            self.model_mgr = model_saving.ModelManager.load_existing_model(self.model_path)
+            self.model_mgr = model_saving.ModelManager.load_existing_model(
+                self.model_path
+            )
             self.session = tf.Session()
             self.model_mgr.load_vars(self.session)
-            self.selector = self.model_mgr.model.make_selector(
-                self.state_ph,
-            )
+            self.selector = self.model_mgr.model.make_selector(self.state_ph)
             for mode in self.modes:
                 mode.reset()
 
@@ -208,20 +199,11 @@ def _randomize_position(bot, engine):
 
 
 def random_bot_type():
-    return random.choice([
-        BotType.Raider,
-        BotType.Heavy,
-        BotType.Sniper,
-    ])
+    return random.choice([BotType.Raider, BotType.Heavy, BotType.Sniper])
 
 
 def find_bullets(engine, bots):
-    bullets = {
-        bullet.origin_id: bullet
-        for bullet in engine.iter_bullets()
-    }
+    bullets = {bullet.origin_id: bullet for bullet in engine.iter_bullets()}
     return [
-        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0))
-        for bot in bots
+        bullets.get(bot.id, BulletModel(None, None, 0, bot.x, bot.y, 0)) for bot in bots
     ]
-

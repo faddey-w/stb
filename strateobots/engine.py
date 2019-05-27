@@ -12,14 +12,14 @@ class Constants:
     world_height = 1000
     epsilon = 0.000001
     bot_radius = 25
-    shield_damage_absorption = 4/5
+    shield_damage_absorption = 4 / 5
     ray_min_load_required = 0.33
     bullet_speed = 500
     # friction_factor = 0
     friction_factor = 175
     collision_factor = 0.0002
     rotation_smoothness = 5
-    min_collision_speed = 3
+    min_collision_speed = 15
     ticks_per_sec = 50
     load_with_action = 0.4
     minimum_shield_warmup = 0.75
@@ -33,9 +33,18 @@ class StbEngine:
 
     TEAMS = 0x00DD00, 0x0000FF
 
-    def __init__(self, ai1, ai2, initialize_bots,
-                 max_ticks=1000, wait_after_win=1, wait_after_win_ticks=None,
-                 teams=None, stop_all_after_finish=False, collect_replay=True):
+    def __init__(
+        self,
+        ai1,
+        ai2,
+        initialize_bots,
+        max_ticks=1000,
+        wait_after_win=1,
+        wait_after_win_ticks=None,
+        teams=None,
+        stop_all_after_finish=False,
+        collect_replay=True,
+    ):
         self.stop_all_after_finish = stop_all_after_finish
         self.teams = self.team1, self.team2 = teams or self.TEAMS
         self._bots = {}
@@ -118,11 +127,7 @@ class StbEngine:
         if with_explosions:
             clone._explosions = [
                 ExplosionModel(
-                    x=expl.x,
-                    y=expl.y,
-                    duration=expl.duration,
-                    size=expl.size,
-                    t=expl.t,
+                    x=expl.x, y=expl.y, duration=expl.duration, size=expl.size, t=expl.t
                 )
                 for expl in self._explosions
             ]
@@ -174,7 +179,8 @@ class StbEngine:
             id=len(self._bots),
             orientation=orientation,
             team=team,
-            x=x, y=y,
+            x=x,
+            y=y,
         )
         bot.tower_orientation = tower_orientation
         if hp is not None:
@@ -202,48 +208,57 @@ class StbEngine:
         shield_leak_factor = 1 - Constants.shield_half_leak_period ** (1 / tps)
 
         # process AI
-        bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = \
+        bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = (
             self._serialize_game_state()
+        )
         control1_data = control2_data = None
         try:
             control1_data = self._communicate_with_ai(
                 self.ai1,
                 bots_full_data[self.team1],
                 bots_visible_data[self.team2],
-                bullets_data, rays_data)
+                bullets_data,
+                rays_data,
+            )
             control2_data = self._communicate_with_ai(
                 self.ai2,
                 bots_full_data[self.team2],
                 bots_visible_data[self.team1],
-                bullets_data, rays_data)
+                bullets_data,
+                rays_data,
+            )
         except KeyboardInterrupt:
             raise
         except:
-            log.exception('ERROR while processing AI')
+            log.exception("ERROR while processing AI")
             self.has_error = True
             self.exc_info = sys.exc_info()
             return
         finally:
             if self.collect_replay:
-                self.replay.append({
-                    'bots': bots_full_data,
-                    'bullets': bullets_data,
-                    'rays': rays_data,
-                    'controls': {
-                        self.team1: control1_data,
-                        self.team2: control2_data,
-                    },
-                    'explosions': explosions_data,
-                })
+                self.replay.append(
+                    {
+                        "bots": bots_full_data,
+                        "bullets": bullets_data,
+                        "rays": rays_data,
+                        "controls": {
+                            self.team1: control1_data,
+                            self.team2: control2_data,
+                        },
+                        "explosions": explosions_data,
+                    }
+                )
 
         # move bullets
         for bullet in self._bullets:
             bullet.x += bullet_speed * bullet.cos
             bullet.y += bullet_speed * bullet.sin
             bullet.remaining_range -= bullet_speed
-            if 0 <= bullet.x <= world_width \
-                    and 0 <= bullet.y <= world_height \
-                    and bullet.remaining_range > 0:
+            if (
+                0 <= bullet.x <= world_width
+                and 0 <= bullet.y <= world_height
+                and bullet.remaining_range > 0
+            ):
                 next_bullets.append(bullet)
 
         # move bots
@@ -254,7 +269,9 @@ class StbEngine:
             rot_speed = typ.rot_speed
             if ctl.action == Action.ACCELERATION:
                 rot_speed += typ.bonus_rot_speed
-            bot.rot_speed = (rotation_smoothness * bot.rot_speed + ctl.rotate * rot_speed) / (rotation_smoothness + 1)
+            bot.rot_speed = (
+                rotation_smoothness * bot.rot_speed + ctl.rotate * rot_speed
+            ) / (rotation_smoothness + 1)
             ori_change = little_noise(bot.rot_speed) / tps
 
             a_angle = bot.orientation + ori_change / 2
@@ -319,7 +336,7 @@ class StbEngine:
             bot.vy += a_sin * acc + fvy
 
             # maximum speed
-            v = sqrt(bot.vx*bot.vx + bot.vy*bot.vy)
+            v = sqrt(bot.vx * bot.vx + bot.vy * bot.vy)
             if ctl.action == Action.ACCELERATION:
                 extra_speed = typ.bonus_max_speed
             else:
@@ -337,14 +354,17 @@ class StbEngine:
             bot.orientation += ori_change
             if bot.x < bot_radius:
                 bot.x = bot_radius
-            elif bot.x > world_width-bot_radius:
-                bot.x = world_width-bot_radius
+            elif bot.x > world_width - bot_radius:
+                bot.x = world_width - bot_radius
             if bot.y < bot_radius:
                 bot.y = bot_radius
-            elif bot.y > world_height-bot_radius:
-                bot.y = world_height-bot_radius
+            elif bot.y > world_height - bot_radius:
+                bot.y = world_height - bot_radius
 
-            bot.tower_rot_speed = (rotation_smoothness * bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed) / (1 + rotation_smoothness)
+            bot.tower_rot_speed = (
+                rotation_smoothness * bot.tower_rot_speed
+                + ctl.tower_rotate * typ.gun_rot_speed
+            ) / (1 + rotation_smoothness)
             bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
         # shield
@@ -367,26 +387,40 @@ class StbEngine:
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
             wants_fire = ctl.action == Action.FIRE
-            if wants_fire and not typ.shots_ray and bot.shot_ready and not bot.is_firing:
+            if (
+                wants_fire
+                and not typ.shots_ray
+                and bot.shot_ready
+                and not bot.is_firing
+            ):
                 angle = random.gauss(
-                    mu=bot.orientation + bot.tower_orientation,
-                    sigma=typ.fire_scatter
+                    mu=bot.orientation + bot.tower_orientation, sigma=typ.fire_scatter
                 )
-                bullet = BulletModel(
-                    typ, b_id, angle,
-                    bot.x, bot.y, typ.shot_range
-                )
+                bullet = BulletModel(typ, b_id, angle, bot.x, bot.y, typ.shot_range)
                 next_bullets.append(bullet)
                 bot.load -= typ.shot_energy
                 bot.is_firing = True
-            elif wants_fire and typ.shots_ray and bot.load > typ.shot_energy / tps and bot.is_firing:
+            elif (
+                wants_fire
+                and typ.shots_ray
+                and bot.load > typ.shot_energy / tps
+                and bot.is_firing
+            ):
                 # ray should already be in rays dict
                 pass
-            elif wants_fire and typ.shots_ray and bot.load > Constants.ray_min_load_required:
+            elif (
+                wants_fire
+                and typ.shots_ray
+                and bot.load > Constants.ray_min_load_required
+            ):
                 if bot.id not in self._rays:
                     bullet = BulletModel(
-                        typ, b_id, bot.orientation + bot.tower_orientation,
-                        bot.x, bot.y, typ.shot_range
+                        typ,
+                        b_id,
+                        bot.orientation + bot.tower_orientation,
+                        bot.x,
+                        bot.y,
+                        typ.shot_range,
                     )
                     self._rays[bot.id] = bullet
                 bot.is_firing = True
@@ -402,7 +436,11 @@ class StbEngine:
         # update rays
         for ray in self._rays.values():
             bot = self._bots.get(ray.origin_id)
-            if bot is None or bot.load < 0 or self._controls[bot.id].action != Action.FIRE:
+            if (
+                bot is None
+                or bot.load < 0
+                or self._controls[bot.id].action != Action.FIRE
+            ):
                 continue
             bot.load -= bot.type.shot_energy / tps
             next_rays[bot.id] = ray
@@ -431,7 +469,8 @@ class StbEngine:
                     damage = absorb_damage_by_shield(bot, damage)
                 bot.hp -= damage
                 self._explosions.append(
-                    ExplosionModel(bullet.x, bullet.y, 0.75 * tps, 0.5*bot_radius))
+                    ExplosionModel(bullet.x, bullet.y, 0.75 * tps, 0.5 * bot_radius)
+                )
                 break
             else:
                 next_bullets_after_damage.append(bullet)
@@ -449,7 +488,7 @@ class StbEngine:
                     continue
                 dx = bot.x - ray.x
                 dy = bot.y - ray.y
-                t = sqrt(dx*dx + dy*dy - d*d)
+                t = sqrt(dx * dx + dy * dy - d * d)
                 if vec_dot(ray.cos, ray.sin, dx, dy) < 0:
                     t = -t
                 if not (0 <= t <= ray.range):
@@ -459,13 +498,15 @@ class StbEngine:
                 damaged.append((t, base_dmg * hit_factor, bot))
 
                 dt = sqrt(bot_radius * bot_radius - d * d)
-                for t_i in range(int(t-dt), int(t+dt+1), 2):
-                    self._explosions.append(ExplosionModel(
-                        x=ray.x + t_i * ray.cos,
-                        y=ray.y + t_i * ray.sin,
-                        size=8,
-                        duration=2,
-                    ))
+                for t_i in range(int(t - dt), int(t + dt + 1), 2):
+                    self._explosions.append(
+                        ExplosionModel(
+                            x=ray.x + t_i * ray.cos,
+                            y=ray.y + t_i * ray.sin,
+                            size=8,
+                            duration=2,
+                        )
+                    )
             damaged.sort(key=lambda item: item[0])
             decay_factor = 1.0
             for _, dmg, bot in damaged:
@@ -480,10 +521,10 @@ class StbEngine:
         all_bots = list(self._bots.values())
         for i1, b1 in enumerate(all_bots):
             m1 = b1.type.mass
-            for i2 in range(i1+1, len(all_bots)):
+            for i2 in range(i1 + 1, len(all_bots)):
                 b2 = all_bots[i2]
                 d = dist_points(b1.x, b1.y, b2.x, b2.y)
-                if d >= 2*bot_radius:
+                if d >= 2 * bot_radius:
                     continue
                 d = max(d, eps)
 
@@ -494,16 +535,16 @@ class StbEngine:
                 e1b = vec_len2(v1x, v1y)
                 e2b = vec_len2(v2x, v2y)
 
-                c_cos = (b2.x-b1.x) / d
-                c_sin = (b2.y-b1.y) / d
+                c_cos = (b2.x - b1.x) / d
+                c_sin = (b2.y - b1.y) / d
 
-                v1r = v1x*c_cos + v1y*c_sin
-                v1t = -v1x*c_sin + v1y*c_cos
+                v1r = v1x * c_cos + v1y * c_sin
+                v1t = -v1x * c_sin + v1y * c_cos
 
-                v2r = v2x*c_cos + v2y*c_sin
-                v2t = -v2x*c_sin + v2y*c_cos
+                v2r = v2x * c_cos + v2y * c_sin
+                v2t = -v2x * c_sin + v2y * c_cos
 
-                vr = (v1r*m1 + v2r*m2) / (m1 + m2)
+                vr = (v1r * m1 + v2r * m2) / (m1 + m2)
 
                 b1.vx = vr * c_cos - v1t * c_sin
                 b1.vy = vr * c_sin + v1t * c_cos
@@ -519,18 +560,22 @@ class StbEngine:
 
                 # make damage
 
-                if abs(v1r-v2r) < min_collision_speed:
+                if abs(v1r - v2r) < min_collision_speed:
                     continue
 
                 e1a = vec_len2(b1.vx, b1.vy)
                 e2a = vec_len2(b2.vx, b2.vy)
 
                 h = max(0, m1 * (e1b - e1a) + m2 * (e2b - e2a))
-                cf1 = 2 - vec_dot(cos(b1.orientation), sin(b1.orientation), c_cos, c_sin)
-                cf2 = 2 + vec_dot(cos(b2.orientation), sin(b2.orientation), c_cos, c_sin)
+                cf1 = 2 - vec_dot(
+                    cos(b1.orientation), sin(b1.orientation), c_cos, c_sin
+                )
+                cf2 = 2 + vec_dot(
+                    cos(b2.orientation), sin(b2.orientation), c_cos, c_sin
+                )
 
-                dmg1 = collision_factor * cf1 * h * m2 / (m1+m2)
-                dmg2 = collision_factor * cf2 * h * m1 / (m1+m2)
+                dmg1 = collision_factor * cf1 * h * m2 / (m1 + m2)
+                dmg2 = collision_factor * cf2 * h * m1 / (m1 + m2)
 
                 if b1.has_shield:
                     dmg1 = absorb_damage_by_shield(b1, dmg1)
@@ -553,7 +598,8 @@ class StbEngine:
                 next_bots[bot.id] = bot
             else:
                 self._explosions.append(
-                    ExplosionModel(bot.x, bot.y, tps, 2*bot_radius))
+                    ExplosionModel(bot.x, bot.y, tps, 2 * bot_radius)
+                )
                 self._n_bots[bot.team] -= 1
                 bot.hp = 0
         self._bots = next_bots
@@ -572,9 +618,12 @@ class StbEngine:
         if self._win_reached_at is None:
             if self.win_condition_reached:
                 self._win_reached_at = self.nticks
-        return self._win_reached_at is not None \
-               and self.nticks >= self._win_reached_at + self._wait_after_win \
-               or self.nticks >= self.max_ticks or self.has_error
+        return (
+            self._win_reached_at is not None
+            and self.nticks >= self._win_reached_at + self._wait_after_win
+            or self.nticks >= self.max_ticks
+            or self.has_error
+        )
 
     @property
     def win_condition_reached(self):
@@ -589,20 +638,22 @@ class StbEngine:
                     ctl.rotate = 0
                     ctl.tower_rotate = 0
             return None
-        result = ai({
-            'tick': self.nticks,
-            'friendly_bots': friendly_bots,
-            'enemy_bots': enemy_bots,
-            'bullets': bullets,
-            'rays': rays,
-        })
+        result = ai(
+            {
+                "tick": self.nticks,
+                "friendly_bots": friendly_bots,
+                "enemy_bots": enemy_bots,
+                "bullets": bullets,
+                "rays": rays,
+            }
+        )
         if isinstance(result, dict):
-            controls = result['controls']
+            controls = result["controls"]
         else:
             controls = result
-        allowed_ids = {bot['id'] for bot in friendly_bots}
+        allowed_ids = {bot["id"] for bot in friendly_bots}
         for ctl_data in controls:
-            bot_id = ctl_data['id']
+            bot_id = ctl_data["id"]
             if bot_id not in allowed_ids:
                 continue
             ctl = self._controls[bot_id]
@@ -620,53 +671,61 @@ class StbEngine:
         explosions = []
         for bot in self.iter_bots():
             visible_fields = {
-                'id': bot.id,
-                'type': bot.type.code,
-                'hp': bot.hp_ratio,
-                'x': bot.x,
-                'y': bot.y,
-                'vx': bot.vx,
-                'vy': bot.vy,
-                'orientation': bot.orientation,
-                'tower_orientation': bot.tower_orientation,
-                'shield': bot.shield_ratio,
-                'has_shield': bot.has_shield,
-                'is_firing': bot.is_firing,
+                "id": bot.id,
+                "type": bot.type.code,
+                "hp": bot.hp_ratio,
+                "x": bot.x,
+                "y": bot.y,
+                "vx": bot.vx,
+                "vy": bot.vy,
+                "orientation": bot.orientation,
+                "tower_orientation": bot.tower_orientation,
+                "shield": bot.shield_ratio,
+                "has_shield": bot.has_shield,
+                "is_firing": bot.is_firing,
             }
             team_bots_visible_data[bot.team].append(visible_fields)
             all_fields = visible_fields.copy()
-            all_fields.update({
-                'load': bot.load,
-                'shot_ready': bot.shot_ready,
-                'shield_warmup': bot.shield_warmup,
-            })
+            all_fields.update(
+                {
+                    "load": bot.load,
+                    "shot_ready": bot.shot_ready,
+                    "shield_warmup": bot.shield_warmup,
+                }
+            )
             team_bots_full_data[bot.team].append(all_fields)
 
         for bullet in self.iter_bullets():
-            bullets.append({
-                'origin_id': bullet.origin_id,
-                'type': bullet.type.code,
-                'x': bullet.x,
-                'y': bullet.y,
-                'range': bullet.remaining_range,
-                'orientation': bullet.orientation,
-            })
+            bullets.append(
+                {
+                    "origin_id": bullet.origin_id,
+                    "type": bullet.type.code,
+                    "x": bullet.x,
+                    "y": bullet.y,
+                    "range": bullet.remaining_range,
+                    "orientation": bullet.orientation,
+                }
+            )
         for ray in self.iter_rays():
-            rays.append({
-                'type': ray.type.code,
-                'x': ray.x,
-                'y': ray.y,
-                'orientation': ray.orientation,
-                'range': ray.range,
-            })
+            rays.append(
+                {
+                    "type": ray.type.code,
+                    "x": ray.x,
+                    "y": ray.y,
+                    "orientation": ray.orientation,
+                    "range": ray.range,
+                }
+            )
         for explosion in self.iter_explosions():
-            explosions.append({
-                'x': explosion.x,
-                'y': explosion.y,
-                'duration': explosion.duration,
-                'size': explosion.size,
-                't': explosion.t,
-            })
+            explosions.append(
+                {
+                    "x": explosion.x,
+                    "y": explosion.y,
+                    "duration": explosion.duration,
+                    "size": explosion.size,
+                    "t": explosion.t,
+                }
+            )
         return team_bots_full_data, team_bots_visible_data, bullets, rays, explosions
 
     @property
@@ -684,30 +743,30 @@ class StbEngine:
 
 
 BotTypeProperties = collections.namedtuple(
-    'BotTypeProperties',
+    "BotTypeProperties",
     [
-        'code',
-        'max_hp',
-        'mass',
-        'reload_period',  # sec
-        'acc',
-        'bonus_acc',
-        'max_ahead_speed',  # points / sec
-        'bonus_max_speed',  # points / sec
-        'max_back_speed',  # points / sec
-        'rot_speed',  # radian / sec
-        'bonus_rot_speed',  # radian / sec
-        'gun_rot_speed',  # radian / sec
-        'shots_ray',  # boolean
-        'shot_range',
-        'shot_energy',  # for rays it is discharge per sec
-        'fire_scatter',  # sigma of bullet direction distribution
-        'damage',  # per-shot or per-second if ray
-        'shield_warmup_period',  # sec
-        'shield_energy',
-        'shield_regen',  # hp / sec
-        'bonus_shield_regen',  # hp / sec
-    ]
+        "code",
+        "max_hp",
+        "mass",
+        "reload_period",  # sec
+        "acc",
+        "bonus_acc",
+        "max_ahead_speed",  # points / sec
+        "bonus_max_speed",  # points / sec
+        "max_back_speed",  # points / sec
+        "rot_speed",  # radian / sec
+        "bonus_rot_speed",  # radian / sec
+        "gun_rot_speed",  # radian / sec
+        "shots_ray",  # boolean
+        "shot_range",
+        "shot_energy",  # for rays it is discharge per sec
+        "fire_scatter",  # sigma of bullet direction distribution
+        "damage",  # per-shot or per-second if ray
+        "shield_warmup_period",  # sec
+        "shield_energy",
+        "shield_regen",  # hp / sec
+        "bonus_shield_regen",  # hp / sec
+    ],
 )
 
 
@@ -793,14 +852,44 @@ class BotType(BotTypeProperties, enum.Enum):
 
 class BotModel:
 
-    __slots__ = ['id', 'team', 'type', 'hp', 'load', 'x', 'y', 'vx', 'vy',
-                 'rot_speed', 'orientation', 'tower_orientation',
-                 'is_firing',
-                 'shield', 'shield_warmup', 'tower_rot_speed']
+    __slots__ = [
+        "id",
+        "team",
+        "type",
+        "hp",
+        "load",
+        "x",
+        "y",
+        "vx",
+        "vy",
+        "rot_speed",
+        "orientation",
+        "tower_orientation",
+        "is_firing",
+        "shield",
+        "shield_warmup",
+        "tower_rot_speed",
+    ]
 
-    def __init__(self, id, team, type, x, y, orientation, tower_orientation=0.0,
-                 shield_warmup=0, _hp=None, _shield=None, load=1.0, vx=0, vy=0,
-                 rot_speed=0, tower_rot_speed=0, is_firing=False):
+    def __init__(
+        self,
+        id,
+        team,
+        type,
+        x,
+        y,
+        orientation,
+        tower_orientation=0.0,
+        shield_warmup=0,
+        _hp=None,
+        _shield=None,
+        load=1.0,
+        vx=0,
+        vy=0,
+        rot_speed=0,
+        tower_rot_speed=0,
+        is_firing=False,
+    ):
         self.id = id
         self.team = team
         self.type = type  # type: BotTypeProperties
@@ -838,8 +927,16 @@ class BotModel:
 class BulletModel:
 
     __slots__ = [
-        'type', 'origin_id', '_orientation', 'x', 'y',
-        'range', 'remaining_range', 'cos', 'sin']
+        "type",
+        "origin_id",
+        "_orientation",
+        "x",
+        "y",
+        "range",
+        "remaining_range",
+        "cos",
+        "sin",
+    ]
 
     def __init__(self, type, origin_id, orientation, x, y, range, remaining_range=None):
         self.origin_id = origin_id
@@ -865,7 +962,7 @@ class BulletModel:
 
 class ExplosionModel:
 
-    __slots__ = ['x', 'y', 'duration', 'size', 't']
+    __slots__ = ["x", "y", "duration", "size", "t"]
 
     def __init__(self, x, y, duration, size, t=0):
         self.x = x
@@ -908,11 +1005,11 @@ def vec_sum(vec, *vecs):
 
 
 def vec_dot(x1, y1, x2, y2):
-    return x1*x2 + y1*y2
+    return x1 * x2 + y1 * y2
 
 
 def half_chord_len(radius, distance):
-    return sqrt(radius*radius - distance*distance)
+    return sqrt(radius * radius - distance * distance)
 
 
 def dist_line(point_x, point_y, line_cos, line_sin, line_x, line_y):
@@ -921,7 +1018,7 @@ def dist_line(point_x, point_y, line_cos, line_sin, line_x, line_y):
 
 
 def dist_points(x1, y1, x2, y2):
-    return sqrt((x1-x2)*(x1-x2) + (y1-y2)*(y1-y2))
+    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
 
 
 def dist_bot(bot, x, y):
@@ -929,16 +1026,16 @@ def dist_bot(bot, x, y):
 
 
 def vec_len(x, y):
-    return sqrt(x*x + y*y)
+    return sqrt(x * x + y * y)
 
 
 def vec_len2(x, y):
-    return x*x + y*y
+    return x * x + y * y
 
 
 def quantize(x, q):
     r = x % q
-    if r >= q/2:
+    if r >= q / 2:
         r -= q
     return x - r
 
@@ -946,7 +1043,7 @@ def quantize(x, q):
 def little_noise(x):
     if abs(x) < Constants.epsilon:
         return x
-    return random.gauss(x, x/10)
+    return random.gauss(x, x / 10)
 
 
 class Action:
@@ -961,7 +1058,7 @@ class Action:
 
 class BotControl:
 
-    __slots__ = ['move', 'rotate', 'tower_rotate', 'action']
+    __slots__ = ["move", "rotate", "tower_rotate", "action"]
 
     def __init__(self, move=0, rotate=0, tower_rotate=0, action=Action.IDLE):
         self.move = move
@@ -971,12 +1068,11 @@ class BotControl:
 
     def __eq__(self, other):
         return all(
-            getattr(self, slot) == getattr(other, slot)
-            for slot in self.__slots__
+            getattr(self, slot) == getattr(other, slot) for slot in self.__slots__
         )
 
     def __repr__(self):
-        return 'BotControl(move={}, rotate={}, tower_rotate={}, action={})'.format(
+        return "BotControl(move={}, rotate={}, tower_rotate={}, action={})".format(
             self.move, self.rotate, self.tower_rotate, self.action
         )
 

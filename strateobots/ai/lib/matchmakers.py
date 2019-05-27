@@ -31,7 +31,6 @@ class MatchmakerStorage:
 
 
 class MatchmakerFunction:
-
     def __init__(self, matchmaker_store, session):
         self.storage = matchmaker_store  # type: MatchmakerStorage
         self.session = session

@@ -5,20 +5,24 @@ from .util import SelectOneAction
 
 
 class QualityFunction:
-
     def __init__(self, move, rotate, tower_rotate, fire, shield):
         self.move = move
         self.rotate = rotate
         self.tower_rotate = tower_rotate
         self.fire = fire
         self.shield = shield
-        self.quality = tf.add_n([
-            self.move.get_quality(),
-            self.rotate.get_quality(),
-            self.tower_rotate.get_quality(),
-            self.fire.get_quality(),
-            self.shield.get_quality(),
-        ]) / 5.0
+        self.quality = (
+            tf.add_n(
+                [
+                    self.move.get_quality(),
+                    self.rotate.get_quality(),
+                    self.tower_rotate.get_quality(),
+                    self.fire.get_quality(),
+                    self.shield.get_quality(),
+                ]
+            )
+            / 5.0
+        )
 
     def get_quality(self):
         return self.quality
@@ -36,24 +40,22 @@ class QualityFunctionModelset:
 
     def __init__(self, move, rotate, tower_rotate, fire, shield):
         with tf.variable_scope(self.name):
-            with tf.variable_scope('move'):
+            with tf.variable_scope("move"):
                 self.move = self.node_cls(3, **move)
-            with tf.variable_scope('rotate'):
+            with tf.variable_scope("rotate"):
                 self.rotate = self.node_cls(3, **rotate)
-            with tf.variable_scope('tower_rotate'):
+            with tf.variable_scope("tower_rotate"):
                 self.tower_rotate = self.node_cls(3, **tower_rotate)
-            with tf.variable_scope('fire'):
+            with tf.variable_scope("fire"):
                 self.fire = self.node_cls(2, **fire)
-            with tf.variable_scope('shield'):
+            with tf.variable_scope("shield"):
                 self.shield = self.node_cls(2, **shield)
 
     @classmethod
     def AllTheSame(cls, **kwargs):
-        return cls(move=kwargs,
-                   rotate=kwargs,
-                   tower_rotate=kwargs,
-                   fire=kwargs,
-                   shield=kwargs)
+        return cls(
+            move=kwargs, rotate=kwargs, tower_rotate=kwargs, fire=kwargs, shield=kwargs
+        )
 
     def apply(self, state, action):
         move_action = action[..., 0:3]
@@ -87,7 +89,6 @@ class QualityFunctionModelset:
 
 
 class SelectAction:
-
     def __init__(self, qfunc_modelset, state):
         """
         :type qfunc_modelset: QualityFunctionModelset
@@ -101,24 +102,31 @@ class SelectAction:
         self.select_shield = SelectOneAction(qfunc_modelset.shield, state)
         self.select_fire = SelectOneAction(qfunc_modelset.fire, state)
 
-        self.action = tf.concat([
-            self.select_move.action,
-            self.select_rotate.action,
-            self.select_tower_rotate.action,
-            self.select_fire.action,
-            self.select_shield.action,
-        ], -1)
-        self.max_q = tf.add_n([
-            self.select_move.max_q,
-            self.select_rotate.max_q,
-            self.select_tower_rotate.max_q,
-            self.select_shield.max_q,
-            self.select_fire.max_q,
-        ]) / 5.0
+        self.action = tf.concat(
+            [
+                self.select_move.action,
+                self.select_rotate.action,
+                self.select_tower_rotate.action,
+                self.select_fire.action,
+                self.select_shield.action,
+            ],
+            -1,
+        )
+        self.max_q = (
+            tf.add_n(
+                [
+                    self.select_move.max_q,
+                    self.select_rotate.max_q,
+                    self.select_tower_rotate.max_q,
+                    self.select_shield.max_q,
+                    self.select_fire.max_q,
+                ]
+            )
+            / 5.0
+        )
 
 
 class ModelbasedFunction:
-
     def __init__(self, modelset, session):
         self.modelset = modelset
         self.state_ph = tf.placeholder(tf.float32, [1, state2vec.vector_length])

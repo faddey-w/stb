@@ -2,13 +2,11 @@ import random
 
 
 class _GeneratorBase:
-
     def __call__(self):
         raise NotImplementedError
 
 
 class value(_GeneratorBase):
-
     def __init__(self, min_value, max_value):
         self.min_value = min_value
         self.range = max_value - min_value
@@ -18,7 +16,6 @@ class value(_GeneratorBase):
 
 
 class categorical(_GeneratorBase):
-
     def __init__(self, *categories):
         self.categories = categories
 
@@ -27,7 +24,6 @@ class categorical(_GeneratorBase):
 
 
 class structure(_GeneratorBase):
-
     def __init__(self, struct):
         self.struct = struct
 
@@ -44,8 +40,10 @@ class structure(_GeneratorBase):
             return typ(self._generate(val) for val in struct)
         elif isinstance(struct, dict):
             typ = struct.__class__
-            return typ((self._generate(key), self._generate(val))
-                       for key, val in struct.items())
+            return typ(
+                (self._generate(key), self._generate(val))
+                for key, val in struct.items()
+            )
         elif isinstance(struct, str):
             return struct
         else:

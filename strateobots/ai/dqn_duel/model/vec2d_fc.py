@@ -10,7 +10,6 @@ log = logging.getLogger(__name__)
 
 
 class QualityFunctionModel:
-
     def __new__(cls, **kwargs):
         self = super().__new__(cls)
         self.construct_params = kwargs
@@ -19,12 +18,12 @@ class QualityFunctionModel:
     def __init__(self, coord_cfg, angle_cfg, fc_cfg, exp_layers):
         assert len(coord_cfg) == len(angle_cfg)
         assert len(exp_layers) <= len(fc_cfg)
-        assert fc_cfg[-1] == 7+1  # action2vec.vector_length - 4 + 1
+        assert fc_cfg[-1] == 7 + 1  # action2vec.vector_length - 4 + 1
 
         self.vec2d_cfg = tuple(zip(coord_cfg, angle_cfg))
         self.exp_layers_cfg = tuple(exp_layers)
         self.fc_cfg = tuple(fc_cfg)
-        self.name = 'QFunc'
+        self.name = "QFunc"
         self.var_list = []
 
         self.vec2d_layers = []
@@ -33,15 +32,15 @@ class QualityFunctionModel:
         with tf.variable_scope(self.name):
             coord_in, angle_in = 2, 2
             for i, (coord_out, angle_out) in enumerate(self.vec2d_cfg):
-                lx = layers.Linear('L{}x'.format(i), coord_in, coord_out)
-                ly = layers.Linear('L{}y'.format(i), coord_in, coord_out, lx.weight)
-                la = layers.Linear('L{}a'.format(i), coord_in + angle_in, angle_out)
+                lx = layers.Linear("L{}x".format(i), coord_in, coord_out)
+                ly = layers.Linear("L{}y".format(i), coord_in, coord_out, lx.weight)
+                la = layers.Linear("L{}a".format(i), coord_in + angle_in, angle_out)
                 self.vec2d_layers.append((lx, ly, la))
                 coord_in, angle_in = coord_out, angle_out
 
             fc_in = 3 + coord_in + 2 * angle_in
             for i, fc_out in enumerate(self.fc_cfg):
-                fc = layers.Linear('FC{}'.format(i), fc_in, fc_out)
+                fc = layers.Linear("FC{}".format(i), fc_in, fc_out)
                 self.fc_layers.append(fc)
                 fc_in = fc_out
 
@@ -65,37 +64,32 @@ class QualityFunction:
         self.model = model  # type: QualityFunctionModel
         self.state = state  # type: tf.Tensor
         self.action = select_features(
-            action, action2vec,
-            'rotate_left',
-            'rotate_no',
-            'rotate_right',
-            'tower_rotate_left',
-            'tower_rotate_no',
-            'tower_rotate_right',
-            'fire'
+            action,
+            action2vec,
+            "rotate_left",
+            "rotate_no",
+            "rotate_right",
+            "tower_rotate_left",
+            "tower_rotate_no",
+            "tower_rotate_right",
+            "fire",
         )  # type: tf.Tensor
 
         self.lin0 = select_features(
-            state, state2vec,
-            (0, 'hp_ratio'),
+            state,
+            state2vec,
+            (0, "hp_ratio"),
             # (0, 'load'),
-            (1, 'hp_ratio'),
-            (1, 'load'),
+            (1, "hp_ratio"),
+            (1, "load"),
         )
-        self.x0 = select_features(
-            state, state2vec,
-            (0, 'x'),
-            (1, 'x'),
-        )
-        self.y0 = select_features(
-            state, state2vec,
-            (0, 'y'),
-            (1, 'y'),
-        )
+        self.x0 = select_features(state, state2vec, (0, "x"), (1, "x"))
+        self.y0 = select_features(state, state2vec, (0, "y"), (1, "y"))
         self.angles0 = select_features(
-            state, state2vec,
-            (0, 'orientation'),
-            (0, 'tower_orientation'),
+            state,
+            state2vec,
+            (0, "orientation"),
+            (0, "tower_orientation"),
             # (1, 'rotation'),
             # (1, 'tower_rotation'),
         )
@@ -104,7 +98,7 @@ class QualityFunction:
         def make_activation(dim, activation=tf.nn.relu, angle=False):
             def function(vec):
                 if angle:
-                    vec = (vec % (2*pi)) - pi
+                    vec = (vec % (2 * pi)) - pi
                 half = dim // 2
                 vec1 = activation(vec[..., :half])
                 vec2 = tf.identity(vec[..., half:])
@@ -153,10 +147,11 @@ class QualityFunction:
         return self.quality
 
     def call(self, state, action, session):
-        return session.run(self.quality, feed_dict={
-            self.state: state,
-            self.action: action,
-        })
+        return session.run(
+            self.quality, feed_dict={self.state: state, self.action: action}
+        )
+
+
 Model = QualityFunctionModel
 
 
@@ -164,5 +159,5 @@ def select_features(tensor, mapper, *feature_names):
     feature_tensors = []
     for ftr_name in feature_names:
         idx = mapper[ftr_name]
-        feature_tensors.append(tensor[..., idx:idx+1])
+        feature_tensors.append(tensor[..., idx : idx + 1])
     return tf.concat(feature_tensors, -1)

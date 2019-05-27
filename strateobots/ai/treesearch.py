@@ -1,9 +1,15 @@
 from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
 import numpy as np
+
 # from scipy import optimize
 from strateobots.engine import dist_points, vec_len, dist_line, vec_dot
 from strateobots.engine import Constants, BotType, StbEngine
-from strateobots.ai.simple_duel import norm_angle, navigate_gun, navigate_shortest, should_fire
+from strateobots.ai.simple_duel import (
+    norm_angle,
+    navigate_gun,
+    navigate_shortest,
+    should_fire,
+)
 from strateobots.util import objedict
 import itertools
 import random
@@ -16,22 +22,18 @@ log = logging.getLogger(__name__)
 
 
 class AIModule(base.AIModule):
-
     def __init__(self):
         self.config = {
             # should be: depth * resolution ~= 150
             # for all branching^depth should be approximately same
-            'MCTS-0': lambda: MCTSAiFunction(20, [(2, 4)]),
-            'MCTS-1': lambda: MCTSAiFunction(37, [(4, 3), (2, 1)]),
-            'MCTS-2': lambda: MCTSAiFunction(30, [(3, 3), [2, 2]]),
-            'MCTS-3': lambda: MCTSAiFunction(22, [(2, 7)]),
+            "MCTS-0": lambda: MCTSAiFunction(20, [(2, 4)]),
+            "MCTS-1": lambda: MCTSAiFunction(37, [(4, 3), (2, 1)]),
+            "MCTS-2": lambda: MCTSAiFunction(30, [(3, 3), [2, 2]]),
+            "MCTS-3": lambda: MCTSAiFunction(22, [(2, 7)]),
         }
 
     def list_ai_function_descriptions(self):
-        return [
-            (name, name)
-            for name, func in self.config.items()
-        ]
+        return [(name, name) for name, func in self.config.items()]
 
     def list_bot_initializers(self):
         return []
@@ -41,7 +43,6 @@ class AIModule(base.AIModule):
 
 
 class MCTSAiFunction:
-
     def __init__(self, resolution, branching_config):
         self.resolution = resolution
         self.branching = []
@@ -54,12 +55,12 @@ class MCTSAiFunction:
         self.dt = 1.0 / Constants.ticks_per_sec
 
     def __call__(self, state):
-        bot = state['friendly_bots'][0]
-        enemy = state['enemy_bots'][0]
-        bottype = BotType.by_code(bot['type'])
-        enemytype = BotType.by_code(enemy['type'])
+        bot = state["friendly_bots"][0]
+        enemy = state["enemy_bots"][0]
+        bottype = BotType.by_code(bot["type"])
+        enemytype = BotType.by_code(enemy["type"])
 
-        if enemy['is_firing']:
+        if enemy["is_firing"]:
             if enemytype.shots_ray:
                 self.enemy_load -= self.dt * Constants.ray_charge_per_sec
             else:
@@ -68,23 +69,28 @@ class MCTSAiFunction:
         else:
             self.enemy_load += self.dt / enemytype.cd_period
             self.since_enemy_fire += 1
-        if enemy['has_shield']:
+        if enemy["has_shield"]:
             self.since_enemy_shield = 0
         else:
             self.since_enemy_shield += 1
 
-        possible_time_warming = self.dt * min(self.since_enemy_shield, self.since_enemy_fire)
+        possible_time_warming = self.dt * min(
+            self.since_enemy_shield, self.since_enemy_fire
+        )
         warmup = max(1.0, possible_time_warming / enemytype.shield_warmup_period)
 
         value, ctl = mcts_ai(
-            bot, enemy, bottype, enemytype,
+            bot,
+            enemy,
+            bottype,
+            enemytype,
             resolution=self.resolution,
             depth=self.depth,
             heuristic=_heuristic,
             branching=self.branching,
             enemy_modelled_fields={
-                'load': min(1, self.enemy_load),
-                'shield_warmup': warmup,
+                "load": min(1, self.enemy_load),
+                "shield_warmup": warmup,
             },
         )
         # ctl = {'id': bot['id']}
@@ -96,34 +102,44 @@ class MCTSAiFunction:
         return [ctl]
 
 
-def mcts_ai(bot, enemy, bottype, enemytype, resolution, depth, branching,
-            heuristic, enemy_modelled_fields):
+def mcts_ai(
+    bot,
+    enemy,
+    bottype,
+    enemytype,
+    resolution,
+    depth,
+    branching,
+    heuristic,
+    enemy_modelled_fields,
+):
 
-    all_actions = tuple(itertools.product(
-        [
-            _target_enemy,
-        ],
-        [
-            partial(_fire_shield_policy, bottype=bottype, shield=True),
-            partial(_fire_shield_policy, bottype=bottype, shield=False),
-        ],
-        [
-            partial(_frontal_move, direction=+1),
-            partial(_frontal_move, direction=-1),
-            partial(_flank_move, side=+1),
-            partial(_flank_move, side=-1),
-        ],
-    ))
+    all_actions = tuple(
+        itertools.product(
+            [_target_enemy],
+            [
+                partial(_fire_shield_policy, bottype=bottype, shield=True),
+                partial(_fire_shield_policy, bottype=bottype, shield=False),
+            ],
+            [
+                partial(_frontal_move, direction=+1),
+                partial(_frontal_move, direction=-1),
+                partial(_flank_move, side=+1),
+                partial(_flank_move, side=-1),
+            ],
+        )
+    )
     n_actions = len(all_actions)
 
     def sim_ai():
         def function(_state):
-            b = _state['friendly_bots'][0]
-            e = _state['enemy_bots'][0]
-            ctl = {'id': b.id}
+            b = _state["friendly_bots"][0]
+            e = _state["enemy_bots"][0]
+            ctl = {"id": b.id}
             for action in function.actions_list:
                 ctl.update(action(b, e))
             return [ctl]
+
         function.actions_list = []
         return function
 
@@ -136,47 +152,55 @@ def mcts_ai(bot, enemy, bottype, enemytype, resolution, depth, branching,
     sim_bot = initial_game.add_bot(
         bottype,
         initial_game.team1,
-        bot['x'], bot['y'],
-        bot['orientation'], bot['tower_orientation'],
-        bot['hp'] * bottype.max_hp,
+        bot["x"],
+        bot["y"],
+        bot["orientation"],
+        bot["tower_orientation"],
+        bot["hp"] * bottype.max_hp,
     )
-    sim_bot.is_firing = bot['is_firing']
-    sim_bot.load = bot['load']
-    sim_bot.shield = bot['shield']
-    sim_bot.shield_warmup = bot['shield_warmup']
-    sim_bot.vx = bot['vx']
-    sim_bot.vy = bot['vy']
+    sim_bot.is_firing = bot["is_firing"]
+    sim_bot.load = bot["load"]
+    sim_bot.shield = bot["shield"]
+    sim_bot.shield_warmup = bot["shield_warmup"]
+    sim_bot.vx = bot["vx"]
+    sim_bot.vy = bot["vy"]
 
     sim_enemy = initial_game.add_bot(
         enemytype,
         initial_game.team2,
-        enemy['x'], enemy['y'],
-        enemy['orientation'], enemy['tower_orientation'],
-        enemy['hp'] * enemytype.max_hp,
+        enemy["x"],
+        enemy["y"],
+        enemy["orientation"],
+        enemy["tower_orientation"],
+        enemy["hp"] * enemytype.max_hp,
     )
-    sim_enemy.is_firing = enemy['is_firing']
-    sim_enemy.shield = enemy['shield']
-    sim_enemy.vx = enemy['vx']
-    sim_enemy.vy = enemy['vy']
+    sim_enemy.is_firing = enemy["is_firing"]
+    sim_enemy.shield = enemy["shield"]
+    sim_enemy.vx = enemy["vx"]
+    sim_enemy.vy = enemy["vy"]
     for key, val in enemy_modelled_fields.items():
         setattr(sim_enemy, key, val)
 
-    initial_branches = [
-        (i, random.randrange(n_actions))
-        for i in range(n_actions)
-    ]
+    initial_branches = [(i, random.randrange(n_actions)) for i in range(n_actions)]
 
     value_stats = np.zeros([n_actions, 2], dtype=np.float)
     for st_act_idx in initial_branches:
-        v, (i, _) = _treesearch_subtree(initial_game, st_act_idx, all_actions,
-                                        branching, resolution, heuristic, depth)
+        v, (i, _) = _treesearch_subtree(
+            initial_game,
+            st_act_idx,
+            all_actions,
+            branching,
+            resolution,
+            heuristic,
+            depth,
+        )
         value_stats[i] += v, 1
 
     values = value_stats[:, 0] / np.maximum(1, value_stats[:, 1])
     best_action_i = np.argmax(values)
     value, best_action_list = values[best_action_i], all_actions[best_action_i]
 
-    ctl = {'id': bot['id']}
+    ctl = {"id": bot["id"]}
     bot_obj = objedict(bot)
     enemy_obj = objedict(enemy)
     for action in best_action_list:
@@ -185,15 +209,26 @@ def mcts_ai(bot, enemy, bottype, enemytype, resolution, depth, branching,
     return value, ctl
 
 
-def _treesearch_subtree(initial_game, starting_action_idx, all_actions, branching, resolution, heuristic, depth):
+def _treesearch_subtree(
+    initial_game,
+    starting_action_idx,
+    all_actions,
+    branching,
+    resolution,
+    heuristic,
+    depth,
+):
     n_actions = len(all_actions)
-    stack = [_Matrix(n_actions, initial_game, 1, explicit_branches=[starting_action_idx])]
+    stack = [
+        _Matrix(n_actions, initial_game, 1, explicit_branches=[starting_action_idx])
+    ]
     while stack:
         top = stack[-1]
         n_branches = branching[len(stack) - 1]
         if top.tests_left > 0:
-            game = top.game.clone(with_explosions=False, with_replay=False,
-                                  using_class=_SimulationEngine)
+            game = top.game.clone(
+                with_explosions=False, with_replay=False, using_class=_SimulationEngine
+            )
 
             bot_act_idx, enemy_act_idx = top.next_idx
             game.ai1.actions_list[:] = all_actions[bot_act_idx]
@@ -229,10 +264,14 @@ class _Matrix:
         self.game = game
         self.n_actions = n_actions
         # self.mat = np.zeros([n_actions, n_actions], dtype=np.float)
-        self._selected_actions = [
-            (b_act, random.choice(range(n_actions)))
-            for b_act in random.sample(range(n_actions), n_branches)
-        ] if explicit_branches is None else explicit_branches
+        self._selected_actions = (
+            [
+                (b_act, random.choice(range(n_actions)))
+                for b_act in random.sample(range(n_actions), n_branches)
+            ]
+            if explicit_branches is None
+            else explicit_branches
+        )
         self.values = np.zeros([n_branches], dtype=np.float)
         self.tests_left = n_branches
 
@@ -249,7 +288,6 @@ class _Matrix:
 
 
 class _SimulationEngine(StbEngine):
-
     def _serialize_game_state(self):
         team_bots_visible_data = {t: [] for t in self.teams}
         team_bots_full_data = {t: [] for t in self.teams}
@@ -303,7 +341,7 @@ def _heuristic(game):
 
 
 def _target_enemy(bot, enemy):
-    return {'tower_rotate': navigate_gun(bot, enemy)}
+    return {"tower_rotate": navigate_gun(bot, enemy)}
 
 
 def _fire_shield_policy(bot, enemy, bottype, shield):
@@ -311,13 +349,13 @@ def _fire_shield_policy(bot, enemy, bottype, shield):
         fire = False
     else:
         fire = should_fire(bot, enemy, bottype.shot_range)
-    return {'shield': shield, 'fire': fire}
+    return {"shield": shield, "fire": fire}
 
 
 def _frontal_move(bot, enemy, direction):
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
-    return {'move': direction, 'rotate': rotate}
+    return {"move": direction, "rotate": rotate}
 
 
 def _flank_move(bot, enemy, side):
@@ -335,9 +373,8 @@ def _flank_move(bot, enemy, side):
     else:
         rotate = -1
 
-    return {'move': +1, 'rotate': rotate}
+    return {"move": +1, "rotate": rotate}
 
 
 def _const_move(bot, enemy, move, rotate):
-    return {'move': move, 'rotate': rotate}
-
+    return {"move": move, "rotate": rotate}

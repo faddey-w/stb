@@ -10,20 +10,16 @@ log = logging.getLogger(__name__)
 
 
 class AIModule(base.AIModule):
-
     def __init__(self):
         self.config = {
-            'short': (CloseDistanceAttack, 'Close distance attack'),
-            'distance': (LongDistanceAttack, 'Long distance attack'),
-            'ramming': (RammingAttack, 'Ramming attack'),
-            'hold': (HoldPosition, 'Hold position'),
+            "short": (CloseDistanceAttack, "Close distance attack"),
+            "distance": (LongDistanceAttack, "Long distance attack"),
+            "ramming": (RammingAttack, "Ramming attack"),
+            "hold": (HoldPosition, "Hold position"),
         }
 
     def list_ai_function_descriptions(self):
-        return [
-            (name, key)
-            for key, (func, name) in self.config.items()
-        ]
+        return [(name, key) for key, (func, name) in self.config.items()]
 
     def list_bot_initializers(self):
         return []
@@ -32,14 +28,13 @@ class AIModule(base.AIModule):
         return self.config[parameters][0]()
 
     def get_close_distance_attack(self):
-        return self.construct_ai_function(None, 'short')
+        return self.construct_ai_function(None, "short")
 
 
 class _BaseFunction:
-
     def __call__(self, state):
-        bot = objedict(state['friendly_bots'][0])
-        enemy = objedict(state['enemy_bots'][0])
+        bot = objedict(state["friendly_bots"][0])
+        enemy = objedict(state["enemy_bots"][0])
         bottype = BotType.by_code(bot.type)
         enemytype = BotType.by_code(enemy.type)
         ctl = objedict()
@@ -52,7 +47,6 @@ class _BaseFunction:
 
 
 class CloseDistanceAttack(_BaseFunction):
-
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
         orbit = bottype.shot_range / 3
 
@@ -72,7 +66,6 @@ class CloseDistanceAttack(_BaseFunction):
 
 
 class LongDistanceAttack(_BaseFunction):
-
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
 
         ctl.update(keep_distance(bot, enemy, bottype))
@@ -97,7 +90,6 @@ class LongDistanceAttack(_BaseFunction):
 
 
 class RammingAttack(_BaseFunction):
-
     def __init__(self):
         self.last_v = None
         self.is_ramming = True
@@ -138,7 +130,10 @@ class RammingAttack(_BaseFunction):
             contact_time = max(ts)
             contact_speed = v_r + max_acc * contact_time
         else:
-            contact_time = time_to_max_speed + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
+            contact_time = (
+                time_to_max_speed
+                + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
+            )
             contact_speed = bottype.max_ahead_speed
 
         if bot.has_shield:
@@ -156,9 +151,17 @@ class RammingAttack(_BaseFunction):
 
         action = Action.IDLE
 
-        can_ram_with_shield = shield_start_time + 0.1 < contact_time < shield_start_time + 0.9 * shield_max_time
+        can_ram_with_shield = (
+            shield_start_time + 0.1
+            < contact_time
+            < shield_start_time + 0.9 * shield_max_time
+        )
         if can_ram_with_shield and do_ramming:
-            shield = shield_start_time + 0.1 < contact_time < shield_start_time + min(1, 0.9 * shield_max_time)
+            shield = (
+                shield_start_time + 0.1
+                < contact_time
+                < shield_start_time + min(1, 0.9 * shield_max_time)
+            )
         else:
             shield = False
         if shield:
@@ -182,7 +185,6 @@ class RammingAttack(_BaseFunction):
 
 
 class HoldPosition(LongDistanceAttack):
-
     def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
         super(HoldPosition, self)._make_decision(bot, bottype, enemy, enemytype, ctl)
         ctl.move = 0
@@ -196,7 +198,9 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     ori_angle = norm_angle(bot.orientation)
 
-    if dist > apocenter_at_back_coeff * orbit_radius or not is_at_back(enemy, enemy_angle + pi):
+    if dist > apocenter_at_back_coeff * orbit_radius or not is_at_back(
+        enemy, enemy_angle + pi
+    ):
         # decide - move to left side from enemy or to right
         # determine target point - nearest point on orbit
         pt_angle = asin(orbit_radius / dist) if orbit_radius < dist else pi / 2
@@ -216,21 +220,20 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
         else:
             move = 0
 
-        pt_dist = abs(dist**2 - orbit_radius**2) ** 0.5
-        move_aim = (
-            bot.x + pt_dist * cos(pt_angle),
-            bot.y + pt_dist * sin(pt_angle),
-        )
+        pt_dist = abs(dist ** 2 - orbit_radius ** 2) ** 0.5
+        move_aim = (bot.x + pt_dist * cos(pt_angle), bot.y + pt_dist * sin(pt_angle))
     else:
         move = 0
         rotate = 0
         target_orientation = ori_angle
         move_aim = bot.x, bot.y
-    return dict(move=move, rotate=rotate,
-                orientation=target_orientation,
-                move_aim_x=move_aim[0],
-                move_aim_y=move_aim[1],
-                )
+    return dict(
+        move=move,
+        rotate=rotate,
+        orientation=target_orientation,
+        move_aim_x=move_aim[0],
+        move_aim_y=move_aim[1],
+    )
 
 
 def keep_distance(bot, enemy, bottype, max_ahead_v=100):
@@ -250,12 +253,17 @@ def keep_distance(bot, enemy, bottype, max_ahead_v=100):
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
 
-    return dict(move=move, rotate=rotate, orientation=enemy_angle,
-                move_aim_x=enemy.x, move_aim_y=enemy.y)
+    return dict(
+        move=move,
+        rotate=rotate,
+        orientation=enemy_angle,
+        move_aim_x=enemy.x,
+        move_aim_y=enemy.y,
+    )
 
 
 def norm_angle(angle):
-    angle %= (2 * pi)
+    angle %= 2 * pi
     if angle > pi:
         angle -= 2 * pi
     return angle
@@ -305,13 +313,13 @@ def navigate_gun(bot, enemy, ctl):
 
 def solve_square_equation(a, b, c):
     """"Solve equation a*x^2 + b*x + c = 0 in real numbers"""
-    d = b*b - 4*a*c
+    d = b * b - 4 * a * c
     if d < 0:
         return []
     if d == 0:
-        return [-b / (2*a)]
+        return [-b / (2 * a)]
     d_sqrt = sqrt(d)
-    return [(-b+d_sqrt) / (2*a), (-b-d_sqrt) / (2*a)]
+    return [(-b + d_sqrt) / (2 * a), (-b - d_sqrt) / (2 * a)]
 
 
 def get_angle(from_bot, to_bot):
@@ -323,4 +331,4 @@ def get_angle(from_bot, to_bot):
 def is_at_back(bot, angle):
     gun_angle = bot.orientation + bot.tower_orientation
     need_to_rotate = abs(norm_angle(angle - gun_angle))
-    return need_to_rotate > 2*pi/3
+    return need_to_rotate > 2 * pi / 3

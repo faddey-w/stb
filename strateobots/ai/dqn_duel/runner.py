@@ -6,17 +6,21 @@ from strateobots.ai.lib.util import find_bullets
 from strateobots.engine import BotType, StbEngine, BotControl
 
 
-def run_one_game(replay_memory, ai1_func, ai2_func, frames_per_action=1,
-                 max_ticks=1000, world_size=300, report=None, remember_for_2=False):
+def run_one_game(
+    replay_memory,
+    ai1_func,
+    ai2_func,
+    frames_per_action=1,
+    max_ticks=1000,
+    world_size=300,
+    report=None,
+    remember_for_2=False,
+):
 
     ai1_cls = DQNTrainingAI.parametrize(bot_type=BotType.Raider, function=ai1_func)
     ai2_cls = DQNTrainingAI.parametrize(bot_type=BotType.Raider, function=ai2_func)
 
-    engine = StbEngine(
-        ai1_cls, ai2_cls,
-        max_ticks,
-        wait_after_win=0,
-    )
+    engine = StbEngine(ai1_cls, ai2_cls, max_ticks, wait_after_win=0)
     bot1, bot2 = engine.ai1.bot, engine.ai2.bot
     bullet1, bullet2 = find_bullets(engine, [bot1, bot2])
     state1_before = state2vec((bot1, bot2, bullet1, bullet2))
@@ -82,7 +86,7 @@ class DQNTrainingAI(DuelAI):
         bot, enemy, ctl = self._get_bots()
         if None in (bot, enemy):
             return
-        if hasattr(self.function, 'set_state_vector'):
+        if hasattr(self.function, "set_state_vector"):
             self.function.set_state_vector(state_vector)
         self.function(bot, enemy, self._ctl, self.engine)
 
@@ -98,8 +102,4 @@ class DQNTrainingAI(DuelAI):
 
 
 def random_bot_type():
-    return random.choice([
-        BotType.Raider,
-        BotType.Heavy,
-        BotType.Sniper,
-    ])
+    return random.choice([BotType.Raider, BotType.Heavy, BotType.Sniper])

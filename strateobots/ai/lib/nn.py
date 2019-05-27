@@ -2,16 +2,15 @@ import tensorflow as tf
 
 
 class Linear:
-
     def __init__(self, name, in_dim, out_dim, shared_weight=None, activation=None):
         self.name = name
         self.in_dim = in_dim
         self.out_dim = out_dim
         self.activation = activation
         with tf.variable_scope(self.name):
-            self.weight = shared_weight or tf.get_variable('W', [in_dim, out_dim])
+            self.weight = shared_weight or tf.get_variable("W", [in_dim, out_dim])
             assert self.weight.shape.as_list() == [in_dim, out_dim]
-            self.bias = tf.get_variable('B', [1, out_dim])
+            self.bias = tf.get_variable("B", [1, out_dim])
         if self.weight is shared_weight:
             self.var_list = [self.bias]
         else:
@@ -25,7 +24,7 @@ class Linear:
         return self.Apply(x, self, activation)
 
     class Apply:
-        def __init__(self, x, model: 'Linear', activation):
+        def __init__(self, x, model: "Linear", activation):
             self.name = model.name
             self.model = model
             self.x = x
@@ -45,22 +44,30 @@ class Linear:
             i += 1
             input_dim = out_dim
             return self
+
         return factory
 
 
 class Residual(Linear):
-
-    def __init__(self, name, in_dim, out_dim, shared_weight=None, activation=None, allow_skip_transform=False):
+    def __init__(
+        self,
+        name,
+        in_dim,
+        out_dim,
+        shared_weight=None,
+        activation=None,
+        allow_skip_transform=False,
+    ):
         super(Residual, self).__init__(name, in_dim, out_dim, shared_weight, activation)
         if in_dim == out_dim and allow_skip_transform:
             self.transform = None
         else:
             with tf.variable_scope(self.name):
-                self.transform = tf.get_variable('T', [in_dim, out_dim])
+                self.transform = tf.get_variable("T", [in_dim, out_dim])
             self.var_list.append(self.transform)
 
     class Apply:
-        def __init__(self, x, model: 'Residual', activation):
+        def __init__(self, x, model: "Residual", activation):
             self.name = model.name
             self.model = model
             self.x = x
@@ -75,7 +82,6 @@ class Residual(Linear):
 
 
 class ResidualV2:
-
     def __init__(self, name, in_dim, hidden_dim, out_dim, activation=None):
         self.name = name
         self.in_dim = in_dim
@@ -83,8 +89,8 @@ class ResidualV2:
         self.out_dim = out_dim
         self.activation = activation
 
-        self.resid = Linear(name + '/Resid', in_dim, hidden_dim)
-        self.join = Linear(name + '/Join', in_dim + hidden_dim, out_dim)
+        self.resid = Linear(name + "/Resid", in_dim, hidden_dim)
+        self.join = Linear(name + "/Join", in_dim + hidden_dim, out_dim)
 
         self.var_list = [*self.resid.var_list, *self.join.var_list]
 
@@ -96,7 +102,7 @@ class ResidualV2:
         return self.Apply(x, self, activation)
 
     class Apply:
-        def __init__(self, x, model: 'ResidualV2', activation):
+        def __init__(self, x, model: "ResidualV2", activation):
             self.resid = model.resid.apply(x, activation)
             resid_arg = tf.concat([x, self.resid.out], -1)
             self.join = model.join.apply(resid_arg, tf.identity)
@@ -104,14 +110,13 @@ class ResidualV2:
 
 
 class ResidualV3:
-
     def __init__(self, name, n_dim, activation=None):
         self.name = name
         self.n_dim = n_dim
         self.activation = activation
 
-        self.resid = Linear(name + '/Resid', n_dim, n_dim)
-        self.mask = tf.get_variable(name + '/M', [n_dim])
+        self.resid = Linear(name + "/Resid", n_dim, n_dim)
+        self.mask = tf.get_variable(name + "/M", [n_dim])
 
         self.var_list = [*self.resid.var_list, self.mask]
 
@@ -123,20 +128,19 @@ class ResidualV3:
         return self.Apply(x, self, activation)
 
     class Apply:
-        def __init__(self, x, model: 'ResidualV3', activation):
+        def __init__(self, x, model: "ResidualV3", activation):
             self.resid = model.resid.apply(x, activation)
             self.out = x + model.mask * self.resid.out
 
 
 class LayerChain:
-
     def __init__(self, factory, *arg_lists, **kwargs):
         self.layers = []
         for args in arg_lists:
             if not isinstance(args, (list, tuple)):
                 args = (args,)
             self.layers.append(factory(*args, **kwargs))
-        if self.layers and hasattr(self.layers[0], 'name'):
+        if self.layers and hasattr(self.layers[0], "name"):
             self.name = self.layers[0].name
         self.var_list = sum([l.var_list for l in self.layers], [])
 
@@ -150,20 +154,16 @@ class LayerChain:
 
 
 def stack(*layers):
-    return LayerChain(
-        lambda layer: layer,
-        *layers
-    )
+    return LayerChain(lambda layer: layer, *layers)
 
 
 def shape_to_list(shape):
-    if hasattr(shape, 'as_list'):
+    if hasattr(shape, "as_list"):
         return shape.as_list()
     else:
         return list(shape)
 
 
 def batch_matmul(matrix1, matrix2):
-    with tf.name_scope('BatchMatMul'):
+    with tf.name_scope("BatchMatMul"):
         return tf.tensordot(matrix1, matrix2, [[-1], [-2]])
-

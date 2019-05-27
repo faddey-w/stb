@@ -35,7 +35,7 @@ class _BaseHandler(web.RequestHandler):
 
     def api_respond(self, data, http_code=200):
         self.set_status(http_code)
-        self.set_header('Content-Type', 'application/json')
+        self.set_header("Content-Type", "application/json")
         self.write(json.dumps(data))
 
     def options(self, *args, **kwargs):
@@ -43,10 +43,9 @@ class _BaseHandler(web.RequestHandler):
         for meth in self.SUPPORTED_METHODS:
             methfunc = getattr(self, meth.lower())
             if methfunc.__doc__:
-                result.append({
-                    'method': meth,
-                    'description': textwrap.dedent(methfunc.__doc__),
-                })
+                result.append(
+                    {"method": meth, "description": textwrap.dedent(methfunc.__doc__)}
+                )
         self.api_respond(result)
 
     def get_int(self, value):
@@ -56,7 +55,7 @@ class _BaseHandler(web.RequestHandler):
             raise web.HTTPError(400)
 
     def get_json_argument(self, key):
-        if not hasattr(self.request, 'json_data'):
+        if not hasattr(self.request, "json_data"):
             self.request.json_data = escape.json_decode(self.request.body)
         return self.request.json_data[key]
 
@@ -67,21 +66,17 @@ class _BaseHandler(web.RequestHandler):
 class GameLaunchParametersHandler(_BaseHandler):
     def get(self):
         self.state.refresh_launch_params()
-        self.api_respond({
-            'bot_initializers': [
-                {
-                    'name': name,
-                }
-                for name, func in self.state.bot_initializers
-            ],
-            'ai_functions': [
-                {
-                    'module': ai_m.name,
-                    'name': name,
-                }
-                for name, params, ai_m in self.state.ai_function_descriptors
-            ]
-        })
+        self.api_respond(
+            {
+                "bot_initializers": [
+                    {"name": name} for name, func in self.state.bot_initializers
+                ],
+                "ai_functions": [
+                    {"module": ai_m.name, "name": name}
+                    for name, params, ai_m in self.state.ai_function_descriptors
+                ],
+            }
+        )
 
 
 class GameListHandler(_BaseHandler):
@@ -90,7 +85,7 @@ class GameListHandler(_BaseHandler):
         Lists game replays available for view
         """
         replays = self.state.list_replays()
-        self.api_respond({'result': replays})
+        self.api_respond({"result": replays})
 
     def post(self):
         """
@@ -101,12 +96,11 @@ class GameListHandler(_BaseHandler):
          - ai2_id: id of AI for team 2
         """
         self.authenticate(self.request)
-        init_id = self.get_int(self.get_json_argument('initializer_id'))
-        ai1_id = self.get_int(self.get_json_argument('ai1_id'))
-        ai2_id = self.get_int(self.get_json_argument('ai2_id'))
+        init_id = self.get_int(self.get_json_argument("initializer_id"))
+        ai1_id = self.get_int(self.get_json_argument("ai1_id"))
+        ai2_id = self.get_int(self.get_json_argument("ai2_id"))
         simul = self.state.add_game_simulation(init_id, ai1_id, ai2_id)
-        self.api_respond(util.replay_descriptor_from_simulation(simul),
-                         http_code=201)
+        self.api_respond(util.replay_descriptor_from_simulation(simul), http_code=201)
 
 
 class GameViewHandler(_BaseHandler):
@@ -116,19 +110,15 @@ class GameViewHandler(_BaseHandler):
          - start: int - index of first tick in segment
          - count: int - number of ticks to send, length of segment
         """
-        start = self.get_int(self.get_query_argument('start'))
-        count = self.get_int(self.get_query_argument('count'))
+        start = self.get_int(self.get_query_argument("start"))
+        count = self.get_int(self.get_query_argument("count"))
         try:
             data = self.state.get_replay_data(sim_id)
         except replay.SimulationNotFound as snf:
             raise exceptions.SimulationNotFound(snf.key)
         total_len = len(data)
-        data = data[start:start + count]
-        self.api_respond({
-            'count': len(data),
-            'total': total_len,
-            'data': data
-        })
+        data = data[start : start + count]
+        self.api_respond({"count": len(data), "total": total_len, "data": data})
 
     def delete(self, sim_id):
         """
@@ -143,10 +133,11 @@ class GameViewHandler(_BaseHandler):
 
 
 class UserProgramsViewHandler(_BaseHandler):
-
     def post(self, program_name):
         if self.program_storage is None:
             raise web.HTTPError(404)
         self.authenticate(self.request)
-        self.program_storage.save_program(program_name, self.request.body.decode('utf-8'))
+        self.program_storage.save_program(
+            program_name, self.request.body.decode("utf-8")
+        )
         self.state.refresh_launch_params()

@@ -31,41 +31,40 @@ def _cached_with_timeout_impl(timeout, keyfunc):
                 e, v, tb = exc_info
                 raise v.with_traceback(tb)
             return value
+
         return wrapper
+
     return decorator
 
 
 def cached_with_timeout(timeout):
     def keyfunc(args, kwargs):
         return args, frozenset(kwargs.items())
+
     return _cached_with_timeout_impl(timeout, keyfunc)
 
 
 def cached_with_timeout_m(timeout):
     def keyfunc(args, kwargs):
         return args[1:], frozenset(kwargs.items())
+
     return _cached_with_timeout_impl(timeout, keyfunc)
 
 
 def replay_descriptor_from_simulation(simulation):
     return {
-        'id': simulation.sim_id,
-        'finished': False,
-        'nticks': simulation.engine.nticks,
-        **simulation.metadata
+        "id": simulation.sim_id,
+        "finished": False,
+        "nticks": simulation.engine.nticks,
+        **simulation.metadata,
     }
 
 
 def replay_descriptor_from_storage(storage, key):
-    return {
-        'id': key,
-        'finished': True,
-        **storage.load_metadata(key)
-    }
+    return {"id": key, "finished": True, **storage.load_metadata(key)}
 
 
 class objedict(UserDict):
-
     def __getitem__(self, item):
         return _objedict_wrap_nested(super(objedict, self).__getitem__(item))
 
@@ -74,7 +73,7 @@ class objedict(UserDict):
 
     def __setattr__(self, key, value):
         try:
-            self.__dict__['data'][key] = value
+            self.__dict__["data"][key] = value
         except KeyError:
             super(objedict, self).__setattr__(key, value)
 
@@ -104,9 +103,10 @@ def _objedict_wrap_flat(value):
 @contextlib.contextmanager
 def interrupt_atomic():
     def handler(*args, **kwargs):
-        print('Will interrupt after atomic operation')
+        print("Will interrupt after atomic operation")
         nonlocal interrupted
         interrupted = True
+
     interrupted = False
 
     prev_handler = signal.getsignal(signal.SIGINT)
@@ -128,12 +128,11 @@ def make_metadata_before_game(init_name, ai1_module, ai1_name, ai2_module, ai2_n
 
 
 def fill_metadata_after_game(metadata, engine):
-    metadata['team1'] = str(engine.team1)
-    metadata['team2'] = str(engine.team2)
-    metadata['nticks'] = engine.nticks
+    metadata["team1"] = str(engine.team1)
+    metadata["team2"] = str(engine.team2)
+    metadata["nticks"] = engine.nticks
     if engine.win_condition_reached:
-        metadata['winner'] = str(engine.get_any_nonloser_team())
+        metadata["winner"] = str(engine.get_any_nonloser_team())
     else:
-        metadata['winner'] = None
+        metadata["winner"] = None
     return metadata
-
