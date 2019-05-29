@@ -61,9 +61,15 @@ class Model:
                         ctl_value, prediction_logits[ctl], label_smoothing=0.05
                     )
                 else:
-                    losses[ctl] = tf.losses.mean_squared_error(
-                        ctl_value, predictions[ctl]
-                    )
+                    ctl_value = ctl_value[:, 0]
+                    pred = predictions[ctl]
+                    if isinstance(pred, tf.distributions.Distribution):
+                        mean = pred.mean()
+                        stddev = pred.stddev()
+                    else:
+                        mean = pred
+                        stddev = 0
+                    losses[ctl] = tf.losses.mean_squared_error(ctl_value, mean) + 0.1 * stddev
             total_loss = tf.add_n(list(map(tf.reduce_mean, losses.values())))
 
             if mode is tf_estimator.ModeKeys.EVAL:
@@ -95,7 +101,7 @@ class Model:
 
         return tf_estimator.EstimatorSpec(
             mode=mode,
-            predictions=predictions,
+            # predictions=predictions,
             loss=total_loss,
             train_op=train_op,
             eval_metric_ops=eval_metric_ops,
@@ -105,8 +111,8 @@ class Model:
 def main():
     states_dir = ".data/supervised/numpy"
     controls_dir = ".data/supervised/controls"
-    model_dir = ".data/supervised/models/anglenav"
-    train_steps = 2000
+    model_dir = ".data/supervised/models/anglenav2"
+    train_steps = 1000
 
     logging.basicConfig(level=logging.INFO)
 

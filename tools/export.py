@@ -3,7 +3,8 @@ import os
 import tensorflow as tf
 from tensorflow.python.tools import freeze_graph
 from strateobots import util
-from strateobots.ai.lib import data_encoding, model_saving, data
+from strateobots.ai.lib import data_encoding, model_saving
+from strateobots.ai.nets import postprocessing
 
 
 def main(argv=None):
@@ -24,21 +25,16 @@ def main(argv=None):
     net = model_constructor(controls)
     logits, predictions = net(state_batch)
 
-    output_nodes = {}
-    for ctl, prediction in predictions.items():
-        if ctl in data.CATEGORICAL_CONTROLS:
-            if opts.postprocessing == "max":
-                prediction = tf.argmax(prediction[0])
-            elif opts.postprocessing == "prob":
-                prediction = tf.random.categorical(logits[ctl], 1)[0, 0]
-            else:
-                raise NotImplementedError(opts.postprocessing)
-            ctl_feature = data.get_control_feature(ctl)
-            prediction = tf.constant(ctl_feature.categories)[prediction]
-        else:
-            prediction = prediction[0]  # just unbatch
+    if opts.postprocessing == "max":
+        output_nodes = postprocessing.postprocess_argmax(logits, predictions)
+    elif opts.postprocessing == "prob":
+        output_nodes = postprocessing.postprocess_probabilistic(logits, predictions)
+    else:
+        raise NotImplementedError(opts.postprocessing)
 
-        output_nodes[ctl] = prediction
+    # unbatch
+    output_nodes = {ctl: pred[0] for ctl, pred in output_nodes.items()}
+
     with tf.name_scope("Output"):
         for ctl, prediction in list(output_nodes.items()):
             output_nodes[ctl] = tf.identity(prediction, name=ctl)
@@ -64,7 +60,7 @@ def main(argv=None):
 
 if __name__ == '__main__':
     main([
-        ".data/supervised/models/anglenav",
-        ".data/exported/anglenav",
+        ".data/supervised/models/anglenav2",
+        ".data/exported/anglenav2",
         "--postprocessing", "prob"
     ])

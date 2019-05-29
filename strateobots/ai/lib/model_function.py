@@ -60,6 +60,13 @@ class ModelAiFunction:
         orientation = ctl_vectors.get("orientation", None)
         gun_orientation = ctl_vectors.get("gun_orientation", None)
 
+        if True:
+            # for debugging direct control models
+            if orientation is None and rotate is not None:
+                orientation = bot_data["orientation"] + pi / 3 * rotate
+            if gun_orientation is None and tower_rotate is not None:
+                gun_orientation = bot_data["orientation"] + bot_data["tower_orientation"] + pi / 3 * tower_rotate
+
         try:
             move_aim_x = ctl_vectors["move_aim_x"]
             move_aim_y = ctl_vectors["move_aim_y"]
@@ -117,27 +124,6 @@ class ModelAiFunction:
         pass
 
 
-def encode_vector_for_model(encoder, state, team=None, opponent_team=None):
-    if team is None:
-        bot_data = state["friendly_bots"][0]
-        enemy_data = state["enemy_bots"][0]
-    else:
-        if opponent_team is None:
-            opponent_team = (set(state["bots"].keys()) - {team}).pop()
-        bot_data = state["bots"][team][0]
-        enemy_data = state["bots"][opponent_team][0]
-    bot_bullet_data = None
-    enemy_bullet_data = None
-
-    for bullet in state["bullets"]:
-        if bullet["origin_id"] == bot_data["id"]:
-            bot_bullet_data = bullet
-        elif bullet["origin_id"] == enemy_data["id"]:
-            enemy_bullet_data = bullet
-
-    return encoder(bot_data, enemy_data, bot_bullet_data, enemy_bullet_data)
-
-
 class TwoStepDataEncoderMixin:
     @data.generator_encoder
     def data_encoder(self):
@@ -162,8 +148,6 @@ def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
     if rotate is None:
         delta_angle = (orientation - bot["orientation"]) % (2 * pi)
         rotate = -1 if delta_angle > pi else +1
-    else:
-        rotate = data.ctl_rotate.decode(rotate)
 
     if tower_rotate is None:
         curr_gun_orientation = bot["orientation"] + bot["tower_orientation"]
@@ -186,8 +170,6 @@ def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
         left_time = left_path / max(left_gun_rot_speed, 0.0001)
 
         tower_rotate = +1 if right_time < left_time else -1
-    else:
-        tower_rotate = data.ctl_rotate.decode(tower_rotate)
 
     return rotate, tower_rotate
 
@@ -196,16 +178,12 @@ def _nearest_rotation(rotate, tower_rotate, orientation, gun_orientation, bot):
     if rotate is None:
         delta_angle = (orientation - bot["orientation"]) % (2 * pi)
         rotate = -1 if delta_angle > pi else +1
-    else:
-        rotate = data.ctl_rotate.decode(rotate)
 
     if tower_rotate is None:
         curr_gun_orientation = bot["orientation"] + bot["tower_orientation"]
         right_path = (gun_orientation - curr_gun_orientation) % (2 * pi)
 
         tower_rotate = -1 if right_path > pi else +1
-    else:
-        tower_rotate = data.ctl_rotate.decode(tower_rotate)
 
     return rotate, tower_rotate
 
