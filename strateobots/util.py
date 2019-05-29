@@ -4,6 +4,8 @@ import sys
 import contextlib
 import signal
 from collections import UserDict
+import configparser
+import importlib
 
 
 def _cached_with_timeout_impl(timeout, keyfunc):
@@ -135,4 +137,22 @@ def fill_metadata_after_game(metadata, engine):
         metadata["winner"] = str(engine.get_any_nonloser_team())
     else:
         metadata["winner"] = None
+    for key, val in engine.get_metadata().items():
+        metadata.setdefault(key, val)
     return metadata
+
+
+def get_object_by_config(config_path, section):
+    cp = configparser.ConfigParser()
+    cp.read([config_path])
+    module_path = cp.get(section, "module")
+    classname = cp.get(section, "class")
+    params = {}
+    for key, val in cp.items(section):
+        if key.startswith("param_"):
+            params[key[6:]] = val
+
+    module = importlib.import_module(module_path)
+    cls = getattr(module, classname)
+    inst = cls(**params)
+    return inst

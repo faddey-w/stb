@@ -4,6 +4,7 @@ import logging
 import collections
 import sys
 import copy
+import inspect
 from math import pi, sin, cos, sqrt
 
 
@@ -69,6 +70,7 @@ class StbEngine:
 
         self.ai1 = ai1
         self.ai2 = ai2
+        self.initialize_bots = initialize_bots
         initialize_bots(self)
 
     def clone(self, with_explosions, with_replay, using_class=None):
@@ -741,6 +743,32 @@ class StbEngine:
             if n > 0:
                 return team
 
+    def get_metadata(self):
+        ai1_type = self.ai1 if inspect.isfunction(self.ai1) else self.ai1.__class__
+        ai2_type = self.ai2 if inspect.isfunction(self.ai2) else self.ai2.__class__
+        initer = self.initialize_bots
+        init_type = initer if inspect.isfunction(initer) else initer.__class__
+        metadata = dict(
+            init_name=f"{init_type.__module__}.{init_type.__name__}",
+            ai1_module=ai1_type.__module__,
+            ai1_name=ai1_type.__name__,
+            ai2_module=ai2_type.__module__,
+            ai2_name=ai2_type.__name__,
+            team1=str(self.team1),
+            team2=str(self.team2),
+        )
+        if self.is_finished:
+            metadata["nticks"] = self.nticks
+            if self.win_condition_reached:
+                metadata["winner"] = str(self.get_any_nonloser_team())
+            else:
+                metadata["winner"] = None
+        return metadata
+
+    def play_all(self):
+        while not self.is_finished:
+            self.tick()
+
 
 BotTypeProperties = collections.namedtuple(
     "BotTypeProperties",
@@ -1054,6 +1082,7 @@ class Action:
     ACCELERATION = 4
 
     ALL = IDLE, FIRE, SHIELD_WARMUP, SHIELD_REGEN, ACCELERATION
+    NAMES = "idle", "fire", "shield_warmup", "shield_regen", "acceleration"
 
 
 class BotControl:

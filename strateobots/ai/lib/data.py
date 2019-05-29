@@ -1,5 +1,6 @@
 import numpy as np
 from functools import wraps
+from strateobots.engine import Action
 
 
 def _try_int(x):
@@ -39,9 +40,10 @@ class Feature:
 
 
 class CategoricalFeature(Feature):
-    def __init__(self, path, categories, converter=None):
+    def __init__(self, path, categories, converter=None, *, labels=None):
         super().__init__(path, converter)
         self.categories = tuple(categories)
+        self.labels = tuple(labels or map(str, self.categories))
         self.dimension = len(self.categories)
 
     def _process_value(self, value):
@@ -113,15 +115,49 @@ class FeatureSet:
                 return i
         raise ValueError(path)
 
+    def get_slice(self, path, converter=None):
+        idx = self.find(path, converter)
+        start = sum(f.dimension for f in self.features[:idx])
+        end = start + self.features[idx].dimension
+        return slice(start, end)
+
 
 ALL_CONTROLS = "move", "rotate", "tower_rotate", "action"
 
-ctl_move = CategoricalFeature(["move"], [-1, 0, +1])
-ctl_rotate = CategoricalFeature(["rotate"], [-1, 0, +1])
-ctl_tower_rotate = CategoricalFeature(["tower_rotate"], [-1, 0, +1])
-ctl_action = CategoricalFeature(["action"], [0, 1, 2, 3, 4])
+ctl_move = CategoricalFeature(["move"], [-1, 0, +1], labels=["back", "stay", "ahead"])
+ctl_rotate = CategoricalFeature(
+    ["rotate"], [-1, 0, +1], labels=["left", "none", "right"]
+)
+ctl_tower_rotate = CategoricalFeature(
+    ["tower_rotate"], [-1, 0, +1], labels=["left", "none", "right"]
+)
+ctl_action = CategoricalFeature(["action"], Action.ALL, labels=Action.NAMES)
 
 ALL_CONTROLS_V2 = "move", "orientation", "gun_orientation", "action"
+ALL_CONTROLS_V3 = "move_aim_x", "move_aim_y", "gun_aim_x", "gun_aim_y", "action"
+
+ALL_CONTROLS_FULL = (
+    "move",
+    "rotate",
+    "tower_rotate",
+    "action",
+    "orientation",
+    "gun_orientation",
+    "move_aim_x",
+    "move_aim_y",
+    "gun_aim_x",
+    "gun_aim_y",
+)
+
+CATEGORICAL_CONTROLS = "move", "rotate", "tower_rotate", "action"
+NUMERIC_CONTROLS = (
+    "orientation",
+    "gun_orientation",
+    "move_aim_x",
+    "move_aim_y",
+    "gun_aim_x",
+    "gun_aim_y",
+)
 
 ctl_orientation = Feature(["orientation"])
 ctl_gun_orientation = Feature(["gun_orientation"])
@@ -173,3 +209,7 @@ def function_encoder(function):
         return encode
 
     return encoder_factory
+
+
+def get_control_feature(control_name):
+    return globals()["ctl_" + control_name]
