@@ -153,6 +153,13 @@ def get_object_by_config(config_path, section):
             params[key[6:]] = val
 
     module = importlib.import_module(module_path)
-    cls = getattr(module, classname)
+    cls = get_by_import_path(module, classname)
     inst = cls(**params)
     return inst
+
+
+def get_by_import_path(module, name=None):
+    if name is None:
+        module, name = module.split(":")
+    module = importlib.import_module(module)
+    return getattr(module, name)

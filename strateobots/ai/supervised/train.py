@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow_estimator import estimator as tf_estimator
-from strateobots.ai.lib import data_encoding, data
+from strateobots.ai.lib import data_encoding, data, model_saving
+from strateobots import util
 import numpy as np
 import os
 import logging
@@ -45,31 +46,8 @@ class Model:
         state_batch = features["state"]  # type: tf.Tensor
         state_batch.set_shape([params["batch_size"], None])
 
-        layer_lib = tf.keras.layers
-        stem = tf.keras.Sequential(
-            [
-                layer_lib.Dense(80, tf.nn.leaky_relu),
-                layer_lib.Dense(70, tf.nn.leaky_relu),
-                layer_lib.Dense(60, tf.nn.leaky_relu),
-                layer_lib.Dense(50, tf.nn.leaky_relu),
-            ],
-            name="Stem",
-        )(state_batch)
-
-        prediction_logits = {}
-        predictions = {}
-        for ctl, n_classes in params["n_classes"].items():
-            head = tf.keras.Sequential(
-                [
-                    layer_lib.Dense(40, tf.nn.leaky_relu),
-                    layer_lib.Dense(n_classes, tf.identity),
-                ],
-                name=f"Head_{ctl}",
-            )(stem)
-            if ctl in data.CATEGORICAL_CONTROLS:
-                prediction_logits[ctl] = head
-                head = tf.nn.softmax(head)
-            predictions[ctl] = head
+        net = util.get_by_import_path(params["net_ctor"])(params["controls"])
+        prediction_logits, predictions = net(state_batch)
 
         total_loss = None
         train_op = None
@@ -127,11 +105,12 @@ class Model:
 def main():
     states_dir = ".data/supervised/numpy"
     controls_dir = ".data/supervised/controls"
-    model_dir = ".data/supervised/models/test_anglenav"
-    train_steps = 1000
-    target_controls = ["orientation", "gun_orientation", "action"]
+    model_dir = ".data/supervised/models/anglenav"
+    train_steps = 2000
 
     logging.basicConfig(level=logging.INFO)
+
+    target_controls, model_constructor, _ = model_saving.load_model_config(model_dir)
 
     game_ids = sorted(os.listdir(states_dir))
     train_input = Input(states_dir, controls_dir, game_ids[:70], target_controls)
@@ -141,9 +120,10 @@ def main():
     estimator = tf_estimator.Estimator(
         model_fn=model,
         params={
-            "n_classes": train_input.control_dimensions,
+            "controls": target_controls,
             "batch_size": 50,
             "state_dim": train_input.state_dimension,
+            "net_ctor": model_constructor,
         },
         config=tf_estimator.RunConfig(
             model_dir=model_dir,

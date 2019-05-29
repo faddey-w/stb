@@ -147,3 +147,22 @@ def _normalize_save_path(save_path):
 def get_model_definition_hash(save_path):
     with open(_get_hash_filepath(save_path)) as f:
         return f.read().strip()
+
+
+def save_model_config(model_dir, controls, model_constructor, encoder_name):
+    with open(os.path.join(model_dir, "model-config.json"), "w") as f:
+        json.dump({
+            "controls": controls,
+            "model_constructor": model_constructor,
+            "encoder": encoder_name,
+        }, f, indent=4)
+
+
+def load_model_config(model_dir):
+    with open(os.path.join(model_dir, "model-config.json")) as f:
+        model_config = json.load(f)
+
+    model_constructor = model_config["model_constructor"]
+    encoder = model_config["encoder"]
+    controls = model_config["controls"]
+    return controls, model_constructor, encoder

@@ -25,6 +25,7 @@ class Constants:
     load_with_action = 0.4
     minimum_shield_warmup = 0.75
     shield_half_leak_period = 0.5
+    full_information = True
 
 
 log = logging.getLogger(__name__)
@@ -213,6 +214,8 @@ class StbEngine:
         bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = (
             self._serialize_game_state()
         )
+        if Constants.full_information:
+            bots_visible_data = bots_full_data
         control1_data = control2_data = None
         try:
             control1_data = self._communicate_with_ai(

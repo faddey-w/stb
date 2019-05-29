@@ -1,34 +1,68 @@
 import tensorflow as tf
 import numpy as np
+import os
 from math import pi, atan2, sin, cos
-from strateobots.ai.lib import data
+from strateobots.ai.lib import data, model_saving, data_encoding
 from strateobots.engine import BotType
 
 
 class ModelAiFunction:
-    def __init__(self, model, session):
-        self.state_ph = tf.placeholder(tf.float32, [1, model.state_dimension])
-        self.inference = model.apply(self.state_ph)
-        self.model = model
+    def __init__(self, session, state_vector_ph, control_tensors, encoder):
+        self.state_vector_ph = state_vector_ph
+        self.control_tensors = control_tensors
         self.session = session
-        self.encoder = model.data_encoder()
+        self.encoder = encoder
+
+    @classmethod
+    def from_exported_model(cls, exported_model_dir):
+        inference_pb_path = os.path.join(exported_model_dir, "inference.pb")
+        _, _, encoder_name = model_saving.load_model_config(exported_model_dir)
+        encoder, state_vec_dim = data_encoding.get_encoder(encoder_name)
+
+        with tf.gfile.GFile(inference_pb_path, "rb") as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+        with tf.Graph().as_default() as graph:
+            tf.import_graph_def(
+                graph_def,
+                input_map=None,
+                return_elements=None,
+                name=""
+            )
+
+        def find_nodes(scope):
+            prefix = scope if scope.endswith("/") else scope + "/"
+            return {
+                node.name[len(prefix):]: graph.get_tensor_by_name(node.name + ":0")
+                for node in graph.as_graph_def().node
+                if node.name.startswith(prefix)
+            }
+
+        state_vector_ph = find_nodes("Input")["state_vector"]
+        ctl_tensors = find_nodes("Output")
+        session = tf.Session(graph=graph)
+        return cls(session, state_vector_ph, ctl_tensors, encoder)
+
+    @classmethod
+    def from_legacy_model_object(cls, model, session):
+        raise NotImplementedError
 
     def __call__(self, state):
         bot_data = state["friendly_bots"][0]
-        state_vector = encode_vector_for_model(self.encoder, state)
+        state_vector = self.encoder(state)
 
         ctl_vectors = self.session.run(
-            self.inference.controls, feed_dict={self.state_ph: [state_vector]}
+            self.control_tensors, feed_dict={self.state_vector_ph: state_vector}
         )
 
-        rotate = ctl_vectors.get("rotate", [None])[0]
-        tower_rotate = ctl_vectors.get("tower_rotate", [None])[0]
-        orientation = ctl_vectors.get("orientation", [None])[0]
-        gun_orientation = ctl_vectors.get("gun_orientation", [None])[0]
+        rotate = ctl_vectors.get("rotate", None)
+        tower_rotate = ctl_vectors.get("tower_rotate", None)
+        orientation = ctl_vectors.get("orientation", None)
+        gun_orientation = ctl_vectors.get("gun_orientation", None)
 
         try:
-            move_aim_x = ctl_vectors["move_aim_x"][0]
-            move_aim_y = ctl_vectors["move_aim_y"][0]
+            move_aim_x = ctl_vectors["move_aim_x"]
+            move_aim_y = ctl_vectors["move_aim_y"]
         except KeyError:
             if orientation is None:
                 move_aim_x = move_aim_y = None
@@ -42,8 +76,8 @@ class ModelAiFunction:
                 )
 
         try:
-            gun_aim_x = ctl_vectors["gun_aim_x"][0]
-            gun_aim_y = ctl_vectors["gun_aim_y"][0]
+            gun_aim_x = ctl_vectors["gun_aim_x"]
+            gun_aim_y = ctl_vectors["gun_aim_y"]
         except KeyError:
             if gun_orientation is None:
                 gun_aim_x = gun_aim_y = None
@@ -56,16 +90,16 @@ class ModelAiFunction:
                     gun_aim_y - bot_data["y"], gun_aim_x - bot_data["x"]
                 )
 
-        rotate, tower_rotate = _optimal_rotations(
+        rotate, tower_rotate = _nearest_rotation(
             rotate, tower_rotate, orientation, gun_orientation, bot_data
         )
 
         ctl_dict = {
             "id": bot_data["id"],
-            "move": data.ctl_move.decode(ctl_vectors["move"][0]),
+            "move": ctl_vectors["move"],
             "rotate": rotate,
             "tower_rotate": tower_rotate,
-            "action": data.ctl_action.decode(ctl_vectors["action"][0]),
+            "action": ctl_vectors["action"],
         }
         if move_aim_x is not None:
             ctl_dict["move_aim_x"] = move_aim_x
@@ -80,7 +114,7 @@ class ModelAiFunction:
         return [ctl_dict]
 
     def on_new_game(self):
-        self.encoder = self.model.data_encoder()
+        pass
 
 
 def encode_vector_for_model(encoder, state, team=None, opponent_team=None):
@@ -152,6 +186,24 @@ def _optimal_rotations(rotate, tower_rotate, orientation, gun_orientation, bot):
         left_time = left_path / max(left_gun_rot_speed, 0.0001)
 
         tower_rotate = +1 if right_time < left_time else -1
+    else:
+        tower_rotate = data.ctl_rotate.decode(tower_rotate)
+
+    return rotate, tower_rotate
+
+
+def _nearest_rotation(rotate, tower_rotate, orientation, gun_orientation, bot):
+    if rotate is None:
+        delta_angle = (orientation - bot["orientation"]) % (2 * pi)
+        rotate = -1 if delta_angle > pi else +1
+    else:
+        rotate = data.ctl_rotate.decode(rotate)
+
+    if tower_rotate is None:
+        curr_gun_orientation = bot["orientation"] + bot["tower_orientation"]
+        right_path = (gun_orientation - curr_gun_orientation) % (2 * pi)
+
+        tower_rotate = -1 if right_path > pi else +1
     else:
         tower_rotate = data.ctl_rotate.decode(tower_rotate)
 
