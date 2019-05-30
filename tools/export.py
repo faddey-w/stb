@@ -26,7 +26,7 @@ def main(argv=None):
     logits, predictions = net(state_batch)
 
     if opts.postprocessing == "max":
-        output_nodes = postprocessing.postprocess_argmax(logits, predictions)
+        output_nodes = postprocessing.postprocess_argmax(predictions)
     elif opts.postprocessing == "prob":
         output_nodes = postprocessing.postprocess_probabilistic(logits, predictions)
     else:

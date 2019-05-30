@@ -152,8 +152,7 @@ def get_object_by_config(config_path, section):
         if key.startswith("param_"):
             params[key[6:]] = val
 
-    module = importlib.import_module(module_path)
-    cls = get_by_import_path(module, classname)
+    cls = get_by_import_path(module_path, classname)
     inst = cls(**params)
     return inst
 

@@ -104,6 +104,18 @@ dimension_1vs1_fully_visible = (
 )
 
 
+def extract_orientations(state_vector):
+    ori_slice = _bot_visible_fields.get_slice(["orientation"], norm_angle)
+    assert ori_slice.start + 1 == ori_slice.stop
+    orientation = state_vector[..., ori_slice.start]
+
+    tow_ori_slice = _bot_visible_fields.get_slice(["tower_orientation"], norm_angle)
+    assert tow_ori_slice.start + 1 == tow_ori_slice.stop
+    tower_orientation = state_vector[..., tow_ori_slice.start]
+
+    return orientation, tower_orientation
+
+
 _control_fields_full = data.FeatureSet(
     [getattr(data, "ctl_" + ctlname) for ctlname in data.ALL_CONTROLS_FULL]
 )

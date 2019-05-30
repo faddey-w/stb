@@ -48,80 +48,83 @@ class ModelAiFunction:
         raise NotImplementedError
 
     def __call__(self, state):
-        bot_data = state["friendly_bots"][0]
         state_vector = self.encoder(state)
-
         ctl_vectors = self.session.run(
             self.control_tensors, feed_dict={self.state_vector_ph: state_vector}
         )
-
-        rotate = ctl_vectors.get("rotate", None)
-        tower_rotate = ctl_vectors.get("tower_rotate", None)
-        orientation = ctl_vectors.get("orientation", None)
-        gun_orientation = ctl_vectors.get("gun_orientation", None)
-
-        if True:
-            # for debugging direct control models
-            if orientation is None and rotate is not None:
-                orientation = bot_data["orientation"] + pi / 3 * rotate
-            if gun_orientation is None and tower_rotate is not None:
-                gun_orientation = bot_data["orientation"] + bot_data["tower_orientation"] + pi / 3 * tower_rotate
-
-        try:
-            move_aim_x = ctl_vectors["move_aim_x"]
-            move_aim_y = ctl_vectors["move_aim_y"]
-        except KeyError:
-            if orientation is None:
-                move_aim_x = move_aim_y = None
-            else:
-                move_aim_x = bot_data["x"] + 100 * cos(orientation)
-                move_aim_y = bot_data["y"] + 100 * sin(orientation)
-        else:
-            if orientation is None:
-                orientation = atan2(
-                    move_aim_y - bot_data["y"], move_aim_x - bot_data["x"]
-                )
-
-        try:
-            gun_aim_x = ctl_vectors["gun_aim_x"]
-            gun_aim_y = ctl_vectors["gun_aim_y"]
-        except KeyError:
-            if gun_orientation is None:
-                gun_aim_x = gun_aim_y = None
-            else:
-                gun_aim_x = bot_data["x"] + 100 * cos(gun_orientation)
-                gun_aim_y = bot_data["y"] + 100 * sin(gun_orientation)
-        else:
-            if gun_orientation is None:
-                gun_orientation = atan2(
-                    gun_aim_y - bot_data["y"], gun_aim_x - bot_data["x"]
-                )
-
-        rotate, tower_rotate = _nearest_rotation(
-            rotate, tower_rotate, orientation, gun_orientation, bot_data
-        )
-
-        ctl_dict = {
-            "id": bot_data["id"],
-            "move": ctl_vectors["move"],
-            "rotate": rotate,
-            "tower_rotate": tower_rotate,
-            "action": ctl_vectors["action"],
-        }
-        if move_aim_x is not None:
-            ctl_dict["move_aim_x"] = move_aim_x
-            ctl_dict["move_aim_y"] = move_aim_y
-        if orientation is not None:
-            ctl_dict["orientation"] = orientation
-        if gun_aim_x is not None:
-            ctl_dict["gun_aim_x"] = gun_aim_x
-            ctl_dict["gun_aim_y"] = gun_aim_y
-        if gun_orientation is not None:
-            ctl_dict["gun_orientation"] = gun_orientation
-        return [ctl_dict]
+        return predictions_to_ctls(ctl_vectors, state)
 
     def on_new_game(self):
         pass
+
+
+def predictions_to_ctls(predictions, state):
+    bot_data = state["friendly_bots"][0]
+    ctl_vectors = predictions
+    rotate = ctl_vectors.get("rotate", None)
+    tower_rotate = ctl_vectors.get("tower_rotate", None)
+    orientation = ctl_vectors.get("orientation", None)
+    gun_orientation = ctl_vectors.get("gun_orientation", None)
+
+    if True:
+        # for debugging direct control models
+        if orientation is None and rotate is not None:
+            orientation = bot_data["orientation"] + pi / 3 * rotate
+        if gun_orientation is None and tower_rotate is not None:
+            gun_orientation = bot_data["orientation"] + bot_data["tower_orientation"] + pi / 3 * tower_rotate
+
+    try:
+        move_aim_x = ctl_vectors["move_aim_x"]
+        move_aim_y = ctl_vectors["move_aim_y"]
+    except KeyError:
+        if orientation is None:
+            move_aim_x = move_aim_y = None
+        else:
+            move_aim_x = bot_data["x"] + 100 * cos(orientation)
+            move_aim_y = bot_data["y"] + 100 * sin(orientation)
+    else:
+        if orientation is None:
+            orientation = atan2(
+                move_aim_y - bot_data["y"], move_aim_x - bot_data["x"]
+            )
+
+    try:
+        gun_aim_x = ctl_vectors["gun_aim_x"]
+        gun_aim_y = ctl_vectors["gun_aim_y"]
+    except KeyError:
+        if gun_orientation is None:
+            gun_aim_x = gun_aim_y = None
+        else:
+            gun_aim_x = bot_data["x"] + 100 * cos(gun_orientation)
+            gun_aim_y = bot_data["y"] + 100 * sin(gun_orientation)
+    else:
+        if gun_orientation is None:
+            gun_orientation = atan2(
+                gun_aim_y - bot_data["y"], gun_aim_x - bot_data["x"]
+            )
+
+    rotate, tower_rotate = _nearest_rotation(
+        rotate, tower_rotate, orientation, gun_orientation, bot_data
+    )
+
+    ctl_dict = {
+        "id": bot_data["id"],
+        "move": ctl_vectors["move"],
+        "rotate": rotate,
+        "tower_rotate": tower_rotate,
+        "action": ctl_vectors["action"],
+    }
+    if move_aim_x is not None:
+        ctl_dict["move_aim_x"] = move_aim_x
+        ctl_dict["move_aim_y"] = move_aim_y
+    if orientation is not None:
+        ctl_dict["orientation"] = orientation
+    if gun_aim_x is not None:
+        ctl_dict["gun_aim_x"] = gun_aim_x
+        ctl_dict["gun_aim_y"] = gun_aim_y
+    if gun_orientation is not None:
+        ctl_dict["gun_orientation"] = gun_orientation
+    return [ctl_dict]
 
 
 class TwoStepDataEncoderMixin:

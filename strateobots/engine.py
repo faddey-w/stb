@@ -46,6 +46,7 @@ class StbEngine:
         teams=None,
         stop_all_after_finish=False,
         collect_replay=True,
+        debug=False,
     ):
         self.stop_all_after_finish = stop_all_after_finish
         self.teams = self.team1, self.team2 = teams or self.TEAMS
@@ -55,6 +56,7 @@ class StbEngine:
         self._explosions = []
         self.collect_replay = collect_replay
         self.replay = []
+        self.debug = debug
 
         self._controls = {}
 
@@ -235,6 +237,8 @@ class StbEngine:
         except KeyboardInterrupt:
             raise
         except:
+            if self.debug:
+                raise
             log.exception("ERROR while processing AI")
             self.has_error = True
             self.exc_info = sys.exc_info()

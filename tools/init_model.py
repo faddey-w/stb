@@ -3,9 +3,10 @@ from strateobots.ai.lib import model_saving
 
 
 def main():
-    model_dir = ".data/supervised/models/anglenav2"
-    # target_controls = ["move", "rotate", "tower_rotate", "action"]
-    target_controls = ["move", "orientation", "gun_orientation", "action"]
+    # model_dir = ".data/supervised/models/anglenav2"
+    model_dir = ".data/a3c/models/direct"
+    target_controls = ["move", "rotate", "tower_rotate", "action"]
+    # target_controls = ["move", "orientation", "gun_orientation", "action"]
     model_constructor = "strateobots.ai.nets.dnn:make_v2"
     encoder_name = "1vs1_fully_visible"
 
