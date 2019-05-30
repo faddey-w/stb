@@ -1,6 +1,5 @@
 import tensorflow as tf
 from strateobots.engine import BulletModel
-from .data import state2vec
 
 
 class Average:
@@ -93,3 +92,9 @@ def select_features(tensor, mapper, *feature_names):
         idx = mapper[ftr_name]
         feature_tensors.append(tensor[..., idx : idx + 1])
     return tf.concat(feature_tensors, -1)
+
+
+def assert_finite(tensor, watches=(), summarize=50):
+    assertion = tf.Assert(tf.reduce_all(tf.is_finite(tensor)), watches, summarize=summarize)
+    with tf.control_dependencies([assertion]):
+        return tf.identity(tensor)

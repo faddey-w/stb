@@ -65,6 +65,16 @@ def predictions_to_ctls(predictions, state):
     tower_rotate = ctl_vectors.get("tower_rotate", None)
     orientation = ctl_vectors.get("orientation", None)
     gun_orientation = ctl_vectors.get("gun_orientation", None)
+    move = ctl_vectors["move"]
+    action = ctl_vectors["action"]
+
+    # categorical predictions are category indices, convert them to values
+    if rotate is not None:
+        rotate = data.ctl_rotate.categories[rotate]
+    if tower_rotate is not None:
+        tower_rotate = data.ctl_tower_rotate.categories[tower_rotate]
+    move = data.ctl_move.categories[move]
+    action = data.ctl_action.categories[action]
 
     if True:
         # for debugging direct control models
@@ -109,10 +119,10 @@ def predictions_to_ctls(predictions, state):
 
     ctl_dict = {
         "id": bot_data["id"],
-        "move": ctl_vectors["move"],
+        "move": move,
         "rotate": rotate,
         "tower_rotate": tower_rotate,
-        "action": ctl_vectors["action"],
+        "action": action,
     }
     if move_aim_x is not None:
         ctl_dict["move_aim_x"] = move_aim_x

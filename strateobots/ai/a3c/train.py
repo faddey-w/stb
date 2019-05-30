@@ -3,6 +3,7 @@ import os
 import numpy as np
 import tensorflow as tf
 from strateobots.ai.lib import model_function, model_saving, data_encoding, data
+from strateobots.ai.lib.util import assert_finite
 from strateobots.ai import nets
 from strateobots.engine import StbEngine, BotType
 from strateobots.ai.lib.bot_initializers import random_bot_initializer
@@ -24,8 +25,10 @@ def main(argv=None):
     control_model = {
         "move": nets.CategoricalControlOutput,
         "action": nets.CategoricalControlOutput,
-        "orientation": nets.OrientationOutput,
-        "gun_orientation": nets.OrientationOutput,
+        "orientation": nets.ScalarOutput,
+        # "orientation": nets.OrientationOutput,
+        "gun_orientation": nets.ScalarOutput,
+        # "gun_orientation": nets.OrientationOutput,
     }
 
     global_actor = nets.build_network("GlobalNet/Actor", model_ctor, control_model)
@@ -44,7 +47,9 @@ def main(argv=None):
     state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
     worker_controls_t = {
         ctl: out.sample()[0]
-        for ctl, out in nets.build_inference(worker_actor, state_vec_t, control_model).items()
+        for ctl, out in nets.build_inference(
+            worker_actor, state_vec_t, control_model
+        ).items()
     }
     worker_value_t = worker_critic(state_vec_t)["value"][0]
 
@@ -55,8 +60,7 @@ def main(argv=None):
     state_his_t = tf.placeholder(tf.float32, [batch_size, state_dim])
     actions_his_t = {
         ctl: tf.placeholder(
-            tf.int32 if ctl in data.CATEGORICAL_CONTROLS else tf.float32,
-            [batch_size, data.get_control_feature(ctl).dimension],
+            tf.int32 if ctl in data.CATEGORICAL_CONTROLS else tf.float32, [batch_size]
         )
         for ctl in controls
     }
@@ -71,11 +75,11 @@ def main(argv=None):
     for ctl in controls:
         pred = policy_prediction[ctl]  # type: nets.ControlOutput
         action_his = actions_his_t[ctl]
-        loss = tf.reduce_mean(- pred.log_prob(action_his) * advantage)
+        loss = tf.reduce_mean(-pred.log_prob(action_his) * advantage)
         entropy = tf.reduce_mean(pred.entropy())
         tf.summary.scalar("Loss/" + ctl, loss)
         tf.summary.scalar("Entropy/" + ctl, entropy)
-        actor_losses[ctl] = loss - entropy_weight * entropy
+        actor_losses[ctl] = assert_finite(loss - entropy_weight * entropy, [ctl, action_his], 200)
         # actor_losses[ctl] = tf.maximum(loss, 0) - entropy_weight * tf.maximum(entropy, 0)
     actor_loss = tf.add_n(list(actor_losses.values()))
     total_loss = critic_loss + actor_loss
@@ -91,12 +95,13 @@ def main(argv=None):
 
     opt = tf.train.RMSPropOptimizer(learning_rate)
     train_step_t = tf.train.get_or_create_global_step()
-    update_op = opt.apply_gradients(
-        list(zip(grads, g_vars)), train_step_t
-    )
+    update_op = opt.apply_gradients(list(zip(grads, g_vars)), train_step_t)
     sync_op = [w_v.assign(g_v) for w_v, g_v in zip(w_vars, g_vars)]
 
-    init_op = tf.variables_initializer(g_vars + opt.variables()), train_step_t.initializer
+    init_op = (
+        tf.variables_initializer(g_vars + opt.variables()),
+        train_step_t.initializer,
+    )
     train_summaies_t = tf.summary.merge_all()
     tf.get_default_graph().finalize()
     sess = tf.Session()
@@ -104,8 +109,6 @@ def main(argv=None):
     sess.run(init_op)
     os.makedirs(opts.log_dir, exist_ok=True)
     summary_writer = tf.summary.FileWriter(opts.log_dir)
-
-    ctl_features = {ctl: data.get_control_feature(ctl) for ctl in controls}
 
     bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
 
@@ -115,11 +118,10 @@ def main(argv=None):
             (worker_controls_t, worker_value_t), feed_dict={state_vec_t: [state_vec]}
         )
         ctl_dicts = model_function.predictions_to_ctls(ctl_vectors, state)
-        ctl_dict = ctl_dicts[0]
         buffer_s.append(state_vec)
         buffer_v.append(value)
         for ctl in controls:
-            buffer_a[ctl].append(ctl_features[ctl](ctl_dict))
+            buffer_a[ctl].append(ctl_vectors[ctl])
         return ctl_dicts
 
     opponent_function = util.get_object_by_config("config.ini", "ai.simple_longrange")
@@ -142,7 +144,7 @@ def main(argv=None):
             max_ticks=2000,
             wait_after_win_ticks=0,
             stop_all_after_finish=True,
-            debug=True
+            debug=True,
         )
         engine.play_all()
         t1 = engine.team1
@@ -214,4 +216,4 @@ def _extract_immediate_value(replay_data, t1, t2):
 
 if __name__ == "__main__":
     # main([".data/A3C/models/direct", ".data/A3C/logs/direct/try1"])
-    main([".data/A3C/models/anglenav2", ".data/A3C/logs/anglenav2/try1"])
+    main([".data/A3C/models/anglenav2", ".data/A3C/logs/anglenav2/try3"])

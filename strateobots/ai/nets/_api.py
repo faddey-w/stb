@@ -1,6 +1,6 @@
 import tensorflow as tf
 import numpy as np
-from strateobots.ai.lib import data, data_encoding
+from strateobots.ai.lib import data, data_encoding, util
 
 
 class ControlOutput:
@@ -29,29 +29,22 @@ class ControlOutput:
 class CategoricalControlOutput(ControlOutput):
     def __init__(self, control, state, logits_dict):
         super(CategoricalControlOutput, self).__init__(control, state, logits_dict)
-        self.ctl_feature = data.get_control_feature(self.control)
-        self.ctl_values = tf.constant(self.ctl_feature.categories)
+        self.n_categories = data.get_control_feature(self.control).dimension
         self._logits = self.logits_dict[self.control]
 
     def choice(self):
-        indices_batch = tf.argmax(self._logits, axis=-1)
-        return self._choice_by_indices(indices_batch)
+        return tf.argmax(self._logits, axis=-1)
 
     def sample(self):
-        indices_batch = tf.random.categorical(self._logits, 1)[:, 0]
-        return self._choice_by_indices(indices_batch)
-
-    def _choice_by_indices(self, indices_batch):
-        return tf.gather(self.ctl_values, indices_batch, axis=0)
+        return tf.random.categorical(self._logits, 1)[:, 0]
 
     def entropy(self):
         prob = tf.nn.softmax(self._logits)
         log_prob = tf.nn.log_softmax(self._logits)
         return -prob * log_prob
 
-    def log_prob(self, category_value):
-        mask = tf.equal(category_value, tf.expand_dims(self.ctl_values, 0))
-        onehot = tf.cast(mask, tf.float32)
+    def log_prob(self, category_index):
+        onehot = tf.one_hot(category_index, self.n_categories)
         return tf.nn.softmax_cross_entropy_with_logits_v2(
             labels=onehot, logits=self._logits
         )
@@ -66,9 +59,10 @@ class ScalarOutput(ControlOutput):
         super(ScalarOutput, self).__init__(control, state, logits_dict)
         self.min_value = min_value
         self.max_value = max_value
-        mean = logits_dict[self.control + "_mean"][:, 0]
-        std = logits_dict[self.control + "_std"][:, 0]
-        self._distr = tf.distributions.Normal(mean, std)
+        self.mean = logits_dict[self.control + "_mean"][:, 0]
+        self.std = logits_dict[self.control + "_std"][:, 0]
+        self.std = tf.nn.softplus(self.std) + 0.2
+        self._distr = tf.distributions.Normal(self.mean, self.std)
 
     @classmethod
     def Bounded(cls, min_value=None, max_value=None):
@@ -85,7 +79,7 @@ class ScalarOutput(ControlOutput):
         return self._clip(self._distr.sample(1)[0])
 
     def entropy(self):
-        return self._distr.entropy()
+        return util.assert_finite(self._distr.entropy(), [self.control])
 
     def log_prob(self, x):
         return self._distr.log_prob(x)
