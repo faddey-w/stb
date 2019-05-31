@@ -2,6 +2,7 @@ import argparse
 import os
 import queue
 import threading
+import random
 from multiprocessing import cpu_count
 import numpy as np
 import tensorflow as tf
@@ -117,10 +118,10 @@ def main(argv=None):
     if ckpt:
         print("Restoring model from", ckpt)
         saver.restore(sess, ckpt)
-        sess.run(sync_op)
     else:
         print("Initializing untrained model")
         sess.run(init_op)
+    sess.run(sync_op)
     summary_writer = tf.summary.FileWriter(opts.model_dir)
 
     buffer_s = []
@@ -145,69 +146,85 @@ def main(argv=None):
             daemon=True
         ).start()
 
+    need_to_sync = False
+    need_to_save = False
     init_step = sess.run(train_step_t)
-    for game_i in range(init_step, init_step + total_games):
+    game_i = init_step-1
+    while True:
+        game_i += 1
         if game_i % sync_each_n_games == 0:
-            sess.run(sync_op)
+            need_to_sync = True
+        if game_i % save_each_n_steps == 0:
+            need_to_save = True
 
-        offs = len(buffer_s)
         engine, buf_s, buf_a, buf_v = replays_queue.get()
-        buffer_s.extend(buf_s)
-        buffer_v.extend(buf_v)
-        for ctl in controls:
-            buffer_a[ctl].extend(buf_a[ctl])
         t1 = engine.team1
         t2 = engine.team2
-        sess.run(inc_step_op)
+        episode_len = len(buf_v)
 
         imm_val = _extract_immediate_value(engine.replay, t1, t2)
-        # immediate_rewards = imm_val[1:] - imm_val[:-1]
-        immediate_rewards = imm_val[1:]
+        immediate_rewards = imm_val[1:] - imm_val[:-1]
+        # immediate_rewards = imm_val[1:]
         discounted_reward_reverted = []
         r_acc = 0
         for r in immediate_rewards[::-1]:
             r_acc = r_acc * reward_discount + r
             discounted_reward_reverted.append(r_acc)
-        buffer_r.extend(discounted_reward_reverted[::-1])
+        discounted_reward = discounted_reward_reverted[::-1]
+        assert len(set(map(len, [buf_s, *buf_a.values(), buf_v, discounted_reward]))) == 1, (
+            tuple(map(len, [buf_s, *buf_a.values(), buf_v, discounted_reward]))
+        )
 
-        mean_reward = float(np.mean(buffer_r[offs:]))
-        mean_value = float(np.mean(buffer_v[offs:]))
+        mean_reward = float(np.mean(discounted_reward_reverted))
+        mean_value = float(np.mean(buf_v))
         perf_smr = tf.Summary()
         perf_smr.value.add(tag="Perf/Reward", simple_value=mean_reward)
-        perf_smr.value.add(tag="Perf/Length", simple_value=len(buffer_r[offs:]))
+        perf_smr.value.add(tag="Perf/Length", simple_value=episode_len)
         perf_smr.value.add(tag="Perf/Value", simple_value=mean_value)
         perf_smr.value.add(tag="Perf/Advantage", simple_value=mean_reward - mean_value)
         summary_writer.add_summary(perf_smr, game_i)
         print(f"Game {game_i+1}/{init_step+total_games}: m_r={mean_reward:.3f}")
 
-        while len(buffer_s) >= replay_subsample_rate * batch_size:
-            subsample = slice(
-                None, replay_subsample_rate * batch_size, replay_subsample_rate
-            )
-            remain_slice = slice(replay_subsample_rate * batch_size, None)
+        sample_indices = random.sample(range(episode_len), episode_len // replay_subsample_rate)
+        buffer_r.extend(_sample(discounted_reward, sample_indices))
+        buffer_s.extend(_sample(buf_s, sample_indices))
+        buffer_v.extend(_sample(buf_v, sample_indices))
+        for ctl in controls:
+            buffer_a[ctl].extend(_sample(buf_a[ctl], sample_indices))
+        sess.run(inc_step_op)
+
+        train_step_was_done = False
+        while len(buffer_s) >= batch_size:
+            train_step_was_done = True
 
             actions_feed = {
-                actions_his_t[ctl]: buffer_a[ctl][subsample] for ctl in controls
+                actions_his_t[ctl]: buffer_a[ctl][:batch_size] for ctl in controls
             }
             feed = {
-                state_his_t: buffer_s[subsample],
-                reward_t: buffer_r[subsample],
+                state_his_t: buffer_s[:batch_size],
+                reward_t: buffer_r[:batch_size],
                 **actions_feed,
             }
             train_smr, _ = sess.run([train_summaies_t, update_op], feed)
 
-            buffer_r = buffer_r[remain_slice]
-            buffer_s = buffer_s[remain_slice]
-            buffer_v = buffer_v[remain_slice]
-            buffer_a = {ctl: buffer_a[ctl][remain_slice] for ctl in controls}
+            buffer_r = buffer_r[batch_size:]
+            buffer_s = buffer_s[batch_size:]
+            buffer_v = buffer_v[batch_size:]
+            buffer_a = {ctl: buffer_a[ctl][batch_size:] for ctl in controls}
 
             summary_writer.add_summary(train_smr, game_i)
 
-        if game_i % save_each_n_steps == 0:
-            ckpt = saver.save(sess, os.path.join(opts.model_dir, "model-ckpt"), game_i)
-            print("Model is saved to", ckpt)
-
         summary_writer.flush()
+
+        if train_step_was_done:
+            if need_to_sync:
+                sess.run(sync_op)
+                print("sync workers...")
+                need_to_sync = False
+            if need_to_save:
+                ckpt = saver.save(sess, os.path.join(opts.model_dir, "model-ckpt"), game_i)
+                print("Model is saved to", ckpt)
+                need_to_save = False
 
 
 def play_worker(
@@ -254,6 +271,10 @@ def play_worker(
         out_queue.put((engine, buffer_s, buffer_a, buffer_v))
 
 
+def _sample(values, indices):
+    return np.array(values)[indices]
+
+
 def _extract_immediate_value(replay_data, t1, t2):
     vals = []
     for state in replay_data:
@@ -272,4 +293,4 @@ def _extract_immediate_value(replay_data, t1, t2):
 
 if __name__ == "__main__":
     # main([".data/A3C/models/direct", ".data/A3C/logs/direct/try1"])
-    main([".data/A3C/models/anglenav2"])
+    main()
