@@ -1,13 +1,16 @@
+import argparse
 import os
 from strateobots.ai.lib import model_saving
 
 
 def main():
-    # model_dir = ".data/supervised/models/anglenav2"
-    model_dir = ".data/a3c/models/direct"
-    target_controls = ["move", "rotate", "tower_rotate", "action"]
-    # target_controls = ["move", "orientation", "gun_orientation", "action"]
-    model_constructor = "strateobots.ai.nets.dnn:make_v3"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("model_dir")
+    parser.add_argument("--version", "-v", choices=["1", "2", "3"])
+    opts = parser.parse_args()
+    model_dir = opts.model_dir
+    target_controls = ["move", "orientation", "gun_orientation", "action"]
+    model_constructor = f"strateobots.ai.nets.dnn:make_v{opts.version}"
     encoder_name = "1vs1_fully_visible"
 
     os.makedirs(model_dir)
