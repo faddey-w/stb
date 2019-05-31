@@ -1,9 +1,11 @@
 import argparse
 import os
+import queue
+import threading
+from multiprocessing import cpu_count
 import numpy as np
 import tensorflow as tf
 from strateobots.ai.lib import model_function, model_saving, data_encoding, data
-from strateobots.ai.lib.util import assert_finite
 from strateobots.ai import nets
 from strateobots.engine import StbEngine, BotType
 from strateobots.ai.lib.bot_initializers import random_bot_initializer
@@ -46,6 +48,7 @@ def main(argv=None):
     replay_subsample_rate = 5
     total_games = 1000
     save_each_n_steps = 10
+    n_workers = cpu_count() - 1
     state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
     worker_controls_t = {
         ctl: out.sample()[0]
@@ -120,26 +123,27 @@ def main(argv=None):
         sess.run(init_op)
     summary_writer = tf.summary.FileWriter(opts.model_dir)
 
-    bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
-
-    def agent_function(state):
-        state_vec = encoder(state)
-        ctl_vectors, value = sess.run(
-            (worker_controls_t, worker_value_t), feed_dict={state_vec_t: [state_vec]}
-        )
-        ctl_dicts = model_function.predictions_to_ctls(ctl_vectors, state)
-        buffer_s.append(state_vec)
-        buffer_v.append(value)
-        for ctl in controls:
-            buffer_a[ctl].append(ctl_vectors[ctl])
-        return ctl_dicts
-
-    opponent_function = util.get_object_by_config("config.ini", "ai.simple_longrange")
-
     buffer_s = []
     buffer_r = []
     buffer_a = {ctl: [] for ctl in controls}
     buffer_v = []
+    replays_queue = queue.Queue(maxsize=n_workers * 3)
+
+    opponent_function = util.get_object_by_config("config.ini", "ai.simple_longrange")
+    for _ in range(n_workers):
+        threading.Thread(
+            target=lambda: play_worker(
+                sess,
+                worker_controls_t,
+                worker_value_t,
+                state_vec_t,
+                controls,
+                opponent_function,
+                encoder,
+                replays_queue,
+            ),
+            daemon=True
+        ).start()
 
     init_step = sess.run(train_step_t)
     for game_i in range(init_step, init_step + total_games):
@@ -147,17 +151,11 @@ def main(argv=None):
             sess.run(sync_op)
 
         offs = len(buffer_s)
-
-        engine = StbEngine(
-            ai1=agent_function,
-            ai2=opponent_function,
-            initialize_bots=bot_init,
-            max_ticks=2000,
-            wait_after_win_ticks=0,
-            stop_all_after_finish=True,
-            debug=True,
-        )
-        engine.play_all()
+        engine, buf_s, buf_a, buf_v = replays_queue.get()
+        buffer_s.extend(buf_s)
+        buffer_v.extend(buf_v)
+        for ctl in controls:
+            buffer_a[ctl].extend(buf_a[ctl])
         t1 = engine.team1
         t2 = engine.team2
         sess.run(inc_step_op)
@@ -210,6 +208,50 @@ def main(argv=None):
             print("Model is saved to", ckpt)
 
         summary_writer.flush()
+
+
+def play_worker(
+    sess,
+    worker_controls_t,
+    worker_value_t,
+    state_vec_t,
+    controls,
+    opponent_function,
+    encoder,
+    out_queue,
+):
+    while True:
+
+        def agent_function(state):
+            state_vec = encoder(state)
+            ctl_vectors, value = sess.run(
+                (worker_controls_t, worker_value_t),
+                feed_dict={state_vec_t: [state_vec]},
+            )
+            ctl_dicts = model_function.predictions_to_ctls(ctl_vectors, state)
+            buffer_s.append(state_vec)
+            buffer_v.append(value)
+            for ctl in controls:
+                buffer_a[ctl].append(ctl_vectors[ctl])
+            return ctl_dicts
+
+        buffer_s = []
+        buffer_a = {ctl: [] for ctl in controls}
+        buffer_v = []
+
+        bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
+        engine = StbEngine(
+            ai1=agent_function,
+            ai2=opponent_function,
+            initialize_bots=bot_init,
+            max_ticks=2000,
+            wait_after_win_ticks=0,
+            stop_all_after_finish=True,
+            debug=True,
+        )
+        engine.play_all()
+
+        out_queue.put((engine, buffer_s, buffer_a, buffer_v))
 
 
 def _extract_immediate_value(replay_data, t1, t2):
