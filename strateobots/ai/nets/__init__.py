@@ -4,4 +4,5 @@ from ._api import CategoricalControlOutput
 from ._api import OrientationOutput
 from ._api import build_network
 from ._api import build_inference
+from ._api import AnglenavModel
 from . import dnn

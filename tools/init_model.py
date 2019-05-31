@@ -6,7 +6,7 @@ from strateobots.ai.lib import model_saving
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("model_dir")
-    parser.add_argument("--version", "-v", choices=["1", "2", "3"])
+    parser.add_argument("--version", "-v", choices=["1", "2", "3"], required=True)
     opts = parser.parse_args()
     model_dir = opts.model_dir
     target_controls = ["move", "orientation", "gun_orientation", "action"]

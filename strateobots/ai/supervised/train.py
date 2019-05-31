@@ -1,6 +1,7 @@
 import tensorflow as tf
 from tensorflow_estimator import estimator as tf_estimator
 from strateobots.ai.lib import data_encoding, data, model_saving
+from strateobots.ai import nets
 from strateobots import util
 import numpy as np
 import os
@@ -22,11 +23,15 @@ class Input:
         self.controls = {
             ctl: data_encoding.extract_control(self.controls, ctl) for ctl in controls
         }
+        self.controls = {
+            ctl: np.argmax(arr, axis=1) if ctl in data.CATEGORICAL_CONTROLS else arr[:, 0]
+            for ctl, arr in self.controls.items()
+        }
         self.size = self.states.shape[0]
         self.state_dimension = self.states.shape[1]
-        self.control_dimensions = {
-            ctl: arr.shape[1] for ctl, arr in self.controls.items()
-        }
+        # self.control_dimensions = {
+        #     ctl: arr.shape[1] for ctl, arr in self.controls.items()
+        # }
 
     def __call__(self, mode, params):
         if mode not in (tf_estimator.ModeKeys.TRAIN, tf_estimator.ModeKeys.EVAL):
@@ -45,9 +50,10 @@ class Model:
     def __call__(self, features, params, mode):
         state_batch = features["state"]  # type: tf.Tensor
         state_batch.set_shape([params["batch_size"], None])
+        entropy_weight = params["entropy_weight"]
 
-        net = util.get_by_import_path(params["net_ctor"])(params["controls"])
-        prediction_logits, predictions = net(state_batch)
+        model = nets.AnglenavModel(util.get_by_import_path(params["net_ctor"]))
+        _, predictions = model(state_batch)
 
         total_loss = None
         train_op = None
@@ -56,21 +62,12 @@ class Model:
             target_controls = features["controls"]
             losses = {}
             for ctl, ctl_value in target_controls.items():
-                if ctl in data.CATEGORICAL_CONTROLS:
-                    losses[ctl] = tf.losses.softmax_cross_entropy(
-                        ctl_value, prediction_logits[ctl], label_smoothing=0.05
-                    )
-                else:
-                    ctl_value = ctl_value[:, 0]
-                    pred = predictions[ctl]
-                    if isinstance(pred, tf.distributions.Distribution):
-                        mean = pred.mean()
-                        stddev = pred.stddev()
-                    else:
-                        mean = pred
-                        stddev = 0
-                    losses[ctl] = tf.losses.mean_squared_error(ctl_value, mean) + 0.1 * stddev
-            total_loss = tf.add_n(list(map(tf.reduce_mean, losses.values())))
+                pred = predictions[ctl]
+                losses[ctl] = tf.reduce_mean(-pred.log_prob(ctl_value))
+                # if ctl in data.CATEGORICAL_CONTROLS:
+                #     losses[ctl] = tf.Print(losses[ctl], [ctl, ctl_value, pred.probabilities(), losses[ctl]], summarize=20)
+                # losses[ctl] -= tf.reduce_mean(pred.entropy() * entropy_weight)
+            total_loss = tf.add_n(list(losses.values()))
 
             if mode is tf_estimator.ModeKeys.EVAL:
                 eval_metric_ops = {}
@@ -78,15 +75,18 @@ class Model:
                     eval_metric_ops[f"Loss/{ctl}"] = tf.metrics.mean(loss)
                     if ctl in data.CATEGORICAL_CONTROLS:
                         ctl_feature = data.get_control_feature(ctl)
+                        pred_indices = predictions[ctl].choice()
+                        pred_probs = predictions[ctl].probabilities()
+                        target_indices = target_controls[ctl]
                         for i, label in enumerate(ctl_feature.labels):
-                            targets = target_controls[ctl][..., i]
-                            preds = predictions[ctl][..., i]
+                            tgt_match = tf.equal(target_indices, i)
+                            pred_match = tf.equal(pred_indices, i)
                             eval_metric_ops[f"ROC-AUC_{ctl}/{label}"] = tf.metrics.auc(
-                                targets, preds
+                                tgt_match, pred_probs[..., i]
                             )
                             eval_metric_ops[
                                 f"Accuracy_{ctl}/{label}"
-                            ] = tf.metrics.accuracy(targets > 0.5, preds > 0.5)
+                            ] = tf.metrics.accuracy(tgt_match, pred_match)
                 eval_metric_ops["Loss/Total"] = tf.metrics.mean(total_loss)
 
             if mode is tf_estimator.ModeKeys.TRAIN:
@@ -111,7 +111,7 @@ class Model:
 def main():
     states_dir = ".data/supervised/numpy"
     controls_dir = ".data/supervised/controls"
-    model_dir = ".data/supervised/models/anglenav2"
+    model_dir = ".data/supervised/models/anglenav3"
     train_steps = 1000
 
     logging.basicConfig(level=logging.INFO)
@@ -126,8 +126,8 @@ def main():
     estimator = tf_estimator.Estimator(
         model_fn=model,
         params={
-            "controls": target_controls,
-            "batch_size": 50,
+            "entropy_weight": 0.1,
+            "batch_size": 1000,
             "state_dim": train_input.state_dimension,
             "net_ctor": model_constructor,
         },

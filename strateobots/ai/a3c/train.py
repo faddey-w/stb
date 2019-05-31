@@ -16,6 +16,8 @@ from strateobots import util
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("model_dir")
+    parser.add_argument("--init-training", action="store_true",
+                        help="use when restoring first time from pretrained network")
     opts = parser.parse_args(argv)
 
     controls, model_ctor_name, encoder_name = model_saving.load_model_config(
@@ -24,22 +26,10 @@ def main(argv=None):
     model_ctor = util.get_by_import_path(model_ctor_name)
     encoder, state_dim = data_encoding.get_encoder(encoder_name)
 
-    control_model = {
-        "move": nets.CategoricalControlOutput,
-        "action": nets.CategoricalControlOutput,
-        # "orientation": nets.ScalarOutput,
-        "orientation": nets.OrientationOutput,
-        # "gun_orientation": nets.ScalarOutput,
-        "gun_orientation": nets.OrientationOutput,
-    }
-    assert set(controls) == set(control_model.keys())
-    controls = tuple(control_model.keys())
-
-    global_actor = nets.build_network("GlobalNet/Actor", model_ctor, control_model)
-    global_critic = model_ctor({"value": 1}, scope="GlobalNet/Critic")
-
-    worker_actor = nets.build_network("WorkerNet/Actor", model_ctor, control_model)
-    worker_critic = model_ctor({"value": 1}, scope="WorkerNet/Critic")
+    global_model = nets.AnglenavModel(model_ctor, "GlobalNet")
+    worker_model = nets.AnglenavModel(model_ctor, "WorkerNet")
+    assert set(controls) == set(global_model.control_model.keys())
+    controls = tuple(global_model.control_model.keys())
 
     batch_size = 3000
     entropy_weight = 0.1
@@ -50,17 +40,14 @@ def main(argv=None):
     save_each_n_steps = 50
     n_workers = cpu_count()
     state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
+    worker_value_t, worker_controls_outs = worker_model(state_vec_t)
     worker_controls_t = {
         ctl: out.sample()[0]
-        for ctl, out in nets.build_inference(
-            worker_actor, state_vec_t, control_model
-        ).items()
+        for ctl, out in worker_controls_outs.items()
     }
-    worker_value_t = worker_critic(state_vec_t)["value"][0]
 
-    # create variable nodes for global nets:
-    global_actor(state_vec_t)
-    global_critic(state_vec_t)
+    # make sure variable nodes for global net are created:
+    global_model(state_vec_t)
 
     state_his_t = tf.placeholder(tf.float32, [batch_size, state_dim])
     actions_his_t = {
@@ -70,8 +57,7 @@ def main(argv=None):
         for ctl in controls
     }
     reward_t = tf.placeholder(tf.float32, [batch_size])
-    policy_prediction = nets.build_inference(worker_actor, state_his_t, control_model)
-    value_prediction_t = worker_critic(state_his_t)["value"][:, 0]
+    value_prediction_t, policy_prediction = worker_model(state_his_t)
 
     critic_loss = tf.losses.mean_squared_error(reward_t, value_prediction_t)
     advantage = tf.stop_gradient(reward_t - value_prediction_t)
@@ -103,12 +89,16 @@ def main(argv=None):
     train_step_t = tf.train.get_or_create_global_step()
     inc_step_op = tf.assign_add(train_step_t, 1)
 
-    saveable_variables = g_vars + opt.variables() + [train_step_t]
+    training_process_variables = opt.variables() + [train_step_t]
+    all_saveable_variables = g_vars + training_process_variables
     saver = tf.train.Saver(
-        saveable_variables, keep_checkpoint_every_n_hours=1, max_to_keep=5
+        all_saveable_variables, keep_checkpoint_every_n_hours=1, max_to_keep=5
     )
+    model_restorer = tf.train.Saver(g_vars)
+    training_state_restorer = tf.train.Saver(training_process_variables)
+    model_init_op = tf.variables_initializer(all_saveable_variables)
+    training_init_op = tf.variables_initializer(training_process_variables)
 
-    init_op = tf.variables_initializer(saveable_variables)
     train_summaies_t = tf.summary.merge_all()
     tf.get_default_graph().finalize()
     sess = tf.Session()
@@ -116,10 +106,15 @@ def main(argv=None):
     ckpt = tf.train.latest_checkpoint(opts.model_dir)
     if ckpt:
         print("Restoring model from", ckpt)
-        saver.restore(sess, ckpt)
+        model_restorer.restore(sess, ckpt)
+        if opts.init_training:
+            print("Initializing training from scratch!")
+            sess.run(training_init_op)
+        else:
+            training_state_restorer.restore(sess, ckpt)
     else:
         print("Initializing untrained model")
-        sess.run(init_op)
+        sess.run(model_init_op)
     sess.run(sync_op)
     summary_writer = tf.summary.FileWriter(opts.model_dir)
 

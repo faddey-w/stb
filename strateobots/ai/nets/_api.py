@@ -32,6 +32,12 @@ class CategoricalControlOutput(ControlOutput):
         self.n_categories = data.get_control_feature(self.control).dimension
         self._logits = self.logits_dict[self.control]
 
+    def logits(self):
+        return self._logits
+
+    def probabilities(self):
+        return tf.nn.softmax(self._logits)
+
     def choice(self):
         return tf.argmax(self._logits, axis=-1)
 
@@ -44,9 +50,14 @@ class CategoricalControlOutput(ControlOutput):
         return -prob * log_prob
 
     def log_prob(self, category_index):
-        onehot = tf.one_hot(category_index, self.n_categories)
-        tf.losses.softmax_cross_entropy(onehot, self._logits)
-        return tf.losses.softmax_cross_entropy(onehot, self._logits, label_smoothing=0.02)
+        max_logit = tf.maximum(0.0, tf.reduce_max(self._logits, axis=1, keep_dims=True))
+        exp_safe = tf.exp(self._logits - max_logit)
+        expsum = tf.reduce_sum(exp_safe, axis=1)
+        batch_range = tf.range(tf.shape(self._logits)[0])
+        gathering_indices = tf.stack([tf.cast(batch_range, tf.int32), tf.cast(category_index, tf.int32)], axis=1)
+        tgt_logit = tf.gather_nd(self._logits, gathering_indices)
+        logprob = tgt_logit - tf.log(expsum) - tf.squeeze(max_logit, axis=1)
+        return logprob
 
     @staticmethod
     def heads(control):
@@ -96,7 +107,6 @@ class ScalarOutput(ControlOutput):
 
 
 class OrientationOutput(ControlOutput):
-
     def __init__(self, control, state, logits_dict):
         assert control in ("gun_orientation", "orientation")
         super(OrientationOutput, self).__init__(control, state, logits_dict)
@@ -115,7 +125,7 @@ class OrientationOutput(ControlOutput):
         self.base_angle = tow_ori if self.is_for_gun else ori
 
     def choice(self):
-        return self._to_angle(self._distr.mean()[:, 0])
+        return self._to_angle(self._distr.mean())
 
     def sample(self):
         return self._to_angle(self._distr.sample(1)[0])
@@ -125,13 +135,9 @@ class OrientationOutput(ControlOutput):
 
     def log_prob(self, x):
         rel_angle = x - self.base_angle + np.pi
-        rel_angle = tf.clip_by_value(rel_angle, -1e-2, 2*np.pi-1e-2)
+        rel_angle = tf.clip_by_value(rel_angle, 1e-2, 2 * np.pi - 1e-2)
         beta_value = rel_angle / (2 * np.pi)
-        bounds_assertion = tf.Assert(tf.reduce_all(tf.logical_and(
-            0 < beta_value, beta_value < 1
-        )), [beta_value, x, self.base_angle], summarize=100)
-        with tf.control_dependencies([bounds_assertion]):
-            return self._distr.log_prob(beta_value)
+        return self._distr.log_prob(beta_value)
 
     @staticmethod
     def heads(control):
@@ -156,3 +162,24 @@ def build_inference(network, state, control_outputs):
         ctl: ctl_cls(ctl, state, logits_dict)
         for ctl, ctl_cls in control_outputs.items()
     }
+
+
+class AnglenavModel:
+    def __init__(self, network_factory, scope=None):
+        self.control_model = {
+            "move": CategoricalControlOutput,
+            "action": CategoricalControlOutput,
+            "orientation": OrientationOutput,
+            "gun_orientation": OrientationOutput,
+        }
+        self.policy_net = build_network(
+            util.make_scope(scope, "Actor"), network_factory, self.control_model
+        )
+        self.value_net = network_factory(
+            {"value": 1}, scope=util.make_scope(scope, "Critic")
+        )
+
+    def __call__(self, state_vectors):
+        ctl_outs = build_inference(self.policy_net, state_vectors, self.control_model)
+        value_tensor = self.value_net(state_vectors)["value"][0]
+        return value_tensor, ctl_outs

@@ -98,3 +98,12 @@ def assert_finite(tensor, watches=(), summarize=50):
     assertion = tf.Assert(tf.reduce_all(tf.is_finite(tensor)), watches, summarize=summarize)
     with tf.control_dependencies([assertion]):
         return tf.identity(tensor)
+
+
+def make_scope(prefix, suffix):
+    if prefix is None:
+        return suffix
+    if prefix.endswith("/"):
+        return prefix + suffix
+    else:
+        return prefix + "/" + suffix
