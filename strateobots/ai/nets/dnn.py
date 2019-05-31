@@ -73,7 +73,7 @@ def make_v2(heads, scope=None):
 
 def make_v3(heads, scope=None):
     return DNN(
-        stem_units=[(80, tf.nn.leaky_relu), (50, tf.nn.leaky_relu)],
+        stem_units=[(80, tf.nn.leaky_relu), (60, tf.nn.leaky_relu)],
         head_units={None: [(40, tf.nn.leaky_relu), (30, tf.nn.leaky_relu)]},
         heads=heads,
         scope=scope,

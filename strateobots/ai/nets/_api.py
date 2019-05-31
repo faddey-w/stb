@@ -45,9 +45,8 @@ class CategoricalControlOutput(ControlOutput):
 
     def log_prob(self, category_index):
         onehot = tf.one_hot(category_index, self.n_categories)
-        return tf.nn.softmax_cross_entropy_with_logits_v2(
-            labels=onehot, logits=self._logits
-        )
+        tf.losses.softmax_cross_entropy(onehot, self._logits)
+        return tf.losses.softmax_cross_entropy(onehot, self._logits, label_smoothing=0.02)
 
     @staticmethod
     def heads(control):

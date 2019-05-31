@@ -13,7 +13,6 @@ from strateobots import util
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("model_dir")
-    parser.add_argument("log_dir")
     opts = parser.parse_args(argv)
 
     controls, model_ctor_name, encoder_name = model_saving.load_model_config(
@@ -30,6 +29,8 @@ def main(argv=None):
         "gun_orientation": nets.ScalarOutput,
         # "gun_orientation": nets.OrientationOutput,
     }
+    assert set(controls) == set(control_model.keys())
+    controls = tuple(control_model.keys())
 
     global_actor = nets.build_network("GlobalNet/Actor", model_ctor, control_model)
     global_critic = model_ctor({"value": 1}, scope="GlobalNet/Critic")
@@ -37,13 +38,14 @@ def main(argv=None):
     worker_actor = nets.build_network("WorkerNet/Actor", model_ctor, control_model)
     worker_critic = model_ctor({"value": 1}, scope="WorkerNet/Critic")
 
-    batch_size = 200
+    batch_size = 500
     entropy_weight = 0.1
     learning_rate = 0.01
-    sync_each_n_games = 5
+    sync_each_n_games = 3
     reward_discount = 0.95
     replay_subsample_rate = 5
-    total_games = 500
+    total_games = 1000
+    save_each_n_steps = 10
     state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
     worker_controls_t = {
         ctl: out.sample()[0]
@@ -79,8 +81,7 @@ def main(argv=None):
         entropy = tf.reduce_mean(pred.entropy())
         tf.summary.scalar("Loss/" + ctl, loss)
         tf.summary.scalar("Entropy/" + ctl, entropy)
-        actor_losses[ctl] = assert_finite(loss - entropy_weight * entropy, [ctl, action_his], 200)
-        # actor_losses[ctl] = tf.maximum(loss, 0) - entropy_weight * tf.maximum(entropy, 0)
+        actor_losses[ctl] = loss - entropy_weight * entropy
     actor_loss = tf.add_n(list(actor_losses.values()))
     total_loss = critic_loss + actor_loss
     tf.summary.scalar("Loss/total", total_loss)
@@ -94,21 +95,30 @@ def main(argv=None):
     tf.summary.scalar("Loss/grad_norm", grad_norm)
 
     opt = tf.train.RMSPropOptimizer(learning_rate)
-    train_step_t = tf.train.get_or_create_global_step()
-    update_op = opt.apply_gradients(list(zip(grads, g_vars)), train_step_t)
+    update_op = opt.apply_gradients(list(zip(grads, g_vars)))
     sync_op = [w_v.assign(g_v) for w_v, g_v in zip(w_vars, g_vars)]
+    train_step_t = tf.train.get_or_create_global_step()
+    inc_step_op = tf.assign_add(train_step_t, 1)
 
-    init_op = (
-        tf.variables_initializer(g_vars + opt.variables()),
-        train_step_t.initializer,
+    saveable_variables = g_vars + opt.variables() + [train_step_t]
+    saver = tf.train.Saver(
+        saveable_variables, keep_checkpoint_every_n_hours=1, max_to_keep=5
     )
+
+    init_op = tf.variables_initializer(saveable_variables)
     train_summaies_t = tf.summary.merge_all()
     tf.get_default_graph().finalize()
     sess = tf.Session()
 
-    sess.run(init_op)
-    os.makedirs(opts.log_dir, exist_ok=True)
-    summary_writer = tf.summary.FileWriter(opts.log_dir)
+    ckpt = tf.train.latest_checkpoint(opts.model_dir)
+    if ckpt:
+        print("Restoring model from", ckpt)
+        saver.restore(sess, ckpt)
+        sess.run(sync_op)
+    else:
+        print("Initializing untrained model")
+        sess.run(init_op)
+    summary_writer = tf.summary.FileWriter(opts.model_dir)
 
     bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
 
@@ -131,7 +141,8 @@ def main(argv=None):
     buffer_a = {ctl: [] for ctl in controls}
     buffer_v = []
 
-    for game_i in range(total_games):
+    init_step = sess.run(train_step_t)
+    for game_i in range(init_step, init_step + total_games):
         if game_i % sync_each_n_games == 0:
             sess.run(sync_op)
 
@@ -149,6 +160,7 @@ def main(argv=None):
         engine.play_all()
         t1 = engine.team1
         t2 = engine.team2
+        sess.run(inc_step_op)
 
         imm_val = _extract_immediate_value(engine.replay, t1, t2)
         # immediate_rewards = imm_val[1:] - imm_val[:-1]
@@ -168,9 +180,9 @@ def main(argv=None):
         perf_smr.value.add(tag="Perf/Value", simple_value=mean_value)
         perf_smr.value.add(tag="Perf/Advantage", simple_value=mean_reward - mean_value)
         summary_writer.add_summary(perf_smr, game_i)
-        print(f"Game {game_i+1}/{total_games}: m_r={mean_reward:.3f}")
+        print(f"Game {game_i+1}/{init_step+total_games}: m_r={mean_reward:.3f}")
 
-        if len(buffer_s) >= replay_subsample_rate * batch_size:
+        while len(buffer_s) >= replay_subsample_rate * batch_size:
             subsample = slice(
                 None, replay_subsample_rate * batch_size, replay_subsample_rate
             )
@@ -184,16 +196,18 @@ def main(argv=None):
                 reward_t: buffer_r[subsample],
                 **actions_feed,
             }
-            train_smr, _, train_step = sess.run(
-                [train_summaies_t, update_op, train_step_t], feed
-            )
+            train_smr, _ = sess.run([train_summaies_t, update_op], feed)
 
             buffer_r = buffer_r[remain_slice]
             buffer_s = buffer_s[remain_slice]
             buffer_v = buffer_v[remain_slice]
             buffer_a = {ctl: buffer_a[ctl][remain_slice] for ctl in controls}
 
-            summary_writer.add_summary(train_smr, train_step)
+            summary_writer.add_summary(train_smr, game_i)
+
+        if game_i % save_each_n_steps == 0:
+            ckpt = saver.save(sess, os.path.join(opts.model_dir, "model-ckpt"), game_i)
+            print("Model is saved to", ckpt)
 
         summary_writer.flush()
 
@@ -216,4 +230,4 @@ def _extract_immediate_value(replay_data, t1, t2):
 
 if __name__ == "__main__":
     # main([".data/A3C/models/direct", ".data/A3C/logs/direct/try1"])
-    main([".data/A3C/models/anglenav2", ".data/A3C/logs/anglenav2/try3"])
+    main([".data/A3C/models/anglenav2"])

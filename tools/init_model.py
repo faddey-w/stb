@@ -7,7 +7,7 @@ def main():
     model_dir = ".data/a3c/models/direct"
     target_controls = ["move", "rotate", "tower_rotate", "action"]
     # target_controls = ["move", "orientation", "gun_orientation", "action"]
-    model_constructor = "strateobots.ai.nets.dnn:make_v2"
+    model_constructor = "strateobots.ai.nets.dnn:make_v3"
     encoder_name = "1vs1_fully_visible"
 
     os.makedirs(model_dir)
