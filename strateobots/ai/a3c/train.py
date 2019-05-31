@@ -27,10 +27,10 @@ def main(argv=None):
     control_model = {
         "move": nets.CategoricalControlOutput,
         "action": nets.CategoricalControlOutput,
-        "orientation": nets.ScalarOutput,
-        # "orientation": nets.OrientationOutput,
-        "gun_orientation": nets.ScalarOutput,
-        # "gun_orientation": nets.OrientationOutput,
+        # "orientation": nets.ScalarOutput,
+        "orientation": nets.OrientationOutput,
+        # "gun_orientation": nets.ScalarOutput,
+        "gun_orientation": nets.OrientationOutput,
     }
     assert set(controls) == set(control_model.keys())
     controls = tuple(control_model.keys())
@@ -41,15 +41,14 @@ def main(argv=None):
     worker_actor = nets.build_network("WorkerNet/Actor", model_ctor, control_model)
     worker_critic = model_ctor({"value": 1}, scope="WorkerNet/Critic")
 
-    batch_size = 500
+    batch_size = 3000
     entropy_weight = 0.1
-    learning_rate = 0.01
-    sync_each_n_games = 3
+    learning_rate = 0.001
+    sync_each_n_games = 1
     reward_discount = 0.95
-    replay_subsample_rate = 5
-    total_games = 1000
-    save_each_n_steps = 10
-    n_workers = cpu_count() - 1
+    replay_subsample_rate = 2
+    save_each_n_steps = 50
+    n_workers = cpu_count()
     state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
     worker_controls_t = {
         ctl: out.sample()[0]
@@ -160,7 +159,6 @@ def main(argv=None):
         engine, buf_s, buf_a, buf_v = replays_queue.get()
         t1 = engine.team1
         t2 = engine.team2
-        episode_len = len(buf_v)
 
         imm_val = _extract_immediate_value(engine.replay, t1, t2)
         immediate_rewards = imm_val[1:] - imm_val[:-1]
@@ -171,9 +169,18 @@ def main(argv=None):
             r_acc = r_acc * reward_discount + r
             discounted_reward_reverted.append(r_acc)
         discounted_reward = discounted_reward_reverted[::-1]
+        if len(buf_s) == len(discounted_reward) + 1:
+            # the case if game stopped due to timeout
+            buf_s = buf_s[1:]
+            buf_v = buf_v[1:]
+            buf_a = {ctl: arr[1:] for ctl, arr in buf_a.items()}
         assert len(set(map(len, [buf_s, *buf_a.values(), buf_v, discounted_reward]))) == 1, (
             tuple(map(len, [buf_s, *buf_a.values(), buf_v, discounted_reward]))
         )
+        episode_len = len(buf_s)
+        last_hp1, last_hp2 = _get_final_hp(engine)
+        damage_dealt = 1 - last_hp2
+        damage_taken = 1 - last_hp1
 
         mean_reward = float(np.mean(discounted_reward_reverted))
         mean_value = float(np.mean(buf_v))
@@ -182,8 +189,10 @@ def main(argv=None):
         perf_smr.value.add(tag="Perf/Length", simple_value=episode_len)
         perf_smr.value.add(tag="Perf/Value", simple_value=mean_value)
         perf_smr.value.add(tag="Perf/Advantage", simple_value=mean_reward - mean_value)
+        perf_smr.value.add(tag="Perf/DmgDealt", simple_value=damage_dealt)
+        perf_smr.value.add(tag="Perf/DmgTaken", simple_value=damage_taken)
         summary_writer.add_summary(perf_smr, game_i)
-        print(f"Game {game_i+1}/{init_step+total_games}: m_r={mean_reward:.3f}")
+        print(f"Game {game_i+1}: m_r={mean_reward:.3f}")
 
         sample_indices = random.sample(range(episode_len), episode_len // replay_subsample_rate)
         buffer_r.extend(_sample(discounted_reward, sample_indices))
@@ -287,8 +296,19 @@ def _extract_immediate_value(replay_data, t1, t2):
         else:
             enemy_hp = 0
         # vals.append(1 - enemy_hp)
-        vals.append(bot_hp - enemy_hp)
+        vals.append(100 * (bot_hp - enemy_hp))
     return np.array(vals)
+
+
+def _get_final_hp(engine):
+    t1, t2 = engine.team1, engine.team2
+    hp1 = hp2 = 0
+    last_state = engine.replay[-1]
+    if last_state['bots'].get(t1):
+        hp1 = last_state['bots'][t1][0]['hp']
+    if last_state['bots'].get(t2):
+        hp2 = last_state['bots'][t2][0]['hp']
+    return hp1, hp2
 
 
 if __name__ == "__main__":
