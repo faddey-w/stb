@@ -181,5 +181,5 @@ class AnglenavModel:
 
     def __call__(self, state_vectors):
         ctl_outs = build_inference(self.policy_net, state_vectors, self.control_model)
-        value_tensor = self.value_net(state_vectors)["value"][0]
+        value_tensor = self.value_net(state_vectors)["value"][:, 0]
         return value_tensor, ctl_outs

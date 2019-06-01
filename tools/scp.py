@@ -1,4 +1,4 @@
-#!/usr/bin/env PYTHONPATH=. python
+#!/usr/bin/env PYTHONPATH=. python3
 
 import os
 import argparse
@@ -12,11 +12,12 @@ def main():
     ap.add_argument('direction', choices=["get", "put"])
     ap.add_argument('file1')
     ap.add_argument('file2', nargs="?")
+    ap.add_argument('--server', '-S')
     opts = ap.parse_args()
     if opts.file2 is None:
         opts.file2 = opts.file1
 
-    ssh_conn, home_dir = ssh_lib.get_ssh_connection("config.ini")
+    ssh_conn, home_dir = ssh_lib.get_ssh_connection("config.ini", opts.server)
     with ssh_conn:
         if opts.direction == "get":
             ssh_conn.download_file(os.path.join(home_dir, opts.file1), opts.file2)

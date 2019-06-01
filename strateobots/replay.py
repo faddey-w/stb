@@ -62,7 +62,7 @@ class ReplayDataStorage:
 
 
 def _allow_numpy_scalars(x):
-    if isinstance(x, (numpy.ndarray, numpy.float32, numpy.int32)):
+    if isinstance(x, (numpy.ndarray, numpy.float32, numpy.int32, numpy.int64)):
         if x.size == 1:
             typ = float if x.dtype == numpy.float32 else int
             return typ(x)
