@@ -1,6 +1,6 @@
 import argparse
 import os
-import queue
+import time
 import threading
 from multiprocessing import cpu_count
 import numpy as np
@@ -11,102 +11,46 @@ from strateobots.engine import StbEngine, BotType
 from strateobots.ai.lib.bot_initializers import random_bot_initializer
 from strateobots import util
 
+ENTROPY_WEIGHT = None  # 0.0000
+POLICY_LEARNING_RATE = 0.001
+CRITIC_LEARNING_RATE = 0.00001
+REWARD_DISCOUNT = 0.99
+GRADIENT_NORM_CLIP = 3
+MODEL_SAVE_PERIOD_MINUTES = 3
+N_WORKERS = cpu_count()
+
 
 def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("model_dir")
     parser.add_argument(
-        "--init-training",
+        "--reset-step",
         action="store_true",
-        help="use when restoring first time from pretrained network",
+        help="sets training step to 0, use when starting with pretrained network",
     )
     parser.add_argument("--restore-prefix-map")
     parser.add_argument("--only-critic", action="store_true")
     opts = parser.parse_args(argv)
 
-    controls, model_ctor_name, encoder_name = model_saving.load_model_config(
+    _, model_ctor_name, encoder_name = model_saving.load_model_config(
         opts.model_dir
     )
     model_ctor = util.get_by_import_path(model_ctor_name)
     encoder, state_dim = data_encoding.get_encoder(encoder_name)
 
-    global_model = nets.AnglenavModel(model_ctor, "GlobalNet")
-    worker_model = nets.AnglenavModel(model_ctor, "WorkerNet")
-    assert set(controls) == set(global_model.control_model.keys())
-    controls = tuple(global_model.control_model.keys())
+    nets.AnglenavModel(model_ctor, state_dim, "GlobalNet")
+    model_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, "GlobalNet")
+    assert model_vars
 
-    entropy_weight = None  # 0.0000
-    policy_learning_rate = 0.001
-    critic_learning_rate = 0.00001
-    sync_each_n_games = 20
-    reward_discount = 0.99
-    advantage_scale = 1
-    gradient_norm_clip = 3
-    urgent_sync_gradnorm_threshold = float("inf")
-
-    n_workers = cpu_count()
-    state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
-    worker_value_t, worker_controls_outs = worker_model(state_vec_t)
-    worker_controls_t = {
-        ctl: out.sample()[0] for ctl, out in worker_controls_outs.items()
-    }
-
-    # make sure variable nodes for global net are created:
-    global_model(state_vec_t)
-
-    state_his_t = tf.placeholder(tf.float32, [None, state_dim])
-    actions_his_t = {
-        ctl: tf.placeholder(
-            tf.int32 if ctl in data.CATEGORICAL_CONTROLS else tf.float32, [None]
-        )
-        for ctl in controls
-    }
-    reward_t = tf.placeholder(tf.float32, [None])
-    value_prediction_t, policy_prediction = worker_model(state_his_t)
-
-    critic_loss = tf.losses.mean_squared_error(reward_t, value_prediction_t)
-    advantage = tf.stop_gradient(reward_t - value_prediction_t) * advantage_scale
-    tf.summary.scalar("Loss/value", critic_loss)
-    actor_losses = {}
-    for ctl in controls:
-        pred = policy_prediction[ctl]  # type: nets.ControlOutput
-        action_his = actions_his_t[ctl]
-        loss = tf.reduce_mean(-pred.log_prob(action_his) * advantage)
-        entropy = tf.reduce_mean(pred.entropy())
-        tf.summary.scalar("Loss/" + ctl, loss)
-        tf.summary.scalar("Entropy/" + ctl, entropy)
-        actor_losses[ctl] = loss
-        if entropy_weight is not None:
-            actor_losses[ctl] -= entropy_weight * entropy
-    actor_loss = tf.add_n(list(actor_losses.values()))
-    tf.summary.scalar("Loss/total", critic_loss + actor_loss)
-    _critic_loss_scale = critic_learning_rate / policy_learning_rate
-    if opts.only_critic:
-        training_loss = critic_loss * _critic_loss_scale
-    else:
-        training_loss = actor_loss + critic_loss * _critic_loss_scale
-
-    key = tf.GraphKeys.TRAINABLE_VARIABLES
-    g_vars = tf.get_collection(key, "GlobalNet")
-    w_vars = tf.get_collection(key, "WorkerNet")
-
-    grads = tf.gradients(training_loss, w_vars)
-    grads, grad_norm_t = tf.clip_by_global_norm(grads, gradient_norm_clip)
-    tf.summary.scalar("Loss/grad_norm", grad_norm_t)
-
-    opt = tf.train.RMSPropOptimizer(policy_learning_rate)  # critic LR applied via loss
-    update_op = opt.apply_gradients(list(zip(grads, g_vars)))
-    sync_op = [w_v.assign(g_v) for w_v, g_v in zip(w_vars, g_vars)]
     train_step_t = tf.train.get_or_create_global_step()
     inc_step_op = tf.assign_add(train_step_t, 1)
 
-    training_process_variables = opt.variables() + [train_step_t]
-    all_saveable_variables = g_vars + training_process_variables
+    all_saveable_variables = model_vars + [train_step_t]
     saver = tf.train.Saver(
         all_saveable_variables, keep_checkpoint_every_n_hours=1, max_to_keep=5
     )
     if opts.restore_prefix_map is None:
-        model_restorer = tf.train.Saver(g_vars)
+        model_restorer = tf.train.Saver(model_vars)
     else:
         from_prefix, to_prefix = opts.restore_prefix_map.split(":")
 
@@ -115,13 +59,25 @@ def main(argv=None):
                 return from_prefix + variable_name[len(to_prefix) :]
             raise ValueError(variable_name)
 
-        model_restorer = tf.train.Saver({_replace_prefix(v.op.name): v for v in g_vars})
+        model_restorer = tf.train.Saver(
+            {_replace_prefix(v.op.name): v for v in model_vars}
+        )
 
-    training_state_restorer = tf.train.Saver(training_process_variables)
     model_init_op = tf.variables_initializer(all_saveable_variables)
-    training_init_op = tf.variables_initializer(training_process_variables)
 
-    train_summaries_t = tf.summary.merge_all()
+    workers = [
+        Worker(
+            worker_id=i + 1,
+            encoder=encoder,
+            global_model_vars=model_vars,
+            inc_step_op=inc_step_op,
+            model_constructor=model_ctor,
+            state_dim=state_dim,
+            train_only_critic=opts.only_critic,
+        )
+        for i in range(N_WORKERS)
+    ]
+
     tf.get_default_graph().finalize()
     sess = tf.Session()
 
@@ -129,130 +85,165 @@ def main(argv=None):
     if ckpt:
         print("Restoring model from", ckpt)
         model_restorer.restore(sess, ckpt)
-        if opts.init_training:
-            print("Initializing zero training state!")
-            sess.run(training_init_op)
-        else:
-            training_state_restorer.restore(sess, ckpt)
     else:
         print("Initializing untrained model")
         sess.run(model_init_op)
-    sess.run(sync_op)
     summary_writer = tf.summary.FileWriter(opts.model_dir)
 
-    replays_queue = queue.Queue(maxsize=n_workers * 3)
-
     opponent_function = util.get_object_by_config("config.ini", "ai.simple_longrange")
-    for _ in range(n_workers):
+    for worker in workers:
         threading.Thread(
-            target=lambda: play_worker(
-                sess,
-                worker_controls_t,
-                worker_value_t,
-                state_vec_t,
-                controls,
-                opponent_function,
-                encoder,
-                replays_queue,
-            ),
+            target=lambda w: w.main(sess, opponent_function, summary_writer),
+            args=[worker],
             daemon=True,
         ).start()
 
-    game_i = sess.run(train_step_t) - 1
-    while True:
-        game_i += 1
+    def save_model():
+        step_i = sess.run(train_step_t)
+        ckpt = saver.save(sess, os.path.join(opts.model_dir, "model-ckpt"), step_i)
+        print("Model is saved to", ckpt)
 
-        engine, buf_s, buf_a, buf_v = replays_queue.get()
-        t1 = engine.team1
-        t2 = engine.team2
+    try:
+        while True:
+            time.sleep(MODEL_SAVE_PERIOD_MINUTES * 60)
+            save_model()
+    except KeyboardInterrupt:
+        print("Interrupted")
+        save_model()
 
-        imm_val = _extract_immediate_value(engine.replay, t1, t2)
-        # immediate_rewards = imm_val[:-1]
-        immediate_rewards = imm_val[1:] - imm_val[:-1]
 
-        if len(buf_s) == len(immediate_rewards) + 1:
-            # the case if game is stopped due to timeout
-            buf_s = buf_s[1:]
-            buf_v = buf_v[1:]
-            buf_a = {ctl: arr[1:] for ctl, arr in buf_a.items()}
-        episode_len = len(buf_s)
+class Worker:
+    def __init__(
+        self,
+        worker_id,
+        model_constructor,
+        global_model_vars,
+        state_dim,
+        encoder,
+        train_only_critic,
+        inc_step_op,
+    ):
+        self.scope = f"WorkerNet_{worker_id}"
+        self.model = nets.AnglenavModel(model_constructor, state_dim, self.scope)
+        self.id = worker_id
+        self.state_vec_t = tf.placeholder(tf.float32, [1, state_dim])
+        self.value_t, self.controls_outs = self.model(self.state_vec_t)
+        self.controls_t = {
+            ctl: out.sample()[0] for ctl, out in self.controls_outs.items()
+        }
+        self.encoder = encoder
+        self.variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, self.scope)
+        self.controls = tuple(self.model.control_model.keys())
+        self.inc_step_op = inc_step_op
 
-        discounted_reward = np.zeros([episode_len])
-        r_acc = 0
-        for i, r in enumerate(immediate_rewards[::-1], 1):
-            r_acc = r_acc * reward_discount + r
-            discounted_reward[-i] = r_acc
-        assert {
-            len(buf_s),
-            *map(len, buf_a.values()),
-            len(buf_v),
-            len(discounted_reward),
-        } == {len(buf_s)}
+        self.state_his_t = tf.placeholder(tf.float32, [None, state_dim])
+        self.actions_his_t = {
+            ctl: tf.placeholder(
+                tf.int32 if ctl in data.CATEGORICAL_CONTROLS else tf.float32, [None]
+            )
+            for ctl in self.controls
+        }
+        self.reward_t = tf.placeholder(tf.float32, [None])
+        value_prediction_t, policy_prediction = self.model(self.state_his_t)
+
+        critic_loss = tf.losses.mean_squared_error(self.reward_t, value_prediction_t)
+        advantage = tf.stop_gradient(self.reward_t - value_prediction_t)
+        actor_losses = {}
+        self.summaries = {"Loss/value": critic_loss}
+        for ctl in self.controls:
+            pred = policy_prediction[ctl]  # type: nets.ControlOutput
+            action_his = self.actions_his_t[ctl]
+            loss = tf.reduce_mean(-pred.log_prob(action_his) * advantage)
+            entropy = tf.reduce_mean(pred.entropy())
+            self.summaries["Loss/" + ctl] = loss
+            self.summaries["Entropy/" + ctl] = entropy
+            actor_losses[ctl] = loss
+            if ENTROPY_WEIGHT is not None:
+                actor_losses[ctl] -= ENTROPY_WEIGHT * entropy
+        actor_loss = tf.add_n(list(actor_losses.values()))
+        self.summaries["Loss/total"] = critic_loss + actor_loss
+        _critic_loss_scale = CRITIC_LEARNING_RATE / POLICY_LEARNING_RATE
+        if train_only_critic:
+            training_loss = critic_loss * _critic_loss_scale
+        else:
+            training_loss = actor_loss + critic_loss * _critic_loss_scale
+
+        grads = tf.gradients(training_loss, self.variables)
+        grads, grad_norm_t = tf.clip_by_global_norm(grads, GRADIENT_NORM_CLIP)
+        self.summaries["Loss/grad_norm"] = grad_norm_t
+
+        optimizer = tf.train.RMSPropOptimizer(
+            POLICY_LEARNING_RATE
+        )  # critic LR applied via loss
+        self.push_op = optimizer.apply_gradients(list(zip(grads, global_model_vars)))
+        self.pull_op = [
+            w_v.assign(g_v) for w_v, g_v in zip(self.variables, global_model_vars)
+        ]
+        self.init_op = tf.variables_initializer(optimizer.variables())
+
+    def main(self, sess, opponent_function, summary_writer):
+        sess.run(self.init_op)
+        while True:
+            sess.run(self.pull_op)
+            engine, buffer_s, buffer_a, buffer_v, immediate_r = self._generate_game(
+                sess, opponent_function
+            )
+
+            discounted_reward = _discount(immediate_r, REWARD_DISCOUNT)
+            perf_stats = self._summarize_performance(
+                engine, buffer_s, buffer_v, discounted_reward
+            )
+
+            feed = {
+                self.state_his_t: buffer_s,
+                self.reward_t: discounted_reward,
+                **{self.actions_his_t[ctl]: buffer_a[ctl] for ctl in self.controls},
+            }
+            train_stats, _, game_i = sess.run(
+                [self.summaries, self.push_op, self.inc_step_op], feed
+            )
+            print(f"Game {game_i + 1}: m_r={np.mean(discounted_reward):.3f}")
+
+            smry = tf.Summary()
+            for key, value in {**perf_stats, **train_stats}.items():
+                smry.value.add(tag=key, simple_value=value)
+            summary_writer.add_summary(smry, game_i)
+            summary_writer.flush()
+
+    def _summarize_performance(self, engine, buffer_s, buffer_v, discounted_reward):
         last_hp1, last_hp2 = _get_final_hp(engine)
         damage_dealt = 1 - last_hp2
         damage_taken = 1 - last_hp1
-
+        episode_len = len(buffer_s)
         mean_reward = float(np.mean(discounted_reward))
-        mean_value = float(np.mean(buf_v))
-        perf_smr = tf.Summary()
-        perf_smr.value.add(tag="Perf/Reward", simple_value=mean_reward)
-        perf_smr.value.add(tag="Perf/Length", simple_value=episode_len)
-        perf_smr.value.add(tag="Perf/Value", simple_value=mean_value)
-        perf_smr.value.add(tag="Perf/Advantage", simple_value=mean_reward - mean_value)
-        perf_smr.value.add(tag="Perf/DmgDealt", simple_value=damage_dealt)
-        perf_smr.value.add(tag="Perf/DmgTaken", simple_value=damage_taken)
-        summary_writer.add_summary(perf_smr, game_i)
-        print(f"Game {game_i+1}: m_r={np.mean(discounted_reward):.3f}")
+        mean_value = float(np.mean(buffer_v))
 
-        actions_feed = {actions_his_t[ctl]: buf_a[ctl] for ctl in controls}
-        feed = {state_his_t: buf_s, reward_t: discounted_reward, **actions_feed}
-        train_smr, _, _, grad_norm = sess.run(
-            [train_summaries_t, update_op, inc_step_op, grad_norm_t], feed
-        )
-        summary_writer.add_summary(train_smr, game_i)
+        return {
+            "Perf/Reward": mean_reward,
+            "Perf/Length": episode_len,
+            "Perf/Value": mean_value,
+            "Perf/Advantage": mean_reward - mean_value,
+            "Perf/DmgDealt": damage_dealt,
+            "Perf/DmgTaken": damage_taken,
+        }
 
-        summary_writer.flush()
-
-        do_sync = do_save = (game_i % sync_each_n_games == 0)
-        if grad_norm > urgent_sync_gradnorm_threshold:
-            print(f"Urgent sync: grad_norm={grad_norm:.3f}")
-            do_sync = True
-        if do_sync:
-            sess.run(sync_op)
-            print("sync workers...")
-        if do_save:
-            ckpt = saver.save(sess, os.path.join(opts.model_dir, "model-ckpt"), game_i)
-            print("Model is saved to", ckpt)
-
-
-def play_worker(
-    sess,
-    worker_controls_t,
-    worker_value_t,
-    state_vec_t,
-    controls,
-    opponent_function,
-    encoder,
-    out_queue,
-):
-    while True:
-
+    def _generate_game(self, sess, opponent_function):
         def agent_function(state):
-            state_vec = encoder(state)
+            state_vec = self.encoder(state)
             ctl_vectors, value = sess.run(
-                (worker_controls_t, worker_value_t),
-                feed_dict={state_vec_t: [state_vec]},
+                (self.controls_t, self.value_t),
+                feed_dict={self.state_vec_t: [state_vec]},
             )
             ctl_dicts = model_function.predictions_to_ctls(ctl_vectors, state)
-            buffer_s.append(state_vec)
-            buffer_v.append(value)
-            for ctl in controls:
-                buffer_a[ctl].append(ctl_vectors[ctl])
+            buf_s.append(state_vec)
+            buf_v.append(value)
+            for ctl in self.controls:
+                buf_a[ctl].append(ctl_vectors[ctl])
             return ctl_dicts
 
-        buffer_s = []
-        buffer_a = {ctl: [] for ctl in controls}
-        buffer_v = []
+        buf_s = []
+        buf_a = {ctl: [] for ctl in self.controls}
+        buf_v = []
 
         bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
         engine = StbEngine(
@@ -266,7 +257,23 @@ def play_worker(
         )
         engine.play_all()
 
-        out_queue.put((engine, buffer_s, buffer_a, buffer_v))
+        imm_val = _extract_immediate_value(engine.replay, engine.team1, engine.team2)
+        # immediate_rewards = imm_val[:-1]
+        immediate_rewards = imm_val[1:] - imm_val[:-1]
+
+        if len(buf_s) == len(immediate_rewards) + 1:
+            # the case if game is stopped due to timeout
+            buf_s = buf_s[1:]
+            buf_v = buf_v[1:]
+            buf_a = {ctl: arr[1:] for ctl, arr in buf_a.items()}
+
+        assert {
+            len(buf_s),
+            *map(len, buf_a.values()),
+            len(buf_v),
+            len(immediate_rewards),
+        } == {len(buf_s)}
+        return engine, buf_s, buf_a, buf_v, immediate_rewards
 
 
 def _extract_immediate_value(replay_data, t1, t2):
@@ -285,10 +292,10 @@ def _extract_immediate_value(replay_data, t1, t2):
             enemy_hp = 0
         val = -1.25 * enemy_hp
         if bot and enemy:
-            dx = enemy['x'] - bot['x']
-            dy = enemy['y'] - bot['y']
-            dist = (dx*dx + dy*dy) ** 0.5
-            gun_direction = bot['orientation'] + bot['tower_orientation']
+            dx = enemy["x"] - bot["x"]
+            dy = enemy["y"] - bot["y"]
+            dist = (dx * dx + dy * dy) ** 0.5
+            gun_direction = bot["orientation"] + bot["tower_orientation"]
             gun_x = np.cos(gun_direction)
             gun_y = np.sin(gun_direction)
             val += 0.3 * (dx * gun_x + dy * gun_y) / dist
@@ -297,6 +304,15 @@ def _extract_immediate_value(replay_data, t1, t2):
         # vals.append(0.1 * bot_hp - 1.25 * enemy_hp)
         vals.append(val)
     return np.array(vals) * 100
+
+
+def _discount(values, discount_factor):
+    discounted = np.zeros_like(values)
+    r_acc = 0
+    for i, r in enumerate(values[::-1], 1):
+        r_acc = r_acc * discount_factor + r
+        discounted[-i] = r_acc
+    return discounted
 
 
 def _get_final_hp(engine):
@@ -311,5 +327,5 @@ def _get_final_hp(engine):
 
 
 if __name__ == "__main__":
-    # main([".data/A3C/models/direct", ".data/A3C/logs/direct/try1"])
-    main()
+    main([".data/A3C/models/anglenav2"])
+    # main()

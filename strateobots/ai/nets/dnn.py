@@ -1,11 +1,9 @@
 import tensorflow as tf
-import numpy as np
-from strateobots.ai.lib import data
 
 
 class DNN:
     def __init__(
-        self, stem_units, head_units, heads, scope=None
+        self, input_dim, stem_units, head_units, heads, scope=None
     ):
         scope_prefix = (
             (scope + "/" if not scope.endswith("/") else scope) if scope else ""
@@ -28,28 +26,23 @@ class DNN:
             )
             for head_name, out_dim in heads.items()
         }
+        with tf.variable_scope(scope_prefix):
+            self.stem.build((None, input_dim))
+            control_inputs_dim = stem_units[-1][0] if stem_units else input_dim
+            for mdl in self.controls.values():
+                mdl.build((None, control_inputs_dim))
 
     def __call__(self, state):
         logits = {}
         features = self.stem(state)
         for ctl, net in self.controls.items():
-            # head = net(features)
-            # if ctl in data.CATEGORICAL_CONTROLS:
-            #     logits[ctl] = head
-            #     head = tf.nn.softmax(head)
-            # else:
-            #     mean = head[..., 0]
-            #     stddev = tf.nn.softplus(head[..., 1]) + 0.01
-            #     logits[ctl + "_mean"] = mean
-            #     logits[ctl + "_std"] = stddev
-            #     head = tf.distributions.Normal(mean, stddev)
             logits[ctl] = net(features)
         return logits
-        # return logits, predictions
 
 
-def make_v1(heads, scope=None):
+def make_v1(input_dim, heads, scope=None):
     return DNN(
+        input_dim=input_dim,
         stem_units=[
             (80, tf.nn.leaky_relu),
             (70, tf.nn.leaky_relu),
@@ -62,8 +55,9 @@ def make_v1(heads, scope=None):
     )
 
 
-def make_v2(heads, scope=None):
+def make_v2(input_dim, heads, scope=None):
     return DNN(
+        input_dim=input_dim,
         stem_units=[(80, tf.nn.leaky_relu), (50, tf.nn.leaky_relu)],
         head_units={None: [(40, tf.nn.leaky_relu)]},
         heads=heads,
@@ -71,8 +65,9 @@ def make_v2(heads, scope=None):
     )
 
 
-def make_v3(heads, scope=None):
+def make_v3(input_dim, heads, scope=None):
     return DNN(
+        input_dim=input_dim,
         stem_units=[(80, tf.nn.leaky_relu), (60, tf.nn.leaky_relu)],
         head_units={None: [(40, tf.nn.leaky_relu), (30, tf.nn.leaky_relu)]},
         heads=heads,

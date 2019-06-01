@@ -147,12 +147,12 @@ class OrientationOutput(ControlOutput):
         return self.base_angle + 2 * np.pi * (1 - 1e-3) * (x - 0.5)
 
 
-def build_network(scope, network_factory, control_outputs):
+def build_network(scope, network_factory, input_dim, control_outputs):
     all_heads = {}
     for ctl, ctl_cls in control_outputs.items():
         all_heads.update(ctl_cls.heads(ctl))
 
-    net = network_factory(all_heads, scope)
+    net = network_factory(input_dim, all_heads, scope)
     return net
 
 
@@ -165,7 +165,7 @@ def build_inference(network, state, control_outputs):
 
 
 class AnglenavModel:
-    def __init__(self, network_factory, scope=None):
+    def __init__(self, network_factory, input_dim, scope=None):
         self.control_model = {
             "move": CategoricalControlOutput,
             "action": CategoricalControlOutput,
@@ -173,10 +173,10 @@ class AnglenavModel:
             "gun_orientation": OrientationOutput,
         }
         self.policy_net = build_network(
-            util.make_scope(scope, "Actor"), network_factory, self.control_model
+            util.make_scope(scope, "Actor"), network_factory, input_dim, self.control_model
         )
         self.value_net = network_factory(
-            {"value": 1}, scope=util.make_scope(scope, "Critic")
+            input_dim, {"value": 1}, scope=util.make_scope(scope, "Critic")
         )
 
     def __call__(self, state_vectors):

@@ -28,7 +28,7 @@ def main(argv=None):
     state_vec.set_shape([state_dim])
     state_batch = tf.expand_dims(state_vec, axis=0)
 
-    model = nets.AnglenavModel(model_constructor, opts.scope)
+    model = nets.AnglenavModel(model_constructor, state_dim, opts.scope)
     _, predictions = model(state_batch)
 
     if opts.postprocessing == "max":

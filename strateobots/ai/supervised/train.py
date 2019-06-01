@@ -52,7 +52,7 @@ class Model:
         state_batch.set_shape([params["batch_size"], None])
         entropy_weight = params["entropy_weight"]
 
-        model = nets.AnglenavModel(util.get_by_import_path(params["net_ctor"]))
+        model = nets.AnglenavModel(util.get_by_import_path(params["net_ctor"]), params["state_dim"])
         _, predictions = model(state_batch)
 
         total_loss = None
