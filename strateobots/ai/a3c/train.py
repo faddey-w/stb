@@ -327,5 +327,4 @@ def _get_final_hp(engine):
 
 
 if __name__ == "__main__":
-    main([".data/A3C/models/anglenav2"])
-    # main()
+    main()

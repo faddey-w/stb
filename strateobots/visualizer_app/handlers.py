@@ -2,7 +2,7 @@ import logging
 import textwrap
 import json
 from tornado import web, escape
-from strateobots import cryptoutil, util, replay
+from strateobots import util, replay
 from strateobots.visualizer_app import exceptions
 
 
@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 class CertificateSignatureAuthHandler:
     def __init__(self, certificate_path):
+        from strateobots import cryptoutil
         with open(certificate_path) as f:
             self.key = cryptoutil.using_key(f.read())
 

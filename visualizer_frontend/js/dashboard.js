@@ -206,7 +206,7 @@ angular.module("StrateobotsApp", [
                 sim.frames[i].bullets,
                 sim.frames[i].rays,
                 sim.frames[i].explosions,
-                aims,
+                aims
             );
         }
         animator = new Animator(renderer, 50);

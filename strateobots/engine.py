@@ -647,7 +647,7 @@ class StbEngine:
                     ctl.rotate = 0
                     ctl.tower_rotate = 0
             return None
-        result = ai(
+        controls = ai(
             {
                 "tick": self.nticks,
                 "friendly_bots": friendly_bots,
@@ -656,10 +656,6 @@ class StbEngine:
                 "rays": rays,
             }
         )
-        if isinstance(result, dict):
-            controls = result["controls"]
-        else:
-            controls = result
         allowed_ids = {bot["id"] for bot in friendly_bots}
         for ctl_data in controls:
             bot_id = ctl_data["id"]
