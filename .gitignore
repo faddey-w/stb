@@ -8,5 +8,7 @@ test.py
 config.ini
 tools/credentials.json
 
+*.cpp
+*.h
 *.c
 *.so
