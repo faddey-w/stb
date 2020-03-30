@@ -24,16 +24,13 @@ class ModelAiFunction:
             graph_def.ParseFromString(f.read())
         with tf.Graph().as_default() as graph:
             tf.import_graph_def(
-                graph_def,
-                input_map=None,
-                return_elements=None,
-                name=""
+                graph_def, input_map=None, return_elements=None, name=""
             )
 
         def find_nodes(scope):
             prefix = scope if scope.endswith("/") else scope + "/"
             return {
-                node.name[len(prefix):]: graph.get_tensor_by_name(node.name + ":0")
+                node.name[len(prefix) :]: graph.get_tensor_by_name(node.name + ":0")
                 for node in graph.as_graph_def().node
                 if node.name.startswith(prefix)
             }
@@ -76,12 +73,17 @@ def predictions_to_ctls(predictions, state):
     move = data.ctl_move.categories[move]
     action = data.ctl_action.categories[action]
 
+    visualizations = []
     if True:
         # for debugging direct control models
         if orientation is None and rotate is not None:
             orientation = bot_data["orientation"] + pi / 3 * rotate
         if gun_orientation is None and tower_rotate is not None:
-            gun_orientation = bot_data["orientation"] + bot_data["tower_orientation"] + pi / 3 * tower_rotate
+            gun_orientation = (
+                bot_data["orientation"]
+                + bot_data["tower_orientation"]
+                + pi / 3 * tower_rotate
+            )
 
     try:
         move_aim_x = ctl_vectors["move_aim_x"]
@@ -97,6 +99,10 @@ def predictions_to_ctls(predictions, state):
             orientation = atan2(
                 move_aim_y - bot_data["y"], move_aim_x - bot_data["x"]
             )
+    if move_aim_x is not None:
+        visualizations.append(
+            {"type": "aim", "x": move_aim_x, "y": move_aim_y, "color_id": 0}
+        )
 
     try:
         gun_aim_x = ctl_vectors["gun_aim_x"]
@@ -112,6 +118,10 @@ def predictions_to_ctls(predictions, state):
             gun_orientation = atan2(
                 gun_aim_y - bot_data["y"], gun_aim_x - bot_data["x"]
             )
+    if gun_aim_x is not None:
+        visualizations.append(
+            {"type": "aim", "x": gun_aim_x, "y": gun_aim_y, "color_id": 1}
+        )
 
     rotate, tower_rotate = _nearest_rotation(
         rotate, tower_rotate, orientation, gun_orientation, bot_data
@@ -123,17 +133,9 @@ def predictions_to_ctls(predictions, state):
         "rotate": rotate,
         "tower_rotate": tower_rotate,
         "action": action,
+        "raw_predictions": predictions,
+        "visualizations": visualizations,
     }
-    if move_aim_x is not None:
-        ctl_dict["move_aim_x"] = move_aim_x
-        ctl_dict["move_aim_y"] = move_aim_y
-    if orientation is not None:
-        ctl_dict["orientation"] = orientation
-    if gun_aim_x is not None:
-        ctl_dict["gun_aim_x"] = gun_aim_x
-        ctl_dict["gun_aim_y"] = gun_aim_y
-    if gun_orientation is not None:
-        ctl_dict["gun_orientation"] = gun_orientation
     return [ctl_dict]
 
 

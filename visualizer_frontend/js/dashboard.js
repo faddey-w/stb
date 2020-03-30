@@ -75,7 +75,9 @@ angular.module("StrateobotsApp", [
         animator.skipToPercent(value);
     };
     $scope.cleanup = function() {
-        var cleanedSimulations = $scope.simulations.filter(function (sim) { return !sim.has_error; });
+        var cleanedSimulations = $scope.simulations.filter(
+            function (sim) { return !sim.has_error; }
+        );
         $scope.simulations.splice(0, $scope.simulations.length);
         cleanedSimulations.forEach(function (sim) {
             $scope.simulations.push(sim)
