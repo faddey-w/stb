@@ -45,7 +45,7 @@ def test_a_bit_complex_tree_expr():
     expr.set_linear([], [], 321)
 
     assert expr.to_str("xy".__getitem__) == "x^2-3*x*(2*y+1)+321"
-    assert expr.evaluate([2, 3]) == (2**2 - 3 * 2 * (2 * 3 + 1) + 321)
+    assert expr.evaluate([37, 73]) == (37 ** 2 - 3 * 37 * (2 * 73 + 1) + 321)
 
 
 def test_tree_construction_semantics():
@@ -70,5 +70,6 @@ def test_tree_construction_semantics():
     expr.add_child(sub_expr)
 
     expr.add_poly_member(1, [0, 2], [-1, -1])
+    expr.add_poly_member(coefficient=13, child_indices=[1], powers=[5])
 
-    assert str(expr) == "123^-1*(-2*A^4+A*B+321)^-1"
+    assert str(expr) == "123^-1*(-2*A^4+A*B+321)^-1+13*(-2*A^4+321)^5"
