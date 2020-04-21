@@ -9,6 +9,16 @@ cdef struct LinearExpressionNode:
     double bias
 
 
+cpdef enum SpecialFunction:
+    Identity = 0
+    Threshold = 1
+    Truncate = 2
+    Remainder = 3
+
+
+cdef float SKIP_EPSILON = 10 ** -8
+
+
 cdef struct TreeExpressionNode:
     # Let N - amount of env parameters
     #     M - amount of children expressions
@@ -19,6 +29,7 @@ cdef struct TreeExpressionNode:
     vector[vector[double]] child_powers  # P x K_p
     vector[double] polynom_coefficients  # P
     LinearExpressionNode linear
+    SpecialFunction function
 
 
 cdef double _evaluate_linear_node(LinearExpressionNode* node, vector[double]* params):
@@ -38,11 +49,21 @@ cdef double _evaluate_tree_node(TreeExpressionNode* node, vector[double]* params
         values.push_back(_evaluate_tree_node(&node[0].children[m], params))
     result = 0.0
     for p in range(node[0].polynom_coefficients.size()):
-        r = 1.0
+        r = node[0].polynom_coefficients[p]
         for k in range(node[0].child_indices[p].size()):
+            if -SKIP_EPSILON < r < SKIP_EPSILON:
+                # this allows to disable NaN expressions if needed
+                r = 0.0
+                break
             r *= pow(values[node[0].child_indices[p][k]], node[0].child_powers[p][k])
-        result += r * node[0].polynom_coefficients[p]
+        result += r
     result += _evaluate_linear_node(&node[0].linear, params)
+    if node[0].function == SpecialFunction.Threshold:
+        result = 1.0 if result >= 0 else 0.0
+    elif node[0].function == SpecialFunction.Remainder:
+        result = result % 1.0
+    elif node[0].function == SpecialFunction.Truncate:
+        result = int(result)
     return result
 
 
@@ -105,6 +126,9 @@ cdef class TreeExpression:
 
     cdef TreeExpressionNode data
 
+    def __init__(self):
+        self.data.function = SpecialFunction.Identity
+
     cpdef double evaluate(self, vector[double] params):
         return _evaluate_tree_node(&self.data, &params)
 
@@ -121,6 +145,9 @@ cdef class TreeExpression:
             powers,
         )
 
+    def set_special_function(self, function_type: SpecialFunction):
+        self.data.function = function_type
+
     def set_linear(self, indices, coefficients, bias):
         _set_linear_node(&self.data.linear, indices, coefficients, bias)
 
@@ -128,10 +155,12 @@ cdef class TreeExpression:
         # Cython can't auto-gen pickle methods for recursive structs (a bug maybe)
         raise NotImplementedError
 
-    def to_str(self, param_name_fn=None, strip_leading_plus=True):
-        if param_name_fn is None:
-            param_name_fn = _default_param_name_fn
-        result = _tree_node_to_str(&self.data, param_name_fn)
+    def to_str(self, param_names=None, strip_leading_plus=True):
+        if param_names is None:
+            param_names = _default_param_name_fn
+        elif not callable(param_names):
+            param_names = param_names.__getitem__
+        result = _tree_node_to_str(&self.data, param_names)
         if strip_leading_plus:
             result = result.lstrip("+")
         return result
@@ -188,7 +217,16 @@ cdef _tree_node_to_str(TreeExpressionNode* node, param_name_fn):
 
     parts.append(_linear_node_to_str(&node[0].linear, param_name_fn))
 
-    return "".join(parts)
+    result = "".join(parts)
+
+    if node[0].function == SpecialFunction.Threshold:
+        result = f"thresh({result})"
+    elif node[0].function == SpecialFunction.Truncate:
+        result = f"trunc({result})"
+    elif node[0].function == SpecialFunction.Remainder:
+        result = f"remainder({result})"
+
+    return result
 
 
 def _default_param_name_fn(i):

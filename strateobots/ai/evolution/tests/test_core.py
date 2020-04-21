@@ -1,4 +1,4 @@
-from .evo_core import LinearExpression, TreeExpression
+from strateobots.ai.evolution.evo_core import LinearExpression, TreeExpression
 
 
 def test_basic_linear_evaluation():
