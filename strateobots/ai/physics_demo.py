@@ -48,7 +48,7 @@ class _BaseSceneController:
         self.engine = engine
         self._triggers = {}
 
-    def mkbot(self, bottype, team, x, y, orientation, tower_orientation=0, hp=1.0):
+    def mkbot(self, bottype, team, x, y, orientation, tower_orientation=0.0, hp=1.0):
         # x = 100*x - 0
         # y = 100*y - 600
         x *= self.engine.get_constants().world_width / 10

@@ -16,7 +16,7 @@ cpdef enum SpecialFunction:
     Remainder = 3
 
 
-cdef float SKIP_EPSILON = 10 ** -8
+cdef double SKIP_EPSILON = 0.00000001
 
 
 cdef struct TreeExpressionNode:
@@ -51,7 +51,7 @@ cdef double _evaluate_tree_node(TreeExpressionNode* node, vector[double]* params
     for p in range(node[0].polynom_coefficients.size()):
         r = node[0].polynom_coefficients[p]
         for k in range(node[0].child_indices[p].size()):
-            if -SKIP_EPSILON < r < SKIP_EPSILON:
+            if -SKIP_EPSILON < r and r < SKIP_EPSILON:
                 # this allows to disable NaN expressions if needed
                 r = 0.0
                 break

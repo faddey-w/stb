@@ -73,3 +73,26 @@ def test_tree_construction_semantics():
     expr.add_poly_member(coefficient=13, child_indices=[1], powers=[5])
 
     assert str(expr) == "123^-1*(-2*A^4+A*B+321)^-1+13*(-2*A^4+321)^5"
+
+
+def test_pruning_by_zero():
+    x = TreeExpression()
+    x.set_linear([0], [1], 0)
+    y = TreeExpression()
+    y.set_linear([1], [1], 0)
+
+    expr = TreeExpression()
+    expr.add_child(x)
+    expr.add_child(y)
+    expr.add_poly_member(1, [0, 1], [1, -1])
+
+    assert expr.evaluate([7, 0]) == float("inf")
+    assert expr.evaluate([0, 0]) == 0.0
+    assert expr.evaluate([float("inf"), 0]) in [float("inf"), float("nan")]
+
+    expr = TreeExpression()
+    expr.add_child(x)
+    expr.add_child(y)
+    expr.add_poly_member(0, [0, 1], [-1, -1])
+    assert expr.evaluate([0, 0]) == 0
+    assert expr.evaluate([float("nan"), float("nan")]) == 0
