@@ -1,4 +1,6 @@
-from strateobots.ai.evolution.lib import ComputeGraph
+import math
+import random
+from strateobots.ai.evolution.lib import ComputeGraph, atan2
 
 
 def test_add_exprs():
@@ -63,7 +65,7 @@ def test_rtruediv():
 
 def test_truediv_by_zero():
     g = ComputeGraph("xy")
-    assert (g["x"] / g["y"]).eval({"x": -4.3, "y": 0.}) == float("-inf")
+    assert (g["x"] / g["y"]).eval({"x": -4.3, "y": 0.0}) == float("-inf")
     assert len(g.expressions) == 3
 
 
@@ -82,7 +84,7 @@ def test_floordiv():
 
 def test_mod():
     g = ComputeGraph("xy")
-    assert _is_close((g["x"] % g['y']).eval({"x": 6.35, 'y': 3.1}), 0.15)
+    assert _is_close((g["x"] % g["y"]).eval({"x": 6.35, "y": 3.1}), 0.15)
     assert len(g.expressions) == 3
 
 
@@ -94,34 +96,51 @@ def test_abs():
 
 def test_ge():
     g = ComputeGraph("xy")
-    assert _is_close((g["x"] >= g['y']).eval({"x": 6.3, 'y': 3.1}), 1.0)
-    assert _is_close((g["x"] >= g['y']).eval({"x": 2.1, 'y': 3.1}), 0.0)
-    assert _is_close((g["x"] >= g['y']).eval({"x": 3.1, 'y': 3.1}), 1.0)
+    assert _is_close((g["x"] >= g["y"]).eval({"x": 6.3, "y": 3.1}), 1.0)
+    assert _is_close((g["x"] >= g["y"]).eval({"x": 2.1, "y": 3.1}), 0.0)
+    assert _is_close((g["x"] >= g["y"]).eval({"x": 3.1, "y": 3.1}), 1.0)
     assert len(g.expressions) == 5
 
 
 def test_le():
     g = ComputeGraph("xy")
-    assert _is_close((g["x"] <= g['y']).eval({"x": 6.3, 'y': 3.1}), 0.0)
-    assert _is_close((g["x"] <= g['y']).eval({"x": 2.1, 'y': 3.1}), 1.0)
-    assert _is_close((g["x"] <= g['y']).eval({"x": 3.1, 'y': 3.1}), 1.0)
+    assert _is_close((g["x"] <= g["y"]).eval({"x": 6.3, "y": 3.1}), 0.0)
+    assert _is_close((g["x"] <= g["y"]).eval({"x": 2.1, "y": 3.1}), 1.0)
+    assert _is_close((g["x"] <= g["y"]).eval({"x": 3.1, "y": 3.1}), 1.0)
     assert len(g.expressions) == 5
 
 
 def test_gt():
     g = ComputeGraph("xy")
-    assert _is_close((g["x"] > g['y']).eval({"x": 6.3, 'y': 3.1}), 1.0)
-    assert _is_close((g["x"] > g['y']).eval({"x": 2.1, 'y': 3.1}), 0.0)
-    assert _is_close((g["x"] > g['y']).eval({"x": 3.1, 'y': 3.1}), 0.0)
+    assert _is_close((g["x"] > g["y"]).eval({"x": 6.3, "y": 3.1}), 1.0)
+    assert _is_close((g["x"] > g["y"]).eval({"x": 2.1, "y": 3.1}), 0.0)
+    assert _is_close((g["x"] > g["y"]).eval({"x": 3.1, "y": 3.1}), 0.0)
     assert len(g.expressions) == 5
 
 
 def test_lt():
     g = ComputeGraph("xy")
-    assert _is_close((g["x"] < g['y']).eval({"x": 6.3, 'y': 3.1}), 0.0)
-    assert _is_close((g["x"] < g['y']).eval({"x": 2.1, 'y': 3.1}), 1.0)
-    assert _is_close((g["x"] < g['y']).eval({"x": 3.1, 'y': 3.1}), 0.0)
+    assert _is_close((g["x"] < g["y"]).eval({"x": 6.3, "y": 3.1}), 0.0)
+    assert _is_close((g["x"] < g["y"]).eval({"x": 2.1, "y": 3.1}), 1.0)
+    assert _is_close((g["x"] < g["y"]).eval({"x": 3.1, "y": 3.1}), 0.0)
     assert len(g.expressions) == 5
+
+
+def test_atan2():
+    g = ComputeGraph("xy")
+    z = atan2(g["y"], g["x"])
+
+    n = 12
+    for i in range(n):
+        angle = math.pi * 2 * i / n
+        radius = random.uniform(0.1, 1000)
+        x = radius * math.cos(angle)
+        y = radius * math.sin(angle)
+        assert _is_close(
+            z.eval({"x": x, "y": y}), math.atan2(y, x), abs_err=0.01, rel_err=0.01
+        )
+
+    assert math.isnan(z.eval({"x": 0, "y": 0}))
 
 
 def _is_close(x1, x2, abs_err=1.0e-7, rel_err=1.0e-5):

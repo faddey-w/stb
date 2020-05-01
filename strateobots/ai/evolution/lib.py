@@ -253,13 +253,20 @@ def atan2(dy: Expression, dx: Expression) -> Expression:
     graph = dy.graph
     tan = dy / dx
     with graph.register_mode(False):
-        dx_is_zero = abs(dx) <= 0
+        dx_is_zero = abs(dx) <= 1e-7
+        dy_is_zero = abs(dy) <= 1e-7
     dx_is_zero = Expression(graph, expr=dx_is_zero.value)
+    dy_is_zero = Expression(graph, expr=dy_is_zero.value)
     with graph.register_mode(False):
         dy_sign = (2 * (dy > 0)) - 1
         dx_non_zero = 1 - dx_is_zero
-        dx_negative = dx < 0
+        dx_negative = (dx < 0) * dx_non_zero
         result = dx_non_zero * atan(tan)
         result += dy_sign * (dx_negative * math.pi + dx_is_zero * (math.pi / 2))
+
+        nan = _expr_with_args()
+        nan.set_linear([], [], float("nan"))
+        nan = Expression(graph, expr=nan)
+        result = dy_is_zero * dx_is_zero * nan + (1 - dy_is_zero * dx_is_zero) * result
 
     return Expression(graph, expr=result.value)

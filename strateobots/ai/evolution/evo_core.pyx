@@ -51,6 +51,8 @@ cdef double _evaluate_tree_node(TreeExpressionNode* node, vector[double]* params
     for p in range(node[0].polynom_coefficients.size()):
         r = node[0].polynom_coefficients[p]
         for k in range(node[0].child_indices[p].size()):
+            # noinspection PyChainedComparisons
+            # do not simplify this, it does not work in simplified form:
             if -SKIP_EPSILON < r and r < SKIP_EPSILON:
                 # this allows to disable NaN expressions if needed
                 r = 0.0
