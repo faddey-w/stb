@@ -47,7 +47,7 @@ class ComputeGraph:
                 "Invalid arguments, expected dict with keys: "
                 + ", ".join(self._arg_names)
             )
-        result = [None] * len(expr_ids)
+        result = [0.] * len(expr_ids)
         id_map = []
         n_args = len(self._arg_names)
         param_values = [args[arg_name] for arg_name in self._arg_names]
