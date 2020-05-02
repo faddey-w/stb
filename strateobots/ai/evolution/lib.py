@@ -8,6 +8,7 @@ class ComputeGraph:
     def __init__(self, arg_names):
         self._arg_names = list(arg_names)
         self.expressions = []
+        self.graph = evo_core.Graph()
         self.register_enabled = True
         for i in range(len(self._arg_names)):
             Expression(self, param_i=i)
@@ -16,6 +17,8 @@ class ComputeGraph:
         if self.register_enabled:
             expression.id = len(self.expressions)
             self.expressions.append(expression)
+            if expression.id >= len(self._arg_names):
+                self.graph.add_expr(expression.value)
 
     def __getitem__(self, item) -> "Expression":
         if isinstance(item, str):
@@ -44,14 +47,21 @@ class ComputeGraph:
                 "Invalid arguments, expected dict with keys: "
                 + ", ".join(self._arg_names)
             )
-        if not expr_ids:
-            return []
-        max_expr_id = max(expr_ids)
-        result_values = [args[arg_name] for arg_name in self._arg_names]
-        for i in range(len(result_values), max_expr_id + 1):
-            value = self.expressions[i].value.evaluate(result_values)
-            result_values.append(value)
-        return [result_values[i] for i in expr_ids]
+        result = [None] * len(expr_ids)
+        id_map = []
+        n_args = len(self._arg_names)
+        param_values = [args[arg_name] for arg_name in self._arg_names]
+        for i, expr_id in enumerate(expr_ids):
+            if expr_id < n_args:
+                result[i] = param_values[expr_id]
+            else:
+                id_map.append((expr_id, i))
+        if not id_map:
+            return result
+        values = self.graph.evaluate(param_values)
+        for expr_id, res_i in id_map:
+            result[res_i] = values[expr_id - n_args]
+        return result
 
     @contextlib.contextmanager
     def register_mode(self, enabled):
@@ -60,13 +70,22 @@ class ComputeGraph:
         yield
         self.register_enabled = orig
 
+    def __repr__(self):
+        def name_fn(i):
+            if i < n_args:
+                return self._arg_names[i]
+            else:
+                return f"_{i-n_args+1}"
+
+        n_args = len(self._arg_names)
+        return self.graph.to_str(n_args, name_fn)
+
 
 class Expression:
     def __init__(self, graph: ComputeGraph, *, expr=None, param_i=None, constant=None):
         assert (expr, param_i, constant).count(None) == 2
         self.graph = graph
         self.id = None
-        graph.register(self)
 
         if expr is not None:
             self.value = expr
@@ -78,6 +97,7 @@ class Expression:
             value = evo_core.TreeExpression()
             value.set_linear([], [], constant)
             self.value = value
+        graph.register(self)
 
     def eval(self, args):
         return self.graph.eval(args, [self])[0]
@@ -127,9 +147,10 @@ class Expression:
         return Expression(self.graph, expr=value)
 
     def __floordiv__(self, other):
-        value = self / other
-        value.value.set_special_function(evo_core.SpecialFunction.Truncate)
-        return value
+        with self.graph.register_mode(False):
+            value = self / other
+            value.value.set_special_function(evo_core.SpecialFunction.Truncate)
+        return Expression(self.graph, expr=value.value)
 
     def __mod__(self, other):
         with self.graph.register_mode(False):
@@ -146,14 +167,16 @@ class Expression:
         return Expression(self.graph, expr=result)
 
     def __ge__(self, other):
-        value = self - other
-        value.value.set_special_function(evo_core.SpecialFunction.Threshold)
-        return value
+        with self.graph.register_mode(False):
+            value = self - other
+            value.value.set_special_function(evo_core.SpecialFunction.Threshold)
+        return Expression(self.graph, expr=value.value)
 
     def __le__(self, other):
-        value = other - self
-        value.value.set_special_function(evo_core.SpecialFunction.Threshold)
-        return value
+        with self.graph.register_mode(False):
+            value = other - self
+            value.value.set_special_function(evo_core.SpecialFunction.Threshold)
+        return Expression(self.graph, expr=value.value)
 
     def __gt__(self, other):
         with self.graph.register_mode(False):

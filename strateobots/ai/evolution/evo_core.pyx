@@ -174,6 +174,38 @@ cdef class TreeExpression:
         return f"TreeExpression({self.to_str()})"
 
 
+cdef class Graph:
+
+    cdef vector[TreeExpressionNode] expressions
+
+    def add_expr(self, TreeExpression expr):
+        self.expressions.push_back(expr.data)
+
+    cpdef list evaluate(self, args):
+        cdef vector[double] params = args
+        for node in self.expressions:
+            x = _evaluate_tree_node(&node, &params)
+            params.push_back(x)
+        return list(params)[len(args):]
+
+    def __reduce__(self):
+        # Cython can't auto-gen pickle methods for recursive structs (a bug maybe)
+        raise NotImplementedError
+
+    cpdef to_str(self, n_args, param_names=None, strip_leading_plus=True):
+        if param_names is None:
+            param_names = _default_param_name_fn
+        elif not callable(param_names):
+            param_names = param_names.__getitem__
+        lines = []
+        for i in range(self.expressions.size()):
+            expr_repr = _tree_node_to_str(&self.expressions[i], param_names)
+            if strip_leading_plus:
+                expr_repr = expr_repr.lstrip("+")
+            lines.append(param_names(i-n_args) + " = " + expr_repr)
+        return "\n".join(lines)
+
+
 cdef _linear_node_to_str(LinearExpressionNode* node, param_name_fn):
     parts = []
     for c, i in zip(node[0].coefficients, node[0].indices):

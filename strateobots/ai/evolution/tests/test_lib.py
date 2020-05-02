@@ -3,6 +3,13 @@ import random
 from strateobots.ai.evolution.lib import ComputeGraph, atan2
 
 
+def test_identity():
+    g = ComputeGraph("x")
+    assert _is_close(g['x'].eval({'x': 1.123}), 1.123)
+    assert _is_close(g['x'].eval({'x': -1.987}), -1.987)
+    assert len(g.expressions) == 1
+
+
 def test_add_exprs():
     g = ComputeGraph("xyz")
     assert _is_close((g["x"] + g["y"] + g["z"]).eval(dict(x=1, y=20, z=300)), 321.0)
@@ -72,7 +79,10 @@ def test_truediv_by_zero():
 def test_pow():
     g = ComputeGraph("x")
     assert _is_close((g["x"] ** 3).eval({"x": 5}), 125.0)
-    assert len(g.expressions) == 2
+    assert _is_close((g["x"] ** 3).eval({"x": -5}), -125.0)
+    assert _is_close((g["x"] ** 1.2).eval({"x": 5}), (5 ** 1.2))
+    assert math.isnan((g["x"] ** 1.2).eval({"x": -5}))
+    assert len(g.expressions) == 5
 
 
 def test_floordiv():
