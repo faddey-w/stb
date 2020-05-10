@@ -6,28 +6,31 @@ from strateobots.ai.evolution import evo_core
 
 class ComputeGraph:
     def __init__(self, arg_names):
-        self._arg_names = list(arg_names)
+        self.arg_names = tuple(arg_names)
         self.expressions = []
         self.graph = evo_core.Graph()
         self.register_enabled = True
-        for i in range(len(self._arg_names)):
+        for i in range(len(self.arg_names)):
             Expression(self, param_i=i)
 
     def register(self, expression: "Expression"):
         if self.register_enabled:
             expression.id = len(self.expressions)
             self.expressions.append(expression)
-            if expression.id >= len(self._arg_names):
+            if expression.id >= len(self.arg_names):
                 self.graph.add_expr(expression.value)
 
     def __getitem__(self, item) -> "Expression":
         if isinstance(item, str):
-            i = self._arg_names.index(item)
+            i = self.arg_names.index(item)
         elif isinstance(item, int):
             i = item
         else:
             raise TypeError(type(item))
         return self.expressions[i]
+
+    def const(self, value):
+        return Expression(self, constant=value)
 
     def eval(self, args, expressions_or_ids):
         expr_ids = []
@@ -42,15 +45,15 @@ class ComputeGraph:
                 expr_ids.append(expr)
             else:
                 raise TypeError("Unrecognized expression type: " + str(type(expr)))
-        if not (isinstance(args, dict) and set(args) == set(self._arg_names)):
+        if not (isinstance(args, dict) and set(args) == set(self.arg_names)):
             raise ValueError(
                 "Invalid arguments, expected dict with keys: "
-                + ", ".join(self._arg_names)
+                + ", ".join(self.arg_names)
             )
-        result = [0.] * len(expr_ids)
+        result = [0.0] * len(expr_ids)
         id_map = []
-        n_args = len(self._arg_names)
-        param_values = [args[arg_name] for arg_name in self._arg_names]
+        n_args = len(self.arg_names)
+        param_values = [args[arg_name] for arg_name in self.arg_names]
         for i, expr_id in enumerate(expr_ids):
             if expr_id < n_args:
                 result[i] = param_values[expr_id]
@@ -73,12 +76,15 @@ class ComputeGraph:
     def __repr__(self):
         def name_fn(i):
             if i < n_args:
-                return self._arg_names[i]
+                return self.arg_names[i]
             else:
                 return f"_{i-n_args+1}"
 
-        n_args = len(self._arg_names)
+        n_args = len(self.arg_names)
         return self.graph.to_str(n_args, name_fn)
+
+    def get_out_index(self, expr):
+        return expr.id - len(self.arg_names)
 
 
 class Expression:
@@ -259,12 +265,15 @@ def _product(args, powers, coef=1):
 
 
 def atan(tan: Expression) -> Expression:
+    return _atan(tan)
+
+
+def _atan(tan: Expression, coef=1.0) -> Expression:
     with tan.graph.register_mode(False):
         tan_sqr_plus_1 = 1 + tan ** 2
     result = _expr_with_args(tan)
     result.add_child(tan_sqr_plus_1.value)
     # Euler series which converges faster than Taylor:
-    coef = 1.0
     for n in range(20):
         if n > 0:
             coef *= 4.0 * n * n / ((2 * n) * (2 * n + 1))
@@ -293,3 +302,35 @@ def atan2(dy: Expression, dx: Expression) -> Expression:
         result = dy_is_zero * dx_is_zero * nan + (1 - dy_is_zero * dx_is_zero) * result
 
     return Expression(graph, expr=result.value)
+
+
+def sin(x: Expression) -> Expression:
+    with x.graph.register_mode(False):
+        x = ((x + math.pi) % (2 * math.pi)) - math.pi
+    x = Expression(x.graph, expr=x.value)
+    result = _expr_with_args(x)
+    coef = 1
+    for n in range(1, 10):
+        result.add_poly_member(1 / coef, [0], [2 * n - 1])
+        coef *= -(2 * n) * (2 * n + 1)
+    return Expression(x.graph, expr=result)
+
+
+def cos(x: Expression) -> Expression:
+    with x.graph.register_mode(False):
+        x = ((x + math.pi) % (2 * math.pi)) - math.pi
+    x = Expression(x.graph, expr=x.value)
+    result = _expr_with_args(x)
+    result.set_linear([], [], 1)
+    coef = 1
+    for n in range(1, 10):
+        coef *= -(2 * n - 1) * (2 * n)
+        result.add_poly_member(1.0 / coef, [0], [2 * n])
+    return Expression(x.graph, expr=result)
+
+
+def asin(x: Expression) -> Expression:
+    with x.graph.register_mode(False):
+        tan_half = x / (1 + (1 - x ** 2) ** 0.5)
+    tan_half = Expression(x.graph, expr=tan_half.value)
+    return _atan(tan_half, 2)

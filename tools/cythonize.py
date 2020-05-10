@@ -30,7 +30,7 @@ def main(argv=None):
         imppath = modpath.replace(".py", "").replace("/", ".")
         ext_modules.append(Extension(imppath, [modpath]))
     setup(
-        name="Corlina",
+        name="Strateobots",
         cmdclass={"build_ext": build_ext},
         ext_modules=ext_modules,
         script_args=["build_ext", "--inplace"],
