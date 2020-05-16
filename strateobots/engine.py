@@ -880,6 +880,10 @@ class BotType(BotTypeProperties, enum.Enum):
                 return bt
         raise ValueError
 
+    @classmethod
+    def get_list(cls):
+        return [cls.Heavy, cls.Raider, cls.Sniper]
+
 
 class BotModel:
 

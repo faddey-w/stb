@@ -13,7 +13,9 @@ LOGGING = {
         }
     },
     "filters": {},
-    "formatters": {"default": {"format": "%(levelname)s:%(name)s:%(message)s"}},
+    "formatters": {
+        "default": {"format": "%(asctime)s %(levelname)s:%(name)s:%(message)s"}
+    },
     "loggers": {
         "": {"handlers": ["stderr"], "level": "WARNING"},
         "strateobots": {"handlers": ["stderr"], "level": "INFO", "propagate": False},
@@ -31,7 +33,9 @@ DEBUG_LOGGING = {
         }
     },
     "filters": {},
-    "formatters": {"default": {"format": "%(levelname)s:%(name)s:%(message)s"}},
+    "formatters": {
+        "default": {"format": "%(asctime)s %(levelname)s:%(name)s:%(message)s"}
+    },
     "loggers": {
         "": {"handlers": ["stderr"], "level": "INFO"},
         "strateobots": {"handlers": ["stderr"], "level": "DEBUG", "propagate": False},

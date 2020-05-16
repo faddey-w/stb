@@ -12,7 +12,7 @@ from strateobots.ai.lib.bot_initializers import (
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
-from strateobots.ai import base, physics_demo, simple_duel, guided_by
+from strateobots.ai import base, physics_demo, simple_duel, guided_by, evolution
 
 
 log = logging.getLogger(__name__)
@@ -49,7 +49,12 @@ def main(argv=None):
 
     default_module = base.DefaultAIModule([*duel_matchups, *random_matchups])
     simple_ais = simple_duel.AIModule()
-    ai_modules = [default_module, physics_demo.AIModule(), simple_ais]
+    ai_modules = [
+        default_module,
+        physics_demo.AIModule(),
+        simple_ais,
+        evolution.AIModule(),
+    ]
 
     if args.saved_models_dir is not None:
         from strateobots.ai import models
