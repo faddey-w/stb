@@ -76,7 +76,7 @@ class ComputeGraph:
     def __repr__(self):
         def name_fn(i):
             if i < n_args:
-                return self.arg_names[i]
+                return self.arg_names[i].replace("/", ":")
             else:
                 return f"_{i-n_args+1}"
 
@@ -274,7 +274,7 @@ def _atan(tan: Expression, coef=1.0) -> Expression:
     result = _expr_with_args(tan)
     result.add_child(tan_sqr_plus_1.value)
     # Euler series which converges faster than Taylor:
-    for n in range(20):
+    for n in range(10):
         if n > 0:
             coef *= 4.0 * n * n / ((2 * n) * (2 * n + 1))
         result.add_poly_member(coef, [0, 1], [2 * n + 1, -n - 1])
@@ -284,22 +284,16 @@ def _atan(tan: Expression, coef=1.0) -> Expression:
 def atan2(dy: Expression, dx: Expression) -> Expression:
     graph = dy.graph
     tan = dy / dx
+    ctg = dx / dy
+    dx_is_negative = dx <= 0
+    dy_is_negative = dy <= 0
     with graph.register_mode(False):
-        dx_is_zero = abs(dx) <= 1e-7
-        dy_is_zero = abs(dy) <= 1e-7
-    dx_is_zero = Expression(graph, expr=dx_is_zero.value)
-    dy_is_zero = Expression(graph, expr=dy_is_zero.value)
+        use_tan = (dx * (1 - 2 * dx_is_negative)) >= (dy * (1 - 2 * dy_is_negative))
+    use_tan = Expression(graph, expr=use_tan.value)
     with graph.register_mode(False):
-        dy_sign = (2 * (dy > 0)) - 1
-        dx_non_zero = 1 - dx_is_zero
-        dx_negative = (dx < 0) * dx_non_zero
-        result = dx_non_zero * atan(tan)
-        result += dy_sign * (dx_negative * math.pi + dx_is_zero * (math.pi / 2))
-
-        nan = _expr_with_args()
-        nan.set_linear([], [], float("nan"))
-        nan = Expression(graph, expr=nan)
-        result = dy_is_zero * dx_is_zero * nan + (1 - dy_is_zero * dx_is_zero) * result
+        angle1 = _atan(tan) + dx_is_negative * math.pi - 2 * math.pi * dx_is_negative * dy_is_negative
+        angle2 = (math.pi / 2) - _atan(ctg) - math.pi * dy_is_negative
+        result = use_tan * angle1 + (1 - use_tan) * angle2
 
     return Expression(graph, expr=result.value)
 
@@ -310,7 +304,7 @@ def sin(x: Expression) -> Expression:
     x = Expression(x.graph, expr=x.value)
     result = _expr_with_args(x)
     coef = 1
-    for n in range(1, 10):
+    for n in range(1, 7):
         result.add_poly_member(1 / coef, [0], [2 * n - 1])
         coef *= -(2 * n) * (2 * n + 1)
     return Expression(x.graph, expr=result)
@@ -323,7 +317,7 @@ def cos(x: Expression) -> Expression:
     result = _expr_with_args(x)
     result.set_linear([], [], 1)
     coef = 1
-    for n in range(1, 10):
+    for n in range(1, 7):
         coef *= -(2 * n - 1) * (2 * n)
         result.add_poly_member(1.0 / coef, [0], [2 * n])
     return Expression(x.graph, expr=result)
@@ -334,3 +328,15 @@ def asin(x: Expression) -> Expression:
         tan_half = x / (1 + (1 - x ** 2) ** 0.5)
     tan_half = Expression(x.graph, expr=tan_half.value)
     return _atan(tan_half, 2)
+
+
+def logical_or(x, y):
+    with x.graph.register_mode(False):
+        z = 1 - (1 - x) * (1 - y)
+    return Expression(x.graph, expr=z.value)
+
+
+def binary_choice(predicate, true_value, false_value):
+    with predicate.graph.register_mode(False):
+        result = predicate * true_value + (1 - predicate) * false_value
+    return Expression(predicate.graph, expr=result.value)

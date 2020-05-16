@@ -16,7 +16,7 @@ cpdef enum SpecialFunction:
     Remainder = 3
 
 
-cdef double SKIP_EPSILON = 0.00000001
+cdef double SKIP_EPSILON = 0.00000000001
 
 
 cdef struct TreeExpressionNode:
@@ -202,7 +202,7 @@ cdef class Graph:
             expr_repr = _tree_node_to_str(&self.expressions[i], param_names)
             if strip_leading_plus:
                 expr_repr = expr_repr.lstrip("+")
-            lines.append(param_names(i-n_args) + " = " + expr_repr)
+            lines.append(param_names(i+n_args) + " = " + expr_repr)
         return "\n".join(lines)
 
 

@@ -140,7 +140,7 @@ def test_atan2():
     g = ComputeGraph("xy")
     z = atan2(g["y"], g["x"])
 
-    n = 12
+    n = 72
     cases = []
     for i in range(n):
         angle = math.pi * 2 * i / n
@@ -149,7 +149,7 @@ def test_atan2():
         y = radius * math.sin(angle)
         cases.append((y, x))
     _assert_approx_function(z, math.atan2, cases, arg_names="yx")
-    assert math.isnan(z.eval({"x": 0, "y": 0}))
+    # assert math.isnan(z.eval({"x": 0, "y": 0}))  # don't care about this case
 
 
 def test_asin():
@@ -183,7 +183,7 @@ def test_cos():
 
 
 def _assert_approx_function(
-    value_expr, true_fn, arg_cases, abs_err=0.01, rel_err=0.01, arg_names="x"
+    value_expr, true_fn, arg_cases, abs_err=0.0005, rel_err=0.0005, arg_names="x"
 ):
     for args in arg_cases:
         if not isinstance(args, tuple):
