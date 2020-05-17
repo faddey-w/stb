@@ -1,6 +1,14 @@
 from math import pi
 from strateobots.engine import Constants, BotType
-from strateobots.ai.evolution.lib import atan2, asin, cos, sin, binary_choice, Expression
+from strateobots.ai.evolution.lib import (
+    atan2,
+    asin,
+    cos,
+    sin,
+    binary_choice,
+    Expression,
+    logical_or,
+)
 
 
 def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coeff=1.3):
@@ -9,36 +17,36 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
 
     dist = dist_points(bot["x"], bot["y"], enemy["x"], enemy["y"])
     enemy_angle = atan2((enemy["y"] - bot["y"]), (enemy["x"] - bot["x"]))
-    ori_angle = norm_angle(bot['orientation'])
+    ori_angle = norm_angle(bot["orientation"])
 
     _is_at_back = (dist <= apocenter_at_back_coeff * orbit_radius) * is_at_back(
         enemy, enemy_angle + pi
     )
     _not_at_back = 1 - _is_at_back
 
-    move, rotate = _movement_to_back(
+    move, rotate, tgt_orientation = _movement_to_back(
         bot, orbit_radius, max_speed, dist, enemy_angle, ori_angle
     )
-    return _not_at_back * move, _not_at_back * rotate
+    tgt_orientation = binary_choice(_not_at_back, tgt_orientation, ori_angle)
+    return _not_at_back * move, _not_at_back * rotate, tgt_orientation
 
 
 def _movement_to_back(bot, orbit_radius, max_speed, dist, enemy_angle, ori_angle):
     # decide - move to left side from enemy or to right
     # determine target point - nearest point on orbit
-    pt_angle = asin(orbit_radius / dist) if orbit_radius < dist else pi / 2
+    pt_angle = binary_choice(orbit_radius < dist, asin(orbit_radius / dist), pi / 2)
     delta_angle = norm_angle(enemy_angle - ori_angle)
     pt_angle = enemy_angle - abs(pt_angle) * (2 * (delta_angle >= 0) - 1)
     delta_angle = norm_angle(pt_angle - ori_angle)
-    rotate = delta_angle > 0
+    rotate = 2 * (delta_angle > 0) - 1
 
     # always move ahead
     # limit speed if already at orbit to avoid drift
-    if dist > 1.1 * orbit_radius or vec_len(bot["vx"], bot["vy"]) < max_speed:
-        move = +1
-    else:
-        move = 0
+    move = logical_or(
+        dist > 1.1 * orbit_radius, vec_len(bot["vx"], bot["vy"]) < max_speed
+    )
 
-    return move, rotate
+    return move, rotate, pt_angle
 
 
 def get_bot_type_property(bot, prop_name):
@@ -85,7 +93,7 @@ def norm_angle(angle):
 def should_fire(bot, enemy, shot_range, dist=None):
     if dist is None:
         dist = dist_points(bot["x"], bot["y"], enemy["x"], enemy["y"])
-    gun_angle = bot['orientation'] + bot['tower_orientation']
+    gun_angle = bot["orientation"] + bot["tower_orientation"]
     kx = cos(gun_angle)
     ky = sin(gun_angle)
     fireline_dist = dist_line(

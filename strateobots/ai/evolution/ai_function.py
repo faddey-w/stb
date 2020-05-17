@@ -38,6 +38,10 @@ class AiFunction:
                 ori = ctl["orientation"]
                 ctl["move_aim_x"] = bot['x'] + 100 * math.cos(ori)
                 ctl["move_aim_y"] = bot['y'] + 100 * math.sin(ori)
+            if "gun_aim_x" not in ctl and "gun_orientation" in ctl:
+                ori = ctl["gun_orientation"]
+                ctl["gun_aim_x"] = bot['x'] + 100 * math.cos(ori)
+                ctl["gun_aim_y"] = bot['y'] + 100 * math.sin(ori)
 
         return ctl_dicts
 
