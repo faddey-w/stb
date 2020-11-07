@@ -131,9 +131,7 @@ class StbEngine:
         ]
         if with_explosions:
             clone._explosions = [
-                ExplosionModel(
-                    x=expl.x, y=expl.y, duration=expl.duration, size=expl.size, t=expl.t
-                )
+                ExplosionModel(x=expl.x, y=expl.y, duration=expl.duration, size=expl.size, t=expl.t)
                 for expl in self._explosions
             ]
         else:
@@ -213,9 +211,13 @@ class StbEngine:
         shield_leak_factor = 1 - Constants.shield_half_leak_period ** (1 / tps)
 
         # process AI
-        bots_full_data, bots_visible_data, bullets_data, rays_data, explosions_data = (
-            self._serialize_game_state()
-        )
+        (
+            bots_full_data,
+            bots_visible_data,
+            bullets_data,
+            rays_data,
+            explosions_data,
+        ) = self._serialize_game_state()
         if Constants.full_information:
             bots_visible_data = bots_full_data
         control1_data = control2_data = None
@@ -278,9 +280,9 @@ class StbEngine:
             rot_speed = typ.rot_speed
             if ctl.action == Action.ACCELERATION:
                 rot_speed += typ.bonus_rot_speed
-            bot.rot_speed = (
-                rotation_smoothness * bot.rot_speed + ctl.rotate * rot_speed
-            ) / (rotation_smoothness + 1)
+            bot.rot_speed = (rotation_smoothness * bot.rot_speed + ctl.rotate * rot_speed) / (
+                rotation_smoothness + 1
+            )
             ori_change = little_noise(bot.rot_speed) / tps
 
             a_angle = bot.orientation + ori_change / 2
@@ -371,8 +373,7 @@ class StbEngine:
                 bot.y = world_height - bot_radius
 
             bot.tower_rot_speed = (
-                rotation_smoothness * bot.tower_rot_speed
-                + ctl.tower_rotate * typ.gun_rot_speed
+                rotation_smoothness * bot.tower_rot_speed + ctl.tower_rotate * typ.gun_rot_speed
             ) / (1 + rotation_smoothness)
             bot.tower_orientation += little_noise(bot.tower_rot_speed) / tps
 
@@ -396,12 +397,7 @@ class StbEngine:
             ctl = self._controls[bot.id]  # type: BotControl
             typ = bot.type  # type: BotTypeProperties
             wants_fire = ctl.action == Action.FIRE
-            if (
-                wants_fire
-                and not typ.shots_ray
-                and bot.shot_ready
-                and not bot.is_firing
-            ):
+            if wants_fire and not typ.shots_ray and bot.shot_ready and not bot.is_firing:
                 angle = random.gauss(
                     mu=bot.orientation + bot.tower_orientation, sigma=typ.fire_scatter
                 )
@@ -410,18 +406,11 @@ class StbEngine:
                 bot.load -= typ.shot_energy
                 bot.is_firing = True
             elif (
-                wants_fire
-                and typ.shots_ray
-                and bot.load > typ.shot_energy / tps
-                and bot.is_firing
+                wants_fire and typ.shots_ray and bot.load > typ.shot_energy / tps and bot.is_firing
             ):
                 # ray should already be in rays dict
                 pass
-            elif (
-                wants_fire
-                and typ.shots_ray
-                and bot.load > Constants.ray_min_load_required
-            ):
+            elif wants_fire and typ.shots_ray and bot.load > Constants.ray_min_load_required:
                 if bot.id not in self._rays:
                     bullet = BulletModel(
                         typ,
@@ -445,11 +434,7 @@ class StbEngine:
         # update rays
         for ray in self._rays.values():
             bot = self._bots.get(ray.origin_id)
-            if (
-                bot is None
-                or bot.load < 0
-                or self._controls[bot.id].action != Action.FIRE
-            ):
+            if bot is None or bot.load < 0 or self._controls[bot.id].action != Action.FIRE:
                 continue
             bot.load -= bot.type.shot_energy / tps
             next_rays[bot.id] = ray
@@ -576,12 +561,8 @@ class StbEngine:
                 e2a = vec_len2(b2.vx, b2.vy)
 
                 h = max(0, m1 * (e1b - e1a) + m2 * (e2b - e2a))
-                cf1 = 2 - vec_dot(
-                    cos(b1.orientation), sin(b1.orientation), c_cos, c_sin
-                )
-                cf2 = 2 + vec_dot(
-                    cos(b2.orientation), sin(b2.orientation), c_cos, c_sin
-                )
+                cf1 = 2 - vec_dot(cos(b1.orientation), sin(b1.orientation), c_cos, c_sin)
+                cf2 = 2 + vec_dot(cos(b2.orientation), sin(b2.orientation), c_cos, c_sin)
 
                 dmg1 = collision_factor * cf1 * h * m2 / (m1 + m2)
                 dmg2 = collision_factor * cf2 * h * m1 / (m1 + m2)
@@ -606,9 +587,7 @@ class StbEngine:
             if bot.hp > 0:
                 next_bots[bot.id] = bot
             else:
-                self._explosions.append(
-                    ExplosionModel(bot.x, bot.y, tps, 2 * bot_radius)
-                )
+                self._explosions.append(ExplosionModel(bot.x, bot.y, tps, 2 * bot_radius))
                 self._n_bots[bot.team] -= 1
                 bot.hp = 0
         self._bots = next_bots
@@ -1103,9 +1082,7 @@ class BotControl:
         self.action = action
 
     def __eq__(self, other):
-        return all(
-            getattr(self, slot) == getattr(other, slot) for slot in self.__slots__
-        )
+        return all(getattr(self, slot) == getattr(other, slot) for slot in self.__slots__)
 
     def __repr__(self):
         return "BotControl(move={}, rotate={}, tower_rotate={}, action={})".format(
