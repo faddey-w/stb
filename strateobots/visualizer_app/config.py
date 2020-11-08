@@ -1,6 +1,7 @@
 GAME_MAX_TICKS = 2000
 
 RANDOM_MATCH_SETTINGS = ("RvR", "TvT", "LvL", "RvT", "RvL", "LvT", "RTLvRTL", "RRRvRRR")
+SIDED_MATCH_SETTINGS = ("RTLvRTL", "RRRTLvRRRTL",)
 
 LOGGING = {
     "version": 1,

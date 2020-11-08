@@ -36,12 +36,12 @@ class AiFunction:
                 continue
             if "move_aim_x" not in ctl and "orientation" in ctl:
                 ori = ctl["orientation"]
-                ctl["move_aim_x"] = bot['x'] + 100 * math.cos(ori)
-                ctl["move_aim_y"] = bot['y'] + 100 * math.sin(ori)
+                ctl["move_aim_x"] = bot["x"] + 100 * math.cos(ori)
+                ctl["move_aim_y"] = bot["y"] + 100 * math.sin(ori)
             if "gun_aim_x" not in ctl and "gun_orientation" in ctl:
                 ori = ctl["gun_orientation"]
-                ctl["gun_aim_x"] = bot['x'] + 100 * math.cos(ori)
-                ctl["gun_aim_y"] = bot['y'] + 100 * math.sin(ori)
+                ctl["gun_aim_x"] = bot["x"] + 100 * math.cos(ori)
+                ctl["gun_aim_y"] = bot["y"] + 100 * math.sin(ori)
 
         return ctl_dicts
 
@@ -76,6 +76,7 @@ class Encoder:
             prefix = f"bot/{i}/"
             for bot_type_name in sorted(BotType.__members__):
                 names.append(prefix + "type/" + bot_type_name)
+            names.append(prefix + "is_alive")
             for field in _VISIBLE_BOT_FIELDS:
                 names.append(prefix + field)
             for field in _PRIVATE_BOT_FIELDS:
@@ -84,6 +85,7 @@ class Encoder:
             prefix = f"enemy/{i}/"
             for bot_type_name in sorted(BotType.__members__):
                 names.append(prefix + "type/" + bot_type_name)
+            names.append(prefix + "is_alive")
             for field in _VISIBLE_BOT_FIELDS:
                 names.append(prefix + field)
         return names
@@ -120,6 +122,7 @@ def _encode(bot, is_friend):
         return [0] * (_N_FRIEND_FIELDS if is_friend else _N_ENEMY_FIELDS)
     result = [0] * _N_BOT_TYPES
     result[bot["type"] - 1] = 1
+    result.append(1)  # is_alive
     result.extend(bot[f] for f in _VISIBLE_BOT_FIELDS)
     if is_friend:
         result.extend(bot[f] for f in _PRIVATE_BOT_FIELDS)
@@ -141,5 +144,7 @@ _VISIBLE_BOT_FIELDS = [
 ]
 
 _N_BOT_TYPES = len(BotType.__members__)
-_N_FRIEND_FIELDS = len(_VISIBLE_BOT_FIELDS) + len(_PRIVATE_BOT_FIELDS) + _N_BOT_TYPES
-_N_ENEMY_FIELDS = len(_VISIBLE_BOT_FIELDS) + _N_BOT_TYPES
+_N_FRIEND_FIELDS = (
+    1 + len(_VISIBLE_BOT_FIELDS) + len(_PRIVATE_BOT_FIELDS) + _N_BOT_TYPES
+)
+_N_ENEMY_FIELDS = 1 + len(_VISIBLE_BOT_FIELDS) + _N_BOT_TYPES

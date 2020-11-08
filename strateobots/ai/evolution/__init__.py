@@ -19,4 +19,4 @@ class AIModule(base.AIModule):
     def construct_ai_function(self, team, builder_fn):
         from .ai_function import AiFunction
 
-        return AiFunction(builder_fn, 1, 0)
+        return AiFunction(builder_fn, 5, 25)

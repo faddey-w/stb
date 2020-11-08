@@ -44,3 +44,28 @@ def random_bot_initializer(team1_types, team2_types):
             )
 
     return initialize_bots_randomly
+
+
+def random_sided_bot_initializer(team1_types, team2_types):
+    def initialize_bots_randomly(engine):
+        for bottype in team1_types:
+            engine.add_bot(
+                bottype=bottype,
+                team=engine.team1,
+                x=(0.4 * random.random()) * engine.get_constants().world_width,
+                y=random.random() * engine.get_constants().world_height,
+                orientation=0,
+                tower_orientation=0,
+            )
+
+        for bottype in team2_types:
+            engine.add_bot(
+                bottype=bottype,
+                team=engine.team2,
+                x=(1 - 0.4 * random.random()) * engine.get_constants().world_width,
+                y=random.random() * engine.get_constants().world_height,
+                orientation=-math.pi,
+                tower_orientation=0,
+            )
+
+    return initialize_bots_randomly

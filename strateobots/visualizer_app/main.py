@@ -8,6 +8,7 @@ from strateobots.engine import BotType
 from strateobots.ai.lib.bot_initializers import (
     random_bot_initializer,
     duel_bot_initializer,
+    random_sided_bot_initializer,
 )
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
@@ -46,8 +47,18 @@ def main(argv=None):
         ts1 = [typemap[t] for t in ts1]
         ts2 = [typemap[t] for t in ts2]
         random_matchups.append(("Random " + matchup, random_bot_initializer(ts1, ts2)))
+    sided_matchups = []
+    for matchup in config.SIDED_MATCH_SETTINGS:
+        ts1, ts2 = matchup.split("v")
+        ts1 = [typemap[t] for t in ts1]
+        ts2 = [typemap[t] for t in ts2]
+        sided_matchups.append(
+            ("Sided " + matchup, random_sided_bot_initializer(ts1, ts2))
+        )
 
-    default_module = base.DefaultAIModule([*duel_matchups, *random_matchups])
+    default_module = base.DefaultAIModule(
+        [*duel_matchups, *random_matchups, *sided_matchups]
+    )
     simple_ais = simple_duel.AIModule()
     ai_modules = [
         default_module,

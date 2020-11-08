@@ -89,7 +89,7 @@ class ScalarOutput(ControlOutput):
         return self._clip(self._distr.sample(1)[0])
 
     def entropy(self):
-        return util.assert_finite(self._distr.entropy(), [self.control])
+        return assert_finite(self._distr.entropy(), [self.control])
 
     def log_prob(self, x):
         return self._distr.log_prob(x)
@@ -131,7 +131,7 @@ class OrientationOutput(ControlOutput):
         return self._to_angle(self._distr.sample(1)[0])
 
     def entropy(self):
-        return util.assert_finite(self._distr.entropy(), [self.control])
+        return assert_finite(self._distr.entropy(), [self.control])
 
     def log_prob(self, x):
         rel_angle = x - self.base_angle + np.pi
@@ -183,3 +183,9 @@ class AnglenavModel:
         ctl_outs = build_inference(self.policy_net, state_vectors, self.control_model)
         value_tensor = self.value_net(state_vectors)["value"][:, 0]
         return value_tensor, ctl_outs
+
+
+def assert_finite(tensor, watches=(), summarize=50):
+    assertion = tf.Assert(tf.reduce_all(tf.is_finite(tensor)), watches, summarize=summarize)
+    with tf.control_dependencies([assertion]):
+        return tf.identity(tensor)
