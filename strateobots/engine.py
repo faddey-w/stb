@@ -1,10 +1,10 @@
 import enum
 import random
 import logging
-import collections
 import sys
 import copy
 import inspect
+import dataclasses
 from math import pi, sin, cos, sqrt
 
 
@@ -84,56 +84,11 @@ class StbEngine:
         clone.teams = self.teams
         clone.team1 = self.team1
         clone.team2 = self.team2
-        clone._bots = {
-            bot_id: BotModel(
-                id=bot.id,
-                team=bot.team,
-                type=bot.type,
-                x=bot.x,
-                y=bot.y,
-                orientation=bot.orientation,
-                tower_orientation=bot.tower_orientation,
-                shield_warmup=bot.shield_warmup,
-                _hp=bot.hp,
-                _shield=bot.shield,
-                load=bot.load,
-                vx=bot.vx,
-                vy=bot.vy,
-                rot_speed=bot.rot_speed,
-                tower_rot_speed=bot.tower_rot_speed,
-                is_firing=bot.is_firing,
-            )
-            for bot_id, bot in self._bots.items()
-        }
-        clone._rays = {
-            bot_id: BulletModel(
-                type=ray.type,
-                origin_id=ray.origin_id,
-                orientation=ray.orientation,
-                range=ray.range,
-                remaining_range=ray.remaining_range,
-                x=ray.x,
-                y=ray.y,
-            )
-            for bot_id, ray in self._rays.items()
-        }
-        clone._bullets = [
-            BulletModel(
-                type=bullet.type,
-                origin_id=bullet.origin_id,
-                orientation=bullet.orientation,
-                range=bullet.range,
-                remaining_range=bullet.remaining_range,
-                x=bullet.x,
-                y=bullet.y,
-            )
-            for bullet in self._bullets
-        ]
+        clone._bots = {bot_id: copy.copy(bot) for bot_id, bot in self._bots.items()}
+        clone._rays = {bot_id: copy.copy(ray) for bot_id, ray in self._rays.items()}
+        clone._bullets = [copy.copy(bullet) for bullet in self._bullets]
         if with_explosions:
-            clone._explosions = [
-                ExplosionModel(x=expl.x, y=expl.y, duration=expl.duration, size=expl.size, t=expl.t)
-                for expl in self._explosions
-            ]
+            clone._explosions = [copy.copy(expl) for expl in self._explosions]
         else:
             clone._explosions = []
         if with_replay:
@@ -141,15 +96,7 @@ class StbEngine:
         else:
             clone.replay = []
 
-        clone._controls = {
-            bot_id: BotControl(
-                move=ctl.move,
-                rotate=ctl.rotate,
-                tower_rotate=ctl.tower_rotate,
-                action=ctl.action,
-            )
-            for bot_id, ctl in self._controls.items()
-        }
+        clone._controls = {bot_id: copy.copy(ctl) for bot_id, ctl in self._controls.items()}
         clone._n_bots = self._n_bots.copy()
 
         clone.has_error = self.has_error
@@ -752,32 +699,29 @@ class StbEngine:
             self.tick()
 
 
-BotTypeProperties = collections.namedtuple(
-    "BotTypeProperties",
-    [
-        "code",
-        "max_hp",
-        "mass",
-        "reload_period",  # sec
-        "acc",
-        "bonus_acc",
-        "max_ahead_speed",  # points / sec
-        "bonus_max_speed",  # points / sec
-        "max_back_speed",  # points / sec
-        "rot_speed",  # radian / sec
-        "bonus_rot_speed",  # radian / sec
-        "gun_rot_speed",  # radian / sec
-        "shots_ray",  # boolean
-        "shot_range",
-        "shot_energy",  # for rays it is discharge per sec
-        "fire_scatter",  # sigma of bullet direction distribution
-        "damage",  # per-shot or per-second if ray
-        "shield_warmup_period",  # sec
-        "shield_energy",
-        "shield_regen",  # hp / sec
-        "bonus_shield_regen",  # hp / sec
-    ],
-)
+@dataclasses.dataclass(frozen=True)
+class BotTypeProperties:
+    code: int
+    max_hp: int
+    mass: int
+    reload_period: float
+    acc: float
+    bonus_acc: float
+    max_ahead_speed: float  # points / sec
+    bonus_max_speed: float  # points / sec
+    max_back_speed: float  # points / sec
+    rot_speed: float  # radian / sec
+    bonus_rot_speed: float  # radian / sec
+    gun_rot_speed: float  # radian / sec
+    shots_ray: bool
+    shot_range: int
+    shot_energy: float  # for rays it is discharge per sec
+    fire_scatter: float  # sigma of bullet direction distribution
+    damage: int  # per-shot or per-second if ray
+    shield_warmup_period: float  # sec
+    shield_energy: int
+    shield_regen: int  # hp / sec
+    bonus_shield_regen: int  # hp / sec
 
 
 class BotType(BotTypeProperties, enum.Enum):
@@ -864,62 +808,32 @@ class BotType(BotTypeProperties, enum.Enum):
         return [cls.Heavy, cls.Raider, cls.Sniper]
 
 
+@dataclasses.dataclass
 class BotModel:
+    id: int
+    team: int
+    type: BotTypeProperties
+    x: float
+    y: float
+    orientation: float
+    tower_orientation: float = 0.0
+    shield_warmup: float = 0.0
+    hp: float = None
+    shield: float = None
+    load: float = 1.0
+    vx: float = 0.0
+    vy: float = 0.0
+    rot_speed: float = 0.0
+    tower_rot_speed: float = 0.0
+    is_firing: bool = False
 
-    __slots__ = [
-        "id",
-        "team",
-        "type",
-        "hp",
-        "load",
-        "x",
-        "y",
-        "vx",
-        "vy",
-        "rot_speed",
-        "orientation",
-        "tower_orientation",
-        "is_firing",
-        "shield",
-        "shield_warmup",
-        "tower_rot_speed",
-    ]
+    HIDDEN_FIELDS = "load", "vx", "vy", "rot_speed", "tower_rot_speed", "shot_ready"
 
-    def __init__(
-        self,
-        id,
-        team,
-        type,
-        x,
-        y,
-        orientation,
-        tower_orientation=0.0,
-        shield_warmup=0,
-        _hp=None,
-        _shield=None,
-        load=1.0,
-        vx=0,
-        vy=0,
-        rot_speed=0,
-        tower_rot_speed=0,
-        is_firing=False,
-    ):
-        self.id = id
-        self.team = team
-        self.type = type  # type: BotTypeProperties
-        self.hp = type.max_hp if _hp is None else _hp
-        self.shield = type.shield_energy if _shield is None else _shield
-        self.shield_warmup = shield_warmup
-        self.load = load
-        self.x = x
-        self.y = y
-        self.vx = vx
-        self.vy = vy
-        self.rot_speed = rot_speed
-        self.tower_rot_speed = tower_rot_speed
-        self.orientation = orientation
-        self.tower_orientation = tower_orientation
-        self.is_firing = is_firing
+    def __post_init__(self):
+        if self.hp is None:
+            self.hp = self.type.max_hp
+        if self.shield is None:
+            self.shield = self.type.shield_energy
 
     @property
     def hp_ratio(self):
@@ -938,6 +852,13 @@ class BotModel:
         return self.shield_warmup > Constants.minimum_shield_warmup and self.shield > 0
 
 
+BotModel.ALL_FIELDS = tuple(
+    *BotModel.__annotations__.keys(),
+    *(name for name, value in vars(BotModel).items() if isinstance(value, property)),
+)
+BotModel.VISIBLE_FIELDS = tuple(set(BotModel.ALL_FIELDS) - set(BotModel.HIDDEN_FIELDS))
+
+
 class BulletModel:
 
     __slots__ = [
@@ -951,6 +872,7 @@ class BulletModel:
         "cos",
         "sin",
     ]
+    FIELDS = tuple({*__slots__, "orientation"} - {"_orientation"})
 
     def __init__(self, type, origin_id, orientation, x, y, range, remaining_range=None):
         self.origin_id = origin_id
@@ -974,16 +896,14 @@ class BulletModel:
         self.sin = sin(value)
 
 
+@dataclasses.dataclass
 class ExplosionModel:
 
-    __slots__ = ["x", "y", "duration", "size", "t"]
-
-    def __init__(self, x, y, duration, size, t=0):
-        self.x = x
-        self.y = y
-        self.duration = duration
-        self.size = size
-        self.t = t
+    x: float
+    y: float
+    duration: float
+    size: float
+    t: float = 0
 
     @property
     def t_ratio(self):
@@ -992,6 +912,9 @@ class ExplosionModel:
     @property
     def is_ended(self):
         return self.t >= self.duration
+
+
+ExplosionModel.FIELDS = tuple(ExplosionModel.__annotations__.keys())
 
 
 def absorb_damage_by_shield(bot, damage):
@@ -1060,34 +983,27 @@ def little_noise(x):
     return random.gauss(x, x / 10)
 
 
-class Action:
+class Action(int, enum.Enum):
     IDLE = 0
     FIRE = 1
     SHIELD_WARMUP = 2
     SHIELD_REGEN = 3
     ACCELERATION = 4
 
-    ALL = IDLE, FIRE, SHIELD_WARMUP, SHIELD_REGEN, ACCELERATION
-    NAMES = "idle", "fire", "shield_warmup", "shield_regen", "acceleration"
+
+Action.ALL = tuple(Action.__members__.values())
+Action.NAMES = tuple(name.lower() for name in Action.__members__.keys())
 
 
+@dataclasses.dataclass
 class BotControl:
+    move: int = 0
+    rotate: int = 0
+    tower_rotate: int = 0
+    action: Action = Action.IDLE
 
-    __slots__ = ["move", "rotate", "tower_rotate", "action"]
 
-    def __init__(self, move=0, rotate=0, tower_rotate=0, action=Action.IDLE):
-        self.move = move
-        self.rotate = rotate
-        self.tower_rotate = tower_rotate
-        self.action = action
-
-    def __eq__(self, other):
-        return all(getattr(self, slot) == getattr(other, slot) for slot in self.__slots__)
-
-    def __repr__(self):
-        return "BotControl(move={}, rotate={}, tower_rotate={}, action={})".format(
-            self.move, self.rotate, self.tower_rotate, self.action
-        )
+BotControl.FIELDS = tuple(BotControl.__annotations__.keys())
 
 
 def position_ray(bot, ray):
