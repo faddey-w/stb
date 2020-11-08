@@ -1,2 +1,0 @@
-tornado
-tensorflow==1.5
