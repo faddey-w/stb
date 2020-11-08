@@ -5,6 +5,7 @@ import sys
 import copy
 import inspect
 import dataclasses
+from types import MappingProxyType
 from math import pi, sin, cos, sqrt
 
 
@@ -588,7 +589,7 @@ class StbEngine:
             if bot_id not in allowed_ids:
                 continue
             ctl = self._controls[bot_id]
-            for attr in BotControl.__slots__:
+            for attr in BotControl.FIELDS:
                 value = ctl_data.get(attr)
                 if value is not None:
                     setattr(ctl, attr, value)
@@ -724,7 +725,7 @@ class BotTypeProperties:
     bonus_shield_regen: int  # hp / sec
 
 
-class BotType(BotTypeProperties, enum.Enum):
+class BotType:
 
     Heavy = BotTypeProperties(
         code=1,
@@ -796,6 +797,8 @@ class BotType(BotTypeProperties, enum.Enum):
         bonus_shield_regen=10,
     )
 
+    __members__ = MappingProxyType({"Heavy": Heavy, "Raider": Raider, "Sniper": Sniper})
+
     @classmethod
     def by_code(cls, code):
         for name, bt in cls.__members__.items():
@@ -805,7 +808,7 @@ class BotType(BotTypeProperties, enum.Enum):
 
     @classmethod
     def get_list(cls):
-        return [cls.Heavy, cls.Raider, cls.Sniper]
+        return list(cls.__members__.values())
 
 
 @dataclasses.dataclass
@@ -853,8 +856,10 @@ class BotModel:
 
 
 BotModel.ALL_FIELDS = tuple(
-    *BotModel.__annotations__.keys(),
-    *(name for name, value in vars(BotModel).items() if isinstance(value, property)),
+    [
+        *BotModel.__annotations__.keys(),
+        *(name for name, value in vars(BotModel).items() if isinstance(value, property)),
+    ]
 )
 BotModel.VISIBLE_FIELDS = tuple(set(BotModel.ALL_FIELDS) - set(BotModel.HIDDEN_FIELDS))
 
