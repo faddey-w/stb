@@ -608,66 +608,21 @@ class StbEngine:
     def _serialize_game_state(self):
         team_bots_visible_data = {t: [] for t in self.teams}
         team_bots_full_data = {t: [] for t in self.teams}
-        bullets = []
-        rays = []
-        explosions = []
+        bullets = [
+            _to_dict(bullet, BulletModel.FIELDS)
+            for bullet in self.iter_bullets()
+        ]
+        rays = [
+            _to_dict(ray, BulletModel.FIELDS)
+            for ray in self.iter_rays()
+        ]
+        explosions = [
+            _to_dict(explosion, ExplosionModel.FIELDS)
+            for explosion in self.iter_bullets()
+        ]
         for bot in self.iter_bots():
-            visible_fields = {
-                "id": bot.id,
-                "type": bot.type.code,
-                "hp": bot.hp_ratio,
-                "x": bot.x,
-                "y": bot.y,
-                "vx": bot.vx,
-                "vy": bot.vy,
-                "orientation": bot.orientation,
-                "tower_orientation": bot.tower_orientation,
-                "shield": bot.shield_ratio,
-                "has_shield": bot.has_shield,
-                "is_firing": bot.is_firing,
-            }
-            team_bots_visible_data[bot.team].append(visible_fields)
-            all_fields = visible_fields.copy()
-            all_fields.update(
-                {
-                    "load": bot.load,
-                    "shot_ready": bot.shot_ready,
-                    "shield_warmup": bot.shield_warmup,
-                }
-            )
-            team_bots_full_data[bot.team].append(all_fields)
-
-        for bullet in self.iter_bullets():
-            bullets.append(
-                {
-                    "origin_id": bullet.origin_id,
-                    "type": bullet.type.code,
-                    "x": bullet.x,
-                    "y": bullet.y,
-                    "range": bullet.remaining_range,
-                    "orientation": bullet.orientation,
-                }
-            )
-        for ray in self.iter_rays():
-            rays.append(
-                {
-                    "type": ray.type.code,
-                    "x": ray.x,
-                    "y": ray.y,
-                    "orientation": ray.orientation,
-                    "range": ray.range,
-                }
-            )
-        for explosion in self.iter_explosions():
-            explosions.append(
-                {
-                    "x": explosion.x,
-                    "y": explosion.y,
-                    "duration": explosion.duration,
-                    "size": explosion.size,
-                    "t": explosion.t,
-                }
-            )
+            team_bots_visible_data[bot.team].append(_to_dict(bot, BotModel.VISIBLE_FIELDS))
+            team_bots_full_data[bot.team].append(_to_dict(bot, BotModel.ALL_FIELDS))
         return team_bots_full_data, team_bots_visible_data, bullets, rays, explosions
 
     @property
@@ -840,7 +795,7 @@ class BotModel:
     tower_rot_speed: float = 0.0
     is_firing: bool = False
 
-    HIDDEN_FIELDS = "load", "vx", "vy", "rot_speed", "tower_rot_speed", "shot_ready"
+    HIDDEN_FIELDS = "load", "rot_speed", "tower_rot_speed", "shot_ready"
 
     def __post_init__(self):
         if self.hp is None:
@@ -979,3 +934,7 @@ def position_ray(bot, ray):
     ray.y = y
     ray.cos = cos(angle)
     ray.sin = sin(angle)
+
+
+def _to_dict(obj, fields):
+    return {field: getattr(obj, field) for field in fields}
