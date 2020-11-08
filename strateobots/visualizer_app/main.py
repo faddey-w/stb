@@ -2,7 +2,6 @@ import logging.config
 import argparse
 import itertools
 import os
-import strateobots
 from tornado import web, ioloop
 from strateobots.engine import BotType
 from strateobots.ai.lib.bot_initializers import (
@@ -19,7 +18,7 @@ log = logging.getLogger(__name__)
 
 
 def main(argv=None):
-    static_dir = os.path.join(strateobots.REPO_ROOT, "visualizer_frontend")
+    static_dir = os.path.join(os.path.dirname(__file__), "frontend")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--static-dir", default=static_dir)
