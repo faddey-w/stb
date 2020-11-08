@@ -7,6 +7,16 @@ import inspect
 import dataclasses
 from types import MappingProxyType
 from math import pi, sin, cos, sqrt
+from strateobots.util import (
+    vec_rotate,
+    vec_len,
+    vec_len2,
+    vec_dot,
+    vec_sum,
+    dist_points,
+    dist_line,
+    half_chord_len,
+)
 
 
 class Constants:
@@ -928,58 +938,6 @@ def absorb_damage_by_shield(bot, damage):
     bot.shield -= absorbed
     bot.shield = max(0.0, bot.shield)
     return damage
-
-
-def vec_rotate(x, y, angle):
-    sin_a = sin(angle)
-    cos_a = cos(angle)
-    nx = x * cos_a - y * sin_a
-    ny = x * sin_a + y * cos_a
-    return nx, ny
-
-
-def vec_sum(vec, *vecs):
-    rx, ry = vec
-    for x, y in vecs:
-        rx += x
-        ry += y
-    return rx, ry
-
-
-def vec_dot(x1, y1, x2, y2):
-    return x1 * x2 + y1 * y2
-
-
-def half_chord_len(radius, distance):
-    return sqrt(radius * radius - distance * distance)
-
-
-def dist_line(point_x, point_y, line_cos, line_sin, line_x, line_y):
-    q = line_sin * (point_x - line_x) - line_cos * (point_y - line_y)
-    return abs(q)
-
-
-def dist_points(x1, y1, x2, y2):
-    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
-
-
-def dist_bot(bot, x, y):
-    return dist_points(bot.x, bot.y, x, y)
-
-
-def vec_len(x, y):
-    return sqrt(x * x + y * y)
-
-
-def vec_len2(x, y):
-    return x * x + y * y
-
-
-def quantize(x, q):
-    r = x % q
-    if r >= q / 2:
-        r -= q
-    return x - r
 
 
 def little_noise(x):

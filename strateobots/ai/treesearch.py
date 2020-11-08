@@ -2,7 +2,6 @@ from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
 import numpy as np
 
 # from scipy import optimize
-from strateobots.engine import dist_points, vec_len, dist_line, vec_dot
 from strateobots.engine import Constants, BotType, StbEngine
 from strateobots.ai.simple_duel import (
     norm_angle,
@@ -10,7 +9,7 @@ from strateobots.ai.simple_duel import (
     navigate_shortest,
     should_fire,
 )
-from strateobots.util import objedict
+from strateobots.util import objedict, dist_points
 import itertools
 import random
 from functools import partial

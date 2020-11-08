@@ -6,6 +6,55 @@ import signal
 from collections import UserDict
 import configparser
 import importlib
+from math import sin, cos, sqrt
+
+
+def vec_rotate(x, y, angle):
+    sin_a = sin(angle)
+    cos_a = cos(angle)
+    nx = x * cos_a - y * sin_a
+    ny = x * sin_a + y * cos_a
+    return nx, ny
+
+
+def vec_sum(vec, *vecs):
+    rx, ry = vec
+    for x, y in vecs:
+        rx += x
+        ry += y
+    return rx, ry
+
+
+def vec_dot(x1, y1, x2, y2):
+    return x1 * x2 + y1 * y2
+
+
+def half_chord_len(radius, distance):
+    return sqrt(radius * radius - distance * distance)
+
+
+def dist_line(point_x, point_y, line_cos, line_sin, line_x, line_y):
+    q = line_sin * (point_x - line_x) - line_cos * (point_y - line_y)
+    return abs(q)
+
+
+def dist_points(x1, y1, x2, y2):
+    return sqrt((x1 - x2) * (x1 - x2) + (y1 - y2) * (y1 - y2))
+
+
+def vec_len(x, y):
+    return sqrt(x * x + y * y)
+
+
+def vec_len2(x, y):
+    return x * x + y * y
+
+
+def quantize(x, q):
+    r = x % q
+    if r >= q / 2:
+        r -= q
+    return x - r
 
 
 def _cached_with_timeout_impl(timeout, keyfunc):
