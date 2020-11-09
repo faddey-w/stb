@@ -138,21 +138,10 @@ class StbEngine:
         return bot
 
     def tick(self):
+        self.communicate_with_ais()
+        self.update_game_state()
 
-        next_bullets = []
-        next_rays = {}
-        tps = float(Constants.ticks_per_sec)
-        bullet_speed = Constants.bullet_speed / tps
-        bot_radius = Constants.bot_radius
-        friction_factor = Constants.friction_factor
-        collision_factor = Constants.collision_factor
-        rotation_smoothness = Constants.rotation_smoothness
-        eps = Constants.epsilon
-        min_collision_speed = Constants.min_collision_speed
-        world_width = Constants.world_width
-        world_height = Constants.world_height
-        load_with_action = Constants.load_with_action
-        shield_leak_factor = 1 - Constants.shield_half_leak_period ** (1 / tps)
+    def communicate_with_ais(self):
 
         # process AI
         (
@@ -203,6 +192,22 @@ class StbEngine:
                         "explosions": explosions_data,
                     }
                 )
+
+    def update_game_state(self):
+        next_bullets = []
+        next_rays = {}
+        tps = float(Constants.ticks_per_sec)
+        bullet_speed = Constants.bullet_speed / tps
+        bot_radius = Constants.bot_radius
+        friction_factor = Constants.friction_factor
+        collision_factor = Constants.collision_factor
+        rotation_smoothness = Constants.rotation_smoothness
+        eps = Constants.epsilon
+        min_collision_speed = Constants.min_collision_speed
+        world_width = Constants.world_width
+        world_height = Constants.world_height
+        load_with_action = Constants.load_with_action
+        shield_leak_factor = 1 - Constants.shield_half_leak_period ** (1 / tps)
 
         # move bullets
         for bullet in self._bullets:
