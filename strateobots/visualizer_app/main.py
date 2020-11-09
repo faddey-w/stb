@@ -3,7 +3,7 @@ import argparse
 import itertools
 import os
 from tornado import web, ioloop
-from strateobots.engine import BotType
+from strateobots.models import BotType
 from strateobots.ai.lib.bot_initializers import (
     random_bot_initializer,
     duel_bot_initializer,

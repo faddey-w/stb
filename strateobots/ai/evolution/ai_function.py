@@ -1,6 +1,6 @@
 import math
 from .lib import ComputeGraph
-from strateobots.engine import BotType, Action
+from strateobots.models import BotType, Action
 from strateobots.ai.lib.util import map_struct
 
 

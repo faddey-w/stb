@@ -1,6 +1,6 @@
 from math import pi, atan
 from functools import partial
-from strateobots.engine import BotType, Action
+from strateobots.models import BotType, Action
 from . import base
 
 

@@ -1,5 +1,5 @@
 from math import pi
-from strateobots.engine import Constants, BotType
+from strateobots.models import Constants, BotType
 from strateobots.ai.evolution.lib import (
     atan2,
     asin,

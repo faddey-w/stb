@@ -1,5 +1,5 @@
 from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
-from strateobots.engine import Constants, BotType, Action
+from strateobots.models import Constants, BotType, Action
 from strateobots.util import objedict, dist_points, vec_len, dist_line, vec_dot
 from . import base
 import logging
