@@ -125,13 +125,12 @@ class StbEngine:
             type=bottype,
             id=len(self._bots),
             orientation=orientation,
+            tower_orientation=tower_orientation,
+            hp=hp,
             team=team,
             x=x,
             y=y,
         )
-        bot.tower_orientation = tower_orientation
-        if hp is not None:
-            bot.hp = hp
         self._bots[bot.id] = bot
         self._controls[bot.id] = BotControl()
         self._n_bots[team] += 1
