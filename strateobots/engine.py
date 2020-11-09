@@ -608,21 +608,12 @@ class StbEngine:
     def _serialize_game_state(self):
         team_bots_visible_data = {t: [] for t in self.teams}
         team_bots_full_data = {t: [] for t in self.teams}
-        bullets = [
-            _to_dict(bullet, BulletModel.FIELDS)
-            for bullet in self.iter_bullets()
-        ]
-        rays = [
-            _to_dict(ray, BulletModel.FIELDS)
-            for ray in self.iter_rays()
-        ]
-        explosions = [
-            _to_dict(explosion, ExplosionModel.FIELDS)
-            for explosion in self.iter_bullets()
-        ]
+        bullets = [bullet.serialize() for bullet in self.iter_bullets()]
+        rays = [ray.serialize() for ray in self.iter_rays()]
+        explosions = [explosion.serialize() for explosion in self.iter_explosions()]
         for bot in self.iter_bots():
-            team_bots_visible_data[bot.team].append(_to_dict(bot, BotModel.VISIBLE_FIELDS))
-            team_bots_full_data[bot.team].append(_to_dict(bot, BotModel.ALL_FIELDS))
+            team_bots_visible_data[bot.team].append(bot.serialize(with_hidden=False))
+            team_bots_full_data[bot.team].append(bot.serialize())
         return team_bots_full_data, team_bots_visible_data, bullets, rays, explosions
 
     @property
@@ -819,6 +810,16 @@ class BotModel:
     def has_shield(self):
         return self.shield_warmup > Constants.minimum_shield_warmup and self.shield > 0
 
+    def serialize(self, with_hidden=True):
+        if with_hidden:
+            dct = _to_dict(self, BotModel.ALL_FIELDS)
+        else:
+            dct = _to_dict(self, BotModel.VISIBLE_FIELDS)
+        dct["type"] = dct["type"].code
+        dct["hp"] = dct.pop("hp_ratio")
+        dct["shield"] = dct.pop("shield_ratio")
+        return dct
+
 
 BotModel.ALL_FIELDS = tuple(
     [
@@ -865,6 +866,11 @@ class BulletModel:
         self.cos = cos(value)
         self.sin = sin(value)
 
+    def serialize(self):
+        dct = _to_dict(self, self.FIELDS)
+        dct["type"] = dct["type"].code
+        return dct
+
 
 @dataclasses.dataclass
 class ExplosionModel:
@@ -882,6 +888,9 @@ class ExplosionModel:
     @property
     def is_ended(self):
         return self.t >= self.duration
+
+    def serialize(self):
+        return _to_dict(self, ExplosionModel.FIELDS)
 
 
 ExplosionModel.FIELDS = tuple(ExplosionModel.__annotations__.keys())
