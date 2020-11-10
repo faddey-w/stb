@@ -188,6 +188,9 @@ class BotModel:
         dct["shield"] = dct.pop("shield_ratio")
         return dct
 
+    def __hash__(self):
+        return hash(self.id)
+
 
 BotModel.ALL_FIELDS = tuple(
     [

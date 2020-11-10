@@ -1,8 +1,6 @@
 import random
 import logging
-import sys
 import copy
-import inspect
 from math import sin, cos, sqrt
 from strateobots.util import (
     vec_rotate,
@@ -34,33 +32,21 @@ class StbEngine:
 
     def __init__(
         self,
-        ai1,
-        ai2,
-        initialize_bots,
         max_ticks=1000,
         wait_after_win=1,
         wait_after_win_ticks=None,
         teams=None,
-        stop_all_after_finish=False,
-        collect_replay=True,
-        debug=False,
     ):
-        self.stop_all_after_finish = stop_all_after_finish
         self.teams = self.team1, self.team2 = teams or self.TEAMS
         self._bots = {}
         self._rays = {}
         self._bullets = []
         self._explosions = []
-        self.collect_replay = collect_replay
-        self.replay = []
-        self.debug = debug
 
         self._controls = {}
 
         self._n_bots = {self.team1: 0, self.team2: 0}
 
-        self.has_error = False
-        self.exc_info = None
         self.nticks = 0
         self.max_ticks = max_ticks
         self._win_reached_at = None
@@ -68,16 +54,10 @@ class StbEngine:
             wait_after_win_ticks = Constants.ticks_per_sec * wait_after_win
         self._wait_after_win = max(1, wait_after_win_ticks)
 
-        self.ai1 = ai1
-        self.ai2 = ai2
-        self.initialize_bots = initialize_bots
-        initialize_bots(self)
-
-    def clone(self, with_explosions, with_replay, using_class=None):
+    def clone(self, with_explosions, using_class=None):
         if using_class is None:
             using_class = self.__class__
-        clone = using_class(self.ai1, self.ai2, lambda engine: None)
-        clone.stop_all_after_finish = self.stop_all_after_finish
+        clone = using_class()
         clone.teams = self.teams
         clone.team1 = self.team1
         clone.team2 = self.team2
@@ -88,16 +68,10 @@ class StbEngine:
             clone._explosions = [copy.copy(expl) for expl in self._explosions]
         else:
             clone._explosions = []
-        if with_replay:
-            clone.replay = copy.deepcopy(self.replay)
-        else:
-            clone.replay = []
 
         clone._controls = {bot_id: copy.copy(ctl) for bot_id, ctl in self._controls.items()}
         clone._n_bots = self._n_bots.copy()
 
-        clone.has_error = self.has_error
-        clone.exc_info = self.exc_info
         clone.nticks = self.nticks
         clone.max_ticks = self.max_ticks
         clone._win_reached_at = self._win_reached_at
@@ -137,62 +111,6 @@ class StbEngine:
         return bot
 
     def tick(self):
-        self.communicate_with_ais()
-        self.update_game_state()
-
-    def communicate_with_ais(self):
-
-        # process AI
-        (
-            bots_full_data,
-            bots_visible_data,
-            bullets_data,
-            rays_data,
-            explosions_data,
-        ) = self._serialize_game_state()
-        if Constants.full_information:
-            bots_visible_data = bots_full_data
-        control1_data = control2_data = None
-        try:
-            control1_data = self._communicate_with_ai(
-                self.ai1,
-                bots_full_data[self.team1],
-                bots_visible_data[self.team2],
-                bullets_data,
-                rays_data,
-            )
-            control2_data = self._communicate_with_ai(
-                self.ai2,
-                bots_full_data[self.team2],
-                bots_visible_data[self.team1],
-                bullets_data,
-                rays_data,
-            )
-        except KeyboardInterrupt:
-            raise
-        except:
-            if self.debug:
-                raise
-            log.exception("ERROR while processing AI")
-            self.has_error = True
-            self.exc_info = sys.exc_info()
-            return
-        finally:
-            if self.collect_replay:
-                self.replay.append(
-                    {
-                        "bots": bots_full_data,
-                        "bullets": bullets_data,
-                        "rays": rays_data,
-                        "controls": {
-                            self.team1: control1_data,
-                            self.team2: control2_data,
-                        },
-                        "explosions": explosions_data,
-                    }
-                )
-
-    def update_game_state(self):
         next_bullets = []
         next_rays = {}
         tps = float(Constants.ticks_per_sec)
@@ -237,10 +155,6 @@ class StbEngine:
             a_sin = sin(a_angle)
             a_cos = cos(a_angle)
 
-            # v = vec_len(bot.vx, bot.vy)
-            # v_cos = bot.vx / v if v else a_cos
-            # v_sin = bot.vy / v if v else a_sin
-
             # acceleration
             f_cos = f_sin = None
             if ctl.move != 0:
@@ -258,17 +172,6 @@ class StbEngine:
                     acc += typ.bonus_acc / tps
                 bot.vx -= fvx
                 bot.vy -= fvy
-                # else:
-                #     max_speed = typ.max_ahead_speed if ctl.move == 1 else typ.max_back_speed
-                #     fvx = bot.vx - max_speed * a_cos
-                #     fvy = bot.vy - max_speed * a_sin
-                #     fv = vec_len(fvx, fvy) or 1
-                #     f_cos = fvx / fv
-                #     f_sin = fvy / fv
-                #     fvx = bot.vx
-                #     fvy = bot.vy
-                #     acc = 0
-                #     bot.vx = bot.vy = 0
             else:
                 acc = 0
                 fvx = bot.vx
@@ -301,9 +204,9 @@ class StbEngine:
             else:
                 extra_speed = 0
             if ctl.move == 1:
-                v_coeff = max(1, v / (typ.max_ahead_speed + extra_speed))
+                v_coeff = max(1., v / (typ.max_ahead_speed + extra_speed))
             else:
-                v_coeff = max(1, v / (typ.max_back_speed + extra_speed))
+                v_coeff = max(1., v / (typ.max_back_speed + extra_speed))
             bot.vx /= v_coeff
             bot.vy /= v_coeff
 
@@ -558,53 +461,26 @@ class StbEngine:
             self._win_reached_at is not None
             and self.nticks >= self._win_reached_at + self._wait_after_win
             or self.nticks >= self.max_ticks
-            or self.has_error
         )
 
     @property
     def win_condition_reached(self):
         return sum(1 for n in self._n_bots.values() if n > 0) <= 1
 
-    def _communicate_with_ai(self, ai, friendly_bots, enemy_bots, bullets, rays):
-        if self.win_condition_reached:
-            if self.stop_all_after_finish:
-                for ctl in self._controls.values():
-                    ctl.action = Action.IDLE
-                    ctl.move = 0
-                    ctl.rotate = 0
-                    ctl.tower_rotate = 0
-            return None
-        controls = ai(
-            {
-                "tick": self.nticks,
-                "friendly_bots": friendly_bots,
-                "enemy_bots": enemy_bots,
-                "bullets": bullets,
-                "rays": rays,
-            }
-        )
-        allowed_ids = {bot["id"] for bot in friendly_bots}
-        for ctl_data in controls:
-            bot_id = ctl_data["id"]
-            if bot_id not in allowed_ids:
-                continue
-            ctl = self._controls[bot_id]
-            for attr in BotControl.FIELDS:
-                value = ctl_data.get(attr)
-                if value is not None:
-                    setattr(ctl, attr, value)
-        return controls
-
-    def _serialize_game_state(self):
-        team_bots_visible_data = {t: [] for t in self.teams}
-        team_bots_full_data = {t: [] for t in self.teams}
+    def serialize_state(self):
+        team_bots = {t: [] for t in self.teams}
         bullets = [bullet.serialize() for bullet in self.iter_bullets()]
         rays = [ray.serialize() for ray in self.iter_rays()]
         explosions = [explosion.serialize() for explosion in self.iter_explosions()]
         for bot in self.iter_bots():
+            team_bots[bot.team].append(bot.serialize())
+        return dict(bots=team_bots, bullets=bullets, rays=rays, explosions=explosions)
+
+    def serialize_bots_visible_state(self):
+        team_bots_visible_data = {t: [] for t in self.teams}
+        for bot in self.iter_bots():
             team_bots_visible_data[bot.team].append(bot.serialize(with_hidden=False))
-            team_bots_full_data[bot.team].append(bot.serialize())
-        return team_bots_full_data, team_bots_visible_data, bullets, rays, explosions
+        return team_bots_visible_data
 
     @property
     def time(self):
@@ -618,32 +494,6 @@ class StbEngine:
             n = self._n_bots.get(team, 0)
             if n > 0:
                 return team
-
-    def get_metadata(self):
-        ai1_type = self.ai1 if inspect.isfunction(self.ai1) else self.ai1.__class__
-        ai2_type = self.ai2 if inspect.isfunction(self.ai2) else self.ai2.__class__
-        initer = self.initialize_bots
-        init_type = initer if inspect.isfunction(initer) else initer.__class__
-        metadata = dict(
-            init_name=f"{init_type.__module__}.{init_type.__name__}",
-            ai1_module=ai1_type.__module__,
-            ai1_name=ai1_type.__name__,
-            ai2_module=ai2_type.__module__,
-            ai2_name=ai2_type.__name__,
-            team1=str(self.team1),
-            team2=str(self.team2),
-        )
-        if self.is_finished:
-            metadata["nticks"] = self.nticks
-            if self.win_condition_reached:
-                metadata["winner"] = str(self.get_any_nonloser_team())
-            else:
-                metadata["winner"] = None
-        return metadata
-
-    def play_all(self):
-        while not self.is_finished:
-            self.tick()
 
 
 def absorb_damage_by_shield(bot, damage):

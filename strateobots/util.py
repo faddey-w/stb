@@ -106,7 +106,7 @@ def replay_descriptor_from_simulation(simulation):
     return {
         "id": simulation.sim_id,
         "finished": False,
-        "nticks": simulation.engine.nticks,
+        "nticks": simulation.game.engine.nticks,
         **simulation.metadata,
     }
 
@@ -178,7 +178,8 @@ def make_metadata_before_game(init_name, ai1_module, ai1_name, ai2_module, ai2_n
     )
 
 
-def fill_metadata_after_game(metadata, engine):
+def fill_metadata_after_game(metadata, game):
+    engine = game.engine
     metadata["team1"] = str(engine.team1)
     metadata["team2"] = str(engine.team2)
     metadata["nticks"] = engine.nticks
@@ -186,7 +187,7 @@ def fill_metadata_after_game(metadata, engine):
         metadata["winner"] = str(engine.get_any_nonloser_team())
     else:
         metadata["winner"] = None
-    for key, val in engine.get_metadata().items():
+    for key, val in game.get_metadata().items():
         metadata.setdefault(key, val)
     return metadata
 

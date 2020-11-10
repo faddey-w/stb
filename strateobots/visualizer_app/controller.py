@@ -1,6 +1,8 @@
 import logging
 import time
+import dataclasses
 from tornado import gen
+from strateobots.game import StbGame
 from strateobots.engine import StbEngine
 from strateobots.util import replay_descriptor_from_simulation
 from strateobots.util import replay_descriptor_from_storage
@@ -29,9 +31,7 @@ class ServerState:
 
         self.refresh_launch_params()
 
-    def add_game_simulation(
-        self, bot_initializer_id, ai1_id, ai2_id
-    ) -> "SimulationState":
+    def add_game_simulation(self, bot_initializer_id, ai1_id, ai2_id) -> "SimulationState":
         try:
             bot_init_name, bot_init = self.bot_initializers[bot_initializer_id]
         except IndexError:
@@ -50,20 +50,15 @@ class ServerState:
         ai2 = ai2_mod.construct_ai_function(team2, params2)
 
         simul = self._make_simulation(
+            ai1,
+            ai2,
+            bot_init,
             metadata=make_metadata_before_game(
                 init_name=bot_init_name,
                 ai1_module=ai1_mod.name,
                 ai1_name=func_name1,
                 ai2_module=ai2_mod.name,
                 ai2_name=func_name2,
-            ),
-            params=dict(
-                ai1=ai1,
-                ai2=ai2,
-                initialize_bots=bot_init,
-                max_ticks=config.GAME_MAX_TICKS,
-                wait_after_win=1,
-                stop_all_after_finish=True,
             ),
         )
         log.info(
@@ -78,14 +73,10 @@ class ServerState:
         return simul
 
     def list_replays(self) -> "list":
-        running_replays = [
-            replay_descriptor_from_simulation(sim) for sim in self._request_queue
-        ]
+        running_replays = [replay_descriptor_from_simulation(sim) for sim in self._request_queue]
 
         keys = self.storage.list_keys()
-        finished_replays = [
-            replay_descriptor_from_storage(self.storage, key) for key in keys
-        ]
+        finished_replays = [replay_descriptor_from_storage(self.storage, key) for key in keys]
 
         replays = running_replays + finished_replays
         replays.sort(key=lambda rep: rep["id"], reverse=True)
@@ -123,8 +114,10 @@ class ServerState:
     def currently_runs(self):
         return len(self._request_queue) > 0
 
-    def _make_simulation(self, metadata, params):
-        engine = StbEngine(**params)
+    def _make_simulation(self, ai1, ai2, bot_init, metadata):
+        game = StbGame(
+            StbEngine(max_ticks=config.GAME_MAX_TICKS, wait_after_win=1), ai1, ai2, bot_init
+        )
         sim_id = time.strftime("%Y%m%d_%H%M%S")
         ex_keys = self._list_used_keys()
         suffix = 0
@@ -132,39 +125,36 @@ class ServerState:
         while unique_sim_id in ex_keys:
             suffix += 1
             unique_sim_id = "{}_{}".format(sim_id, suffix)
-        simul = SimulationState(engine, metadata, unique_sim_id)
+        simul = SimulationState(game, metadata, unique_sim_id)
         return simul
 
     @gen.coroutine
     def _run_simulation(self, simul):
         # this is CPU-intensive, so yield between ticks
         log.info("RUN simulation %r", simul.sim_id)
-        while not simul.engine.is_finished and not simul.cancelled:
+        while not simul.game.is_finished and not simul.cancelled:
             yield
-            simul.engine.tick()
-            if simul.engine.nticks % 100 == 0:
-                log.debug("TICK %r: %s", simul.sim_id, simul.engine.nticks)
+            simul.game.play_one_tick()
+            if simul.game.engine.nticks % 100 == 0:
+                log.debug("TICK %r: %s", simul.sim_id, simul.game.engine.nticks)
         yield
-        fill_metadata_after_game(simul.metadata, simul.engine)
+        fill_metadata_after_game(simul.metadata, simul.game)
         log.info(
             "FINISH simulation %r %s",
             simul.sim_id,
             "(cancelled)" if simul.cancelled else "",
         )
         if not simul.cancelled:
-            self.storage.save_replay(simul.sim_id, simul.metadata, simul.engine.replay)
+            self.storage.save_replay(simul.sim_id, simul.metadata, simul.game.replay)
         self._request_queue.remove(simul)
 
     def _list_used_keys(self):
         return self.storage.list_keys() + [sim.sim_id for sim in self._request_queue]
 
 
+@dataclasses.dataclass
 class SimulationState:
-    def __init__(self, engine, metadata, sim_id):
-        """
-        :type engine: strateobots.engine.StbEngine
-        """
-        self.sim_id = sim_id
-        self.engine = engine
-        self.metadata = metadata
-        self.cancelled = False
+    game: StbGame
+    metadata: dict
+    sim_id: str
+    cancelled: bool = False
