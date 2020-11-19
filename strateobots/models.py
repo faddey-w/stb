@@ -155,6 +155,8 @@ class BotModel:
     is_firing: bool = False
 
     HIDDEN_FIELDS = "load", "rot_speed", "tower_rot_speed", "shot_ready"
+    ALL_FIELDS = ()  # defined after class
+    VISIBLE_FIELDS = ()  # defined after class
 
     def __post_init__(self):
         if self.hp is None:
