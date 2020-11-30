@@ -1,8 +1,9 @@
 #! /usr/bin/env PYTHONPATH=. python3
 import argparse
-from strateobots.engine import StbEngine, BotType
+from strateobots.engine import StbEngine
+from strateobots.models import BotType
 from strateobots import replay, util
-from strateobots.ai.lib.bot_initializers import random_bot_initializer
+from strateobots.bot_initializers import RandomInitializer
 
 
 def main():
@@ -14,7 +15,7 @@ def main():
     ap.add_argument("--config", "-C", default="config.ini")
     opts = ap.parse_args()
 
-    bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
+    bot_init = RandomInitializer([BotType.Raider], [BotType.Raider])
 
     function1 = util.get_object_by_config(opts.config, "ai." + opts.ai1)
     function2 = util.get_object_by_config(opts.config, "ai." + opts.ai2)

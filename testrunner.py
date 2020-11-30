@@ -1,7 +1,8 @@
 import argparse
 import importlib
-from strateobots.engine import StbEngine, BotType
-from strateobots.ai.lib import bot_initializers
+from strateobots.engine import StbEngine
+from strateobots.models import BotType
+from strateobots import bot_initializers
 from strateobots.ai import simple_duel
 
 
@@ -14,7 +15,7 @@ def main():
     typemap = {'R': BotType.Raider, 'T': BotType.Heavy, 'L': BotType.Sniper}
     t1, t2 = opts.matchup.upper().split('V')
 
-    initializer = bot_initializers.duel_bot_initializer(typemap[t1], typemap[t2], 0.7)
+    initializer = bot_initializers.DuelInitializer(typemap[t1], typemap[t2], 0.7)
 
     aipath = opts.aipath
     if '/' in aipath and aipath.endswith('.py'):

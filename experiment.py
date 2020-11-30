@@ -4,9 +4,9 @@ import subprocess
 import threading
 import itertools
 import sys
-from strateobots.engine import StbEngine, BotType
-from strateobots.ai.lib import bot_initializers
-from strateobots import replay, util
+from strateobots.engine import StbEngine
+from strateobots.models import BotType
+from strateobots import replay, util, bot_initializers
 
 
 def main():
@@ -101,7 +101,7 @@ def worker(storage_dir, t1, t2, ai1_path, ai1_name, ai2_path, ai2_name, suffix):
 
     typemap = {'R': BotType.Raider, 'T': BotType.Heavy, 'L': BotType.Sniper}
 
-    initializer = bot_initializers.duel_bot_initializer(typemap[t1], typemap[t2], 0.7)
+    initializer = bot_initializers.DuelInitializer(typemap[t1], typemap[t2], 0.7)
 
     ai1_mod = importlib.import_module(ai1_path).AIModule()
     ai1 = ai1_mod.construct_ai_function(StbEngine.TEAMS[0], ai1_name)

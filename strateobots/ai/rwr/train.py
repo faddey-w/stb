@@ -4,11 +4,12 @@ import shutil
 import os
 import tensorflow as tf
 import numpy as np
-from strateobots.engine import StbEngine, BotType
+from strateobots.engine import StbEngine
+from strateobots.models import BotType
 from strateobots import util
-from strateobots.ai.lib.bot_initializers import random_bot_initializer
+from strateobots.bot_initializers import RandomInitializer
 from strateobots.ai.lib import model_function, replay
-from strateobots.ai.models import ff_direct, ff_aim_angle
+from strateobots.ai.models import ff_aim_angle
 from strateobots.ai import simple_duel
 from strateobots.ai.rwr.core import RewardWeightedRegression
 
@@ -71,7 +72,7 @@ class RWRTraining:
         )
         self.function = model_function.ModelAiFunction(self.model, self.sess)
 
-        self.bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
+        self.bot_init = RandomInitializer([BotType.Raider], [BotType.Raider])
         self.bot_init_name = "Random RvR"
         self.n_batches_per_loop = 1
 

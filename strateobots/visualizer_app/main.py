@@ -4,11 +4,7 @@ import itertools
 import os
 from tornado import web, ioloop
 from strateobots.models import BotType
-from strateobots.ai.lib.bot_initializers import (
-    random_bot_initializer,
-    duel_bot_initializer,
-    random_sided_bot_initializer,
-)
+from strateobots.bot_initializers import DuelInitializer, RandomInitializer, RandomSidedInitializer
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
@@ -36,7 +32,7 @@ def main(argv=None):
     duel_matchups = [
         (
             "Duel {}v{}".format(t1, t2),
-            duel_bot_initializer(typemap[t1], typemap[t2], 0.7),
+            DuelInitializer(typemap[t1], typemap[t2], 0.7),
         )
         for t1, t2 in itertools.combinations_with_replacement("RTL", 2)
     ]
@@ -45,19 +41,15 @@ def main(argv=None):
         ts1, ts2 = matchup.split("v")
         ts1 = [typemap[t] for t in ts1]
         ts2 = [typemap[t] for t in ts2]
-        random_matchups.append(("Random " + matchup, random_bot_initializer(ts1, ts2)))
+        random_matchups.append(("Random " + matchup, RandomInitializer(ts1, ts2)))
     sided_matchups = []
     for matchup in config.SIDED_MATCH_SETTINGS:
         ts1, ts2 = matchup.split("v")
         ts1 = [typemap[t] for t in ts1]
         ts2 = [typemap[t] for t in ts2]
-        sided_matchups.append(
-            ("Sided " + matchup, random_sided_bot_initializer(ts1, ts2))
-        )
+        sided_matchups.append(("Sided " + matchup, RandomSidedInitializer(ts1, ts2)))
 
-    default_module = base.DefaultAIModule(
-        [*duel_matchups, *random_matchups, *sided_matchups]
-    )
+    default_module = base.DefaultAIModule([*duel_matchups, *random_matchups, *sided_matchups])
     simple_ais = simple_duel.AIModule()
     ai_modules = [
         default_module,

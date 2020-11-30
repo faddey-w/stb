@@ -7,8 +7,9 @@ import numpy as np
 import tensorflow as tf
 from strateobots.ai.lib import model_function, model_saving, data_encoding, data
 from strateobots.ai import nets
-from strateobots.engine import StbEngine, BotType
-from strateobots.ai.lib.bot_initializers import random_bot_initializer
+from strateobots.engine import StbEngine
+from strateobots.models import BotType
+from strateobots.bot_initializers import RandomInitializer
 from strateobots import util
 
 ENTROPY_WEIGHT = None  # 0.0000
@@ -245,7 +246,7 @@ class Worker:
         buf_a = {ctl: [] for ctl in self.controls}
         buf_v = []
 
-        bot_init = random_bot_initializer([BotType.Raider], [BotType.Raider])
+        bot_init = RandomInitializer([BotType.Raider], [BotType.Raider])
         engine = StbEngine(
             ai1=agent_function,
             ai2=opponent_function,
