@@ -16,6 +16,7 @@ def _get_decoded(coder, original):
     code = coder.encode(original)
     assert isinstance(code, np.ndarray)
     assert code.ndim == 1
+    assert code.dtype == "float64"
     return coder.decode(code)
 
 

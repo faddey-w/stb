@@ -10,7 +10,7 @@ from strateobots.models import BotType
 class DuelInitializer:
     type1: BotType
     type2: BotType
-    distance_ratio: float
+    distance_ratio: float = 0.7
 
     def __call__(self, engine: StbEngine):
         y = engine.get_constants().world_height / 2

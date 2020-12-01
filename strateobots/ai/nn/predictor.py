@@ -1,0 +1,64 @@
+import torch.nn
+from strateobots.ai import coding
+from strateobots.ai.nn.embedder import Embedder
+
+
+class Set2SetPredictor(torch.nn.Module):
+    def __init__(self, object_dim):
+        super(Set2SetPredictor, self).__init__()
+
+        self.bot_embedder = Embedder(coding.bot_full_coder.dim, object_dim)
+        self.ctl_embedder = Embedder(coding.control_coder.dim, object_dim)
+        self.bullet_embedder = Embedder(coding.bullet_coder.dim, object_dim)
+        self.ray_embedder = Embedder(coding.bullet_coder.dim, object_dim)
+
+        self.encoder = torch.nn.TransformerEncoder(
+            torch.nn.TransformerEncoderLayer(
+                object_dim,
+                nhead=4,
+                dim_feedforward=4 * object_dim,
+                dropout=0.1,
+                activation="relu",
+            ),
+            num_layers=3,
+            norm=torch.nn.LayerNorm(object_dim),
+        )
+        self.bot_predictor = torch.nn.Sequential(
+            torch.nn.Linear(object_dim, 2 * object_dim, bias=True),
+            torch.nn.LeakyReLU(),
+        )
+        self.double()
+        self._reset_parameters()
+
+    def forward(
+        self,
+        bot_vectors_batch,
+        controls_vector_batch,
+        bullet_vectors_batch,
+        ray_vectors_batch,
+        bot_vectors_batch_next=None,
+        bullet_vectors_batch_next=None,
+        ray_vectors_batch_next=None,
+    ):
+        bot_vectors, bots_mask = bot_vectors_batch
+        ctl_vectors, ctls_mask = controls_vector_batch
+        bullet_vectors, bullets_mask = bullet_vectors_batch
+        ray_vectors, rays_mask = ray_vectors_batch
+
+        bot_embeddings = self.bot_embedder(bot_vectors)
+        ctl_embeddings = self.ctl_embedder(ctl_vectors)
+        bullet_embeddings = self.bullet_embedder(bullet_vectors)
+        ray_embeddings = self.ray_embedder(ray_vectors)
+
+        all_embeddings = torch.cat(
+            [bot_embeddings, ctl_embeddings, bullet_embeddings, ray_embeddings], dim=0
+        )
+        all_mask = torch.cat([bots_mask, ctls_mask, bullets_mask, rays_mask], dim=1)
+
+        memory = self.encoder(all_embeddings, src_key_padding_mask=all_mask)
+        return memory
+
+    def _reset_parameters(self):
+        for p in self.parameters():
+            if p.dim() > 1:
+                torch.nn.init.xavier_uniform_(p)
