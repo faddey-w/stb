@@ -212,7 +212,7 @@ control_coder = FieldCoder.from_dataclass(
 
 @dataclass
 class WorldStateCodes:
-    bots: Union[Dict[object, "[ N BotDim ]"], "[ N BotDim ]"] = None
+    bots: "Union[Dict[object, '[ N BotDim ]'], '[ N BotDim ]']" = None
     bullets: "[ N BulletDim ]" = None
     rays: "[ N RayDim ]" = None
     controls: "[ N ControlDim ]" = None
@@ -251,7 +251,7 @@ class WorldStateCodes:
             "controls": {control_coder.dim: control_coder},
         }
 
-        def _decode_and_set(_, attr, key):
+        def _decode_and_set(_, attr, key=None):
             data = self[attr, key]
             coder = coders[attr][data.shape[1]]
             objects = coder.batch_decode(data)
@@ -271,7 +271,7 @@ class WorldStateCodes:
         result = cls()
         pad_masks = cls()
 
-        def _collate_and_set(_, attr, key):
+        def _collate_and_set(_, attr, key=None):
             result[attr, key], pad_masks[attr, key] = utils.collate_sequences_with_padding(
                 [s[attr, key] for s in states], insert_batch_dim=insert_batch_dim
             )
@@ -283,7 +283,7 @@ class WorldStateCodes:
     def get_batch_size(self, batch_axis=0) -> int:
         result = None
 
-        def _get_batch_size(_, attr, key):
+        def _get_batch_size(_, attr, key=None):
             nonlocal result
             thing = self[attr, key]
             if result is None and thing.ndim > 2:
@@ -319,7 +319,7 @@ class WorldStateCodes:
 
         copy = self.__class__()
 
-        def to_torch(_, attr, key):
+        def to_torch(_, attr, key=None):
             copy[attr, key] = torch.tensor(self[attr, key])
 
         self._map(to_torch)
@@ -330,7 +330,7 @@ class WorldStateCodes:
 
         copy = self.__class__()
 
-        def to_numpy(_, attr, key):
+        def to_numpy(_, attr, key=None):
             copy[attr, key] = self[attr, key].numpy()
 
         self._map(to_numpy)
@@ -367,8 +367,11 @@ class WorldStateCodes:
         else:
             attr = item
             key = None
-        attr_value = getattr(self, attr)
-        if attr_value is None:
-            attr_value = {}
-            setattr(self, attr, attr_value)
-        attr_value[key] = value
+        if key is not None:
+            attr_value = getattr(self, attr)
+            if attr_value is None:
+                attr_value = {}
+                setattr(self, attr, attr_value)
+            attr_value[key] = value
+        else:
+            setattr(self, attr, value)
