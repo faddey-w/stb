@@ -212,10 +212,10 @@ control_coder = FieldCoder.from_dataclass(
 
 @dataclass
 class WorldStateCodes:
-    bots: Union[Dict[object, np.ndarray], np.ndarray] = None
-    bullets: np.ndarray = None
-    rays: np.ndarray = None
-    controls: np.ndarray = None
+    bots: Union[Dict[object, "[ N BotDim ]"], "[ N BotDim ]"] = None
+    bullets: "[ N BulletDim ]" = None
+    rays: "[ N RayDim ]" = None
+    controls: "[ N ControlDim ]" = None
 
     @classmethod
     def from_engine(
@@ -244,35 +244,23 @@ class WorldStateCodes:
     def decode(self):
         result = {}
 
-        def _decode(attr, coder):
-            data = getattr(self, attr)
-            if isinstance(data, dict):
-                result[attr] = {key: coder[key].batch_decode(item) for key, item in data.items()}
-            else:
-                result[attr] = coder.batch_decode(data)
+        coders = {
+            "bots": {bot_full_coder.dim: bot_full_coder, bot_visible_coder.dim: bot_visible_coder},
+            "bullets": {bullet_coder.dim: bullet_coder},
+            "rays": {ray_coder.dim: ray_coder},
+            "controls": {control_coder.dim: control_coder},
+        }
 
-        if self.bots is not None:
-            if isinstance(self.bots, dict):
-                bot_coder = {
-                    team: bot_full_coder
-                    if matrix.shape[1] == bot_full_coder.dim
-                    else bot_visible_coder
-                    for team, matrix in self.bots.items()
-                }
+        def _decode_and_set(_, attr, key):
+            data = self[attr, key]
+            coder = coders[attr][data.shape[1]]
+            objects = coder.batch_decode(data)
+            if key is None:
+                result[attr] = objects
             else:
-                bot_coder = (
-                    bot_full_coder
-                    if self.bots.shape[1] == bot_full_coder.dim
-                    else bot_visible_coder
-                )
-            _decode("bots", bot_coder)
+                result.setdefault(attr, {})[key] = objects
 
-        if self.bullets is not None:
-            _decode("bullets", bullet_coder)
-        if self.rays is not None:
-            _decode("rays", ray_coder)
-        if self.controls is not None:
-            _decode("controls", control_coder)
+        self._map(_decode_and_set)
 
         return result
 
@@ -283,34 +271,28 @@ class WorldStateCodes:
         result = cls()
         pad_masks = cls()
 
-        def _collate(getter):
-            return utils.collate_sequences_with_padding(
-                [getter(s) for s in states], insert_batch_dim=insert_batch_dim
+        def _collate_and_set(_, attr, key):
+            result[attr, key], pad_masks[attr, key] = utils.collate_sequences_with_padding(
+                [s[attr, key] for s in states], insert_batch_dim=insert_batch_dim
             )
 
-        if states[0].bots is not None:
-            if isinstance(states[0].bots, dict):
-                result.bots, pad_masks.bots = {}, {}
-                for team in states[0].bots.keys():
-                    result.bots, pad_masks.bots = _collate(lambda s: s.bots[team])
-            else:
-                result.bots, pad_masks.bots = _collate(lambda s: s.bots)
-        if states[0].bullets is not None:
-            result.bullets, pad_masks.bullets = _collate(lambda s: s.bullets)
-        if states[0].rays is not None:
-            result.rays, pad_masks.rays = _collate(lambda s: s.rays)
-        if states[0].controls is not None:
-            result.controls, pad_masks.controls = _collate(lambda s: s.controls)
+        states[0]._map(_collate_and_set)
+
         return result, pad_masks
 
-    def get_batch_size(self, batch_axis=0):
-        for thing in (self.bots, self.bullets, self.rays, self.controls):
-            if thing is None:
-                continue
-            if isinstance(thing, dict):
-                thing = next(iter(thing.values()))
-            if thing.ndim > 2:
-                return thing.shape[batch_axis]
+    def get_batch_size(self, batch_axis=0) -> int:
+        result = None
+
+        def _get_batch_size(_, attr, key):
+            nonlocal result
+            thing = self[attr, key]
+            if result is None and thing.ndim > 2:
+                result = thing.shape[batch_axis]
+
+        self._map(_get_batch_size)
+
+        # noinspection PyTypeChecker
+        return result
 
     def unbatch(self, pad_masks=None, batch_axis=0):
         batch_size = self.get_batch_size(batch_axis)
@@ -318,28 +300,75 @@ class WorldStateCodes:
             raise ValueError(f"{self} is not batched")
         result = [self.__class__() for _ in range(batch_size)]
 
-        def _unbatch_and_set(getter, setter):
-            data = getter(self)
+        def mapfunc(_, attr, key=None):
+            data = self[attr, key]
             if pad_masks is not None:
-                mask = getter(pad_masks)
+                mask = pad_masks[attr, key]
             else:
                 mask = None
-            for i in batch_size:
+            for i in range(batch_size):
                 matrix = np.take(data, i, batch_axis)
                 if mask is not None:
                     matrix = matrix[np.take(mask == 0, i, batch_axis)]
-                setter(result[i], matrix)
+                result[i][attr, key] = matrix
 
+        self._map(mapfunc)
+
+    def numpy_to_torch(self):
+        import torch
+
+        copy = self.__class__()
+
+        def to_torch(_, attr, key):
+            copy[attr, key] = torch.tensor(self[attr, key])
+
+        self._map(to_torch)
+
+        return copy
+
+    def torch_to_numpy(self):
+
+        copy = self.__class__()
+
+        def to_numpy(_, attr, key):
+            copy[attr, key] = self[attr, key].numpy()
+
+        self._map(to_numpy)
+
+        return copy
+
+    def _map(self, function):
         if isinstance(self.bots, dict):
-            for wsc in result:
-                wsc.bots = {}
             for team in self.bots.keys():
-                _unbatch_and_set(lambda s: s.bots[team], lambda s, m: s.bots.__setitem__(team, m))
+                function(self, "bots", team)
         elif self.bots is not None:
-            _unbatch_and_set(lambda s: s.bots, lambda s, m: setattr(s, "bots", m))
+            function(self, "bots")
         if self.bullets is not None:
-            _unbatch_and_set(lambda s: s.bullets, lambda s, m: setattr(s, "bullets", m))
+            function(self, "bullets")
         if self.rays is not None:
-            _unbatch_and_set(lambda s: s.rays, lambda s, m: setattr(s, "rays", m))
+            function(self, "rays")
         if self.controls is not None:
-            _unbatch_and_set(lambda s: s.controls, lambda s, m: setattr(s, "controls", m))
+            function(self, "controls")
+
+    def __getitem__(self, item):
+        if isinstance(item, tuple):
+            attr, key = item
+        else:
+            attr = item
+            key = None
+        value = getattr(self, attr)
+        if key is not None:
+            value = value[key]
+        return value
+
+    def __setitem__(self, item, value):
+        if isinstance(item, tuple):
+            attr, key = item
+        else:
+            attr = item
+            key = None
+        attr_value = getattr(self, attr)
+        if attr_value is None:
+            attr_value = {}
+            setattr(self, attr, attr_value)
+        attr_value[key] = value

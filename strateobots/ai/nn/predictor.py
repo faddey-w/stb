@@ -30,30 +30,23 @@ class Set2SetPredictor(torch.nn.Module):
         self.double()
         self._reset_parameters()
 
-    def forward(
-        self,
-        bot_vectors_batch,
-        controls_vector_batch,
-        bullet_vectors_batch,
-        ray_vectors_batch,
-        bot_vectors_batch_next=None,
-        bullet_vectors_batch_next=None,
-        ray_vectors_batch_next=None,
-    ):
-        bot_vectors, bots_mask = bot_vectors_batch
-        ctl_vectors, ctls_mask = controls_vector_batch
-        bullet_vectors, bullets_mask = bullet_vectors_batch
-        ray_vectors, rays_mask = ray_vectors_batch
+    def forward(self, state_batch: coding.WorldStateCodes, mask_batch: coding.WorldStateCodes):
+        return self.compute_internal_repr(state_batch, mask_batch)
 
-        bot_embeddings = self.bot_embedder(bot_vectors)
-        ctl_embeddings = self.ctl_embedder(ctl_vectors)
-        bullet_embeddings = self.bullet_embedder(bullet_vectors)
-        ray_embeddings = self.ray_embedder(ray_vectors)
+    def compute_internal_repr(
+        self, state_batch: coding.WorldStateCodes, mask_batch: coding.WorldStateCodes
+    ):
+        bot_embeddings = self.bot_embedder(state_batch.bots)
+        ctl_embeddings = self.ctl_embedder(state_batch.controls)
+        bullet_embeddings = self.bullet_embedder(state_batch.bullets)
+        ray_embeddings = self.ray_embedder(state_batch.rays)
 
         all_embeddings = torch.cat(
             [bot_embeddings, ctl_embeddings, bullet_embeddings, ray_embeddings], dim=0
         )
-        all_mask = torch.cat([bots_mask, ctls_mask, bullets_mask, rays_mask], dim=1)
+        all_mask = torch.cat(
+            [mask_batch.bots, mask_batch.controls, mask_batch.bullets, mask_batch.rays], dim=1
+        )
 
         memory = self.encoder(all_embeddings, src_key_padding_mask=all_mask)
         return memory
