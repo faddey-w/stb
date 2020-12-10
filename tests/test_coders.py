@@ -1,4 +1,5 @@
 import pytest
+import random
 import numpy as np
 from strateobots.ai.coding import (
     bot_type_coder,
@@ -7,9 +8,12 @@ from strateobots.ai.coding import (
     bullet_coder,
     ray_coder,
     control_coder,
+    WorldStateCodes,
 )
 from strateobots.models import BotModel, BulletModel, BotType, BotControl, Action
 from strateobots.engine import StbEngine
+from strateobots.bot_initializers import RandomInitializer
+from strateobots.util import dist_points
 
 
 def _get_decoded(coder, original):
@@ -107,3 +111,32 @@ def test_control_coder_decoding_intermediate_values():
     vector[control_coder.get_slice("tower_rotate")[0]] = -0.75
     ctl = control_coder.decode(vector)
     assert ctl == BotControl(move=0, rotate=+1, tower_rotate=-1)
+
+
+def test_world_state_codes_encodes_controls_in_the_same_order_as_bots():
+    engine = StbEngine()
+    RandomInitializer([BotType.Raider] * 10, [BotType.Heavy] * 10)(engine)
+    for bot in engine.iter_bots():
+        ctl = engine.get_control(bot)
+        ctl.action = random.choice(Action.ALL)
+        ctl.move = random.choice([-1, 0, +1])
+        ctl.rotate = random.choice([-1, 0, +1])
+        ctl.tower_rotate = random.choice([-1, 0, +1])
+    wsc = WorldStateCodes.from_engine(engine, with_controls=True)
+
+    decoded = wsc.decode()
+    for bot_dec, ctl_dec in zip(decoded['bots'], decoded['controls']):
+        bot_orig = _find_most_similar_bot(engine, bot_dec)
+        ctl_orig = engine.get_control(bot_orig)
+        assert ctl_dec == ctl_orig
+
+
+def _find_most_similar_bot(engine, bot_tgt):
+    bot_orig = None
+    best_dist = float('inf')
+    for bot in engine.iter_bots():
+        dist = dist_points(bot.x, bot.y, bot_tgt.x, bot_tgt.y)
+        if dist < best_dist:
+            bot_orig = bot
+            best_dist = dist
+    return bot_orig

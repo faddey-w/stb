@@ -1,6 +1,7 @@
 import random
 import logging
 import copy
+from typing import Iterable
 from math import sin, cos, sqrt
 from strateobots.util import (
     vec_rotate,
@@ -79,19 +80,19 @@ class StbEngine:
 
         return clone
 
-    def iter_bots(self):
+    def iter_bots(self) -> Iterable[BotModel]:
         return self._bots.values()
 
-    def iter_rays(self):
+    def iter_rays(self) -> Iterable[BulletModel]:
         return self._rays.values()
 
-    def iter_bullets(self):
+    def iter_bullets(self) -> Iterable[BulletModel]:
         return self._bullets
 
-    def iter_explosions(self):
+    def iter_explosions(self) -> Iterable[ExplosionModel]:
         return self._explosions
 
-    def get_control(self, bot):
+    def get_control(self, bot) -> BotControl:
         return self._controls[bot.id]
 
     def add_bot(self, bottype, team, x, y, orientation, tower_orientation, hp=None):
