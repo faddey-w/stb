@@ -336,7 +336,7 @@ function Animator(renderer, fps) {
     }
     function calcFrameByTime() {
         var now = Date.now();
-        return ((now - _startTime) * fps / 1000) | 0;
+        return Math.min(((now - _startTime) * fps / 1000) | 0, _nframes);
     }
 }
 var axisZ = new THREE.Vector3(0, 0, 1);
