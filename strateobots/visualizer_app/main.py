@@ -8,7 +8,7 @@ from strateobots.bot_initializers import DuelInitializer, RandomInitializer, Ran
 from strateobots.visualizer_app import config, handlers
 from strateobots.replay import CachedReplayDataStorage
 from strateobots.visualizer_app.controller import ServerState
-from strateobots.ai import base, physics_demo, simple_duel, guided_by, evolution
+from strateobots.ai import base, physics_demo, simple_duel, guided_by, evolution, simple_team
 
 
 log = logging.getLogger(__name__)
@@ -48,6 +48,15 @@ def main(argv=None):
         ts1 = [typemap[t] for t in ts1]
         ts2 = [typemap[t] for t in ts2]
         sided_matchups.append(("Sided " + matchup, RandomSidedInitializer(ts1, ts2)))
+    sided_matchups.append(
+        (
+            "Sided 30R+L v 30R+L",
+            RandomSidedInitializer(
+                [BotType.Raider] * 30 + [BotType.Sniper],
+                [BotType.Raider] * 30 + [BotType.Sniper],
+            ),
+        )
+    )
 
     default_module = base.DefaultAIModule([*duel_matchups, *random_matchups, *sided_matchups])
     simple_ais = simple_duel.AIModule()
@@ -55,6 +64,7 @@ def main(argv=None):
         default_module,
         physics_demo.AIModule(),
         simple_ais,
+        simple_team.AIModule(),
         evolution.AIModule(),
     ]
 

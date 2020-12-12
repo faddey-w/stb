@@ -38,15 +38,15 @@ class _BaseFunction:
         enemytype = BotType.by_code(enemy.type)
         ctl = objedict()
         ctl.id = bot.id
-        self._make_decision(bot, bottype, enemy, enemytype, ctl)
+        self.make_decision(bot, bottype, enemy, enemytype, ctl)
         return [ctl]
 
-    def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
+    def make_decision(self, bot, bottype, enemy, enemytype, ctl):
         raise NotImplementedError
 
 
 class CloseDistanceAttack(_BaseFunction):
-    def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
+    def make_decision(self, bot, bottype, enemy, enemytype, ctl):
         orbit = bottype.shot_range / 3
 
         dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
@@ -65,7 +65,7 @@ class CloseDistanceAttack(_BaseFunction):
 
 
 class LongDistanceAttack(_BaseFunction):
-    def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
+    def make_decision(self, bot, bottype, enemy, enemytype, ctl):
 
         ctl.update(keep_distance(bot, enemy, bottype))
         navigate_gun(bot, enemy, ctl)
@@ -93,7 +93,7 @@ class RammingAttack(_BaseFunction):
         self.last_v = None
         self.is_ramming = True
 
-    def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
+    def make_decision(self, bot, bottype, enemy, enemytype, ctl):
         if self.last_v is None:
             last_v = 0
         else:
@@ -142,7 +142,7 @@ class RammingAttack(_BaseFunction):
         shield_max_time = bot.shield * bottype.shield_energy / bottype.shield_regen
 
         if self.is_ramming:
-            if v < last_v - 2:
+            if v < min(last_v, bottype.max_ahead_speed) - 2:
                 self.is_ramming = False
             do_ramming = self.is_ramming
         else:
@@ -184,8 +184,8 @@ class RammingAttack(_BaseFunction):
 
 
 class HoldPosition(LongDistanceAttack):
-    def _make_decision(self, bot, bottype, enemy, enemytype, ctl):
-        super(HoldPosition, self)._make_decision(bot, bottype, enemy, enemytype, ctl)
+    def make_decision(self, bot, bottype, enemy, enemytype, ctl):
+        super(HoldPosition, self).make_decision(bot, bottype, enemy, enemytype, ctl)
         ctl.move = 0
 
 
