@@ -1,9 +1,9 @@
 #! /usr/bin/env PYTHONPATH=. python3
 import argparse
-from strateobots.engine import StbEngine
-from strateobots.models import BotType
-from strateobots import replay, util
-from strateobots.bot_initializers import RandomInitializer
+from stb.engine import StbEngine
+from stb.models import BotType
+from stb import replay, util
+from stb.bot_initializers import RandomInitializer
 
 
 def main():

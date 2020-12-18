@@ -1,7 +1,7 @@
 import pytest
 import random
 import numpy as np
-from strateobots.ai.coding import (
+from stb.ai.coding import (
     bot_type_coder,
     bot_full_coder,
     bot_visible_coder,
@@ -10,10 +10,10 @@ from strateobots.ai.coding import (
     control_coder,
     WorldStateCodes,
 )
-from strateobots.models import BotModel, BulletModel, BotType, BotControl, Action
-from strateobots.engine import StbEngine
-from strateobots.bot_initializers import RandomInitializer
-from strateobots.util import dist_points
+from stb.models import BotModel, BulletModel, BotType, BotControl, Action
+from stb.engine import StbEngine
+from stb.bot_initializers import RandomInitializer
+from stb.util import dist_points
 
 
 def _get_decoded(coder, original):

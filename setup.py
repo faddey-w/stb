@@ -4,10 +4,10 @@ from Cython.Build import cythonize
 
 
 setup(
-    name="strateobots",
+    name="stb",
     version="0.2.0",
-    packages=find_packages(include=["strateobots*"]),
-    package_data={"": ["strateobots/visualizer_app/frontend"]},
+    packages=find_packages(include=["stb*"]),
+    package_data={"": ["stb/visualizer_app/frontend"]},
     include_package_data=True,
     install_requires=[
         "tornado",
@@ -16,7 +16,7 @@ setup(
         "cython==0.29.21",
     ],
     ext_modules=cythonize(
-        "strateobots/ai/evolution/evo_core.pyx",
+        "stb/ai/evolution/evo_core.pyx",
         compiler_directives={"language_level": 3},
     ),
 )
