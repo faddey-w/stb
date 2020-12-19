@@ -2,6 +2,12 @@
 from setuptools import setup, find_packages
 from Cython.Build import cythonize
 
+cython_exts = cythonize(
+    "stb/ai/evolution/evo_core.pyx",
+    compiler_directives={"language_level": 3},
+)
+for ext in cython_exts:
+    ext.optional = True
 
 setup(
     name="stb",
@@ -11,12 +17,13 @@ setup(
     include_package_data=True,
     install_requires=[
         "tornado",
-        "tensorflow==1.15",
-        "torch==1.6",
         "cython==0.29.21",
     ],
-    ext_modules=cythonize(
-        "stb/ai/evolution/evo_core.pyx",
-        compiler_directives={"language_level": 3},
-    ),
+    extras_require={
+        "ml": [
+            "tensorflow==1.15",
+            "torch==1.6",
+        ],
+    },
+    ext_modules=cython_exts,
 )

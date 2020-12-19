@@ -8,7 +8,11 @@ from stb.bot_initializers import DuelInitializer, RandomInitializer, RandomSided
 from stb.visualizer_app import config, handlers
 from stb.replay import CachedReplayDataStorage
 from stb.visualizer_app.controller import ServerState
-from stb.ai import base, physics_demo, simple_duel, guided_by, evolution, simple_team
+from stb.ai import base, physics_demo, simple_duel, guided_by, simple_team
+try:
+    from stb.ai import evolution
+except ImportError:
+    evolution = None
 
 
 log = logging.getLogger(__name__)
@@ -65,8 +69,9 @@ def main(argv=None):
         physics_demo.AIModule(),
         simple_ais,
         simple_team.AIModule(),
-        evolution.AIModule(),
     ]
+    if evolution is not None:
+        ai_modules.append(evolution.AIModule())
 
     if args.saved_models_dir is not None:
         from stb.ai import models
