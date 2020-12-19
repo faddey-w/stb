@@ -9,17 +9,6 @@ from stb.visualizer_app import exceptions
 log = logging.getLogger(__name__)
 
 
-class CertificateSignatureAuthHandler:
-    def __init__(self, certificate_path):
-        from stb import cryptoutil
-        with open(certificate_path) as f:
-            self.key = cryptoutil.using_key(f.read())
-
-    def __call__(self, request):
-        # TODO parse signature from request
-        pass
-
-
 def noop_auth_handler(request):
     pass
 
@@ -49,10 +38,12 @@ class _BaseHandler(web.RequestHandler):
                 )
         self.api_respond(result)
 
-    def get_int(self, value):
+    def get_int(self, value, or_none=False):
         try:
             return int(value)
         except:
+            if or_none and value is None:
+                return None
             raise web.HTTPError(400)
 
     def get_json_argument(self, key):
@@ -111,14 +102,15 @@ class GameViewHandler(_BaseHandler):
          - start: int - index of first tick in segment
          - count: int - number of ticks to send, length of segment
         """
-        start = self.get_int(self.get_query_argument("start"))
-        count = self.get_int(self.get_query_argument("count"))
+        start = self.get_int(self.get_query_argument("start", None), or_none=True)
+        count = self.get_int(self.get_query_argument("count", None), or_none=True)
+        end = (start or 0) + count if count is not None else None
         try:
             data = self.state.get_replay_data(sim_id)
         except replay.SimulationNotFound as snf:
             raise exceptions.SimulationNotFound(snf.key)
         total_len = len(data)
-        data = data[start : start + count]
+        data = data[start : end]
         self.api_respond({"count": len(data), "total": total_len, "data": data})
 
     def delete(self, sim_id):

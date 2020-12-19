@@ -1,5 +1,5 @@
 
-angular.module("StbsApp", [
+angular.module("StbApp", [
     'ngStorage'
 ]).controller("StbController", function($scope, $timeout, $localStorage, $http, $q) {
 
