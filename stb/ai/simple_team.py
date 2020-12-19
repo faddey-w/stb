@@ -1,6 +1,6 @@
-from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
+from math import sqrt, cos, sin
 from stb.models import Constants, BotType, Action
-from stb.util import objedict, dist_points, vec_len, dist_line, vec_dot
+from stb.util import SimpleObject, dist_points, dist_line, vec_dot
 from . import base
 from stb.ai.simple_duel import LongDistanceAttack, CloseDistanceAttack, RammingAttack
 import logging
@@ -36,16 +36,20 @@ class _BaseFunction:
         targets = self.assign_targets(state["friendly_bots"], state["enemy_bots"])
         ctls = []
         for bot, (opp_bot, strategy) in zip(state["friendly_bots"], targets):
-            ctl = objedict()
+            ctl = SimpleObject()
             ctl.id = bot["id"]
             strategy(
-                objedict(bot), self.get_type(bot), objedict(opp_bot), self.get_type(opp_bot), ctl
+                SimpleObject(bot),
+                self.get_type(bot),
+                SimpleObject(opp_bot),
+                self.get_type(opp_bot),
+                ctl,
             )
-            ctls.append(ctl)
+            ctls.append(ctl.__dict__)
         for bot, ctl, (opp_bot, _) in zip(state["friendly_bots"], ctls, targets):
-            if ctl.action == Action.FIRE:
+            if ctl["action"] == Action.FIRE:
                 if self.need_block_friendly_fire(bot, opp_bot, state["friendly_bots"]):
-                    ctl.action = Action.IDLE
+                    ctl["action"] = Action.IDLE
         return ctls
 
     def assign_targets(self, bots, opp_bots):

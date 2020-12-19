@@ -1,6 +1,6 @@
-from math import pi, acos, sqrt, asin, copysign, cos, sin, atan2
+from math import pi, sqrt, asin, copysign, cos, sin, atan2
 from stb.models import Constants, BotType, Action
-from stb.util import objedict, dist_points, vec_len, dist_line, vec_dot
+from stb.util import SimpleObject, dist_points, vec_len, dist_line, vec_dot
 from . import base
 import logging
 
@@ -32,14 +32,14 @@ class AIModule(base.AIModule):
 
 class _BaseFunction:
     def __call__(self, state):
-        bot = objedict(state["friendly_bots"][0])
-        enemy = objedict(state["enemy_bots"][0])
+        bot = SimpleObject(state["friendly_bots"][0])
+        enemy = SimpleObject(state["enemy_bots"][0])
         bottype = BotType.by_code(bot.type)
         enemytype = BotType.by_code(enemy.type)
-        ctl = objedict()
+        ctl = SimpleObject()
         ctl.id = bot.id
         self.make_decision(bot, bottype, enemy, enemytype, ctl)
-        return [ctl]
+        return [ctl.__dict__]
 
     def make_decision(self, bot, bottype, enemy, enemytype, ctl):
         raise NotImplementedError
@@ -61,13 +61,13 @@ class CloseDistanceAttack(_BaseFunction):
             else:
                 action = Action.IDLE
         ctl.action = action
-        ctl.update(move_to_back(bot, enemy, orbit))
+        move_to_back(bot, enemy, orbit, ctl)
 
 
 class LongDistanceAttack(_BaseFunction):
     def make_decision(self, bot, bottype, enemy, enemytype, ctl):
 
-        ctl.update(keep_distance(bot, enemy, bottype))
+        keep_distance(bot, enemy, bottype, ctl)
         navigate_gun(bot, enemy, ctl)
 
         action = Action.IDLE
@@ -130,8 +130,7 @@ class RammingAttack(_BaseFunction):
             contact_speed = v_r + max_acc * contact_time
         else:
             contact_time = (
-                time_to_max_speed
-                + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
+                time_to_max_speed + (contact_dist - dist_to_max_speed) / bottype.max_ahead_speed
             )
             contact_speed = bottype.max_ahead_speed
 
@@ -151,9 +150,7 @@ class RammingAttack(_BaseFunction):
         action = Action.IDLE
 
         can_ram_with_shield = (
-            shield_start_time + 0.1
-            < contact_time
-            < shield_start_time + 0.9 * shield_max_time
+            shield_start_time + 0.1 < contact_time < shield_start_time + 0.9 * shield_max_time
         )
         if can_ram_with_shield and do_ramming:
             shield = (
@@ -189,7 +186,7 @@ class HoldPosition(LongDistanceAttack):
         ctl.move = 0
 
 
-def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coeff=1.3):
+def move_to_back(bot, enemy, orbit_radius, ctl, max_speed=None, apocenter_at_back_coeff=1.3):
     if max_speed is None:
         max_speed = sqrt(500 * orbit_radius)
 
@@ -197,9 +194,7 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
     ori_angle = norm_angle(bot.orientation)
 
-    if dist > apocenter_at_back_coeff * orbit_radius or not is_at_back(
-        enemy, enemy_angle + pi
-    ):
+    if dist > apocenter_at_back_coeff * orbit_radius or not is_at_back(enemy, enemy_angle + pi):
         # decide - move to left side from enemy or to right
         # determine target point - nearest point on orbit
         pt_angle = asin(orbit_radius / dist) if orbit_radius < dist else pi / 2
@@ -226,39 +221,32 @@ def move_to_back(bot, enemy, orbit_radius, max_speed=None, apocenter_at_back_coe
         rotate = 0
         target_orientation = ori_angle
         move_aim = bot.x, bot.y
-    return dict(
-        move=move,
-        rotate=rotate,
-        orientation=target_orientation,
-        move_aim_x=move_aim[0],
-        move_aim_y=move_aim[1],
-    )
+    ctl.move = move
+    ctl.rotate = rotate
+    ctl.orientation = target_orientation
+    ctl.move_aim_x = move_aim[0]
+    ctl.move_aim_y = move_aim[1]
 
 
-def keep_distance(bot, enemy, bottype, max_ahead_v=100):
+def keep_distance(bot, enemy, bottype, ctl, max_ahead_v=100):
     # slowly move ahead if target is too far to shoot
     # move back if target is within fire range to keep distance
     dist = dist_points(bot.x, bot.y, enemy.x, enemy.y)
     if dist > 0.9 * bottype.shot_range:
         v = vec_len(bot.vx, bot.vy)
         if v > max_ahead_v:
-            move = 0
+            ctl.move = 0
         else:
-            move = +1
+            ctl.move = +1
     else:
-        move = -1
+        ctl.move = -1
 
     # try to keep target in front
     enemy_angle = atan2((enemy.y - bot.y), (enemy.x - bot.x))
-    rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
-
-    return dict(
-        move=move,
-        rotate=rotate,
-        orientation=enemy_angle,
-        move_aim_x=enemy.x,
-        move_aim_y=enemy.y,
-    )
+    ctl.rotate = navigate_shortest(bot, enemy_angle, with_gun=False)
+    ctl.orientation = enemy_angle
+    ctl.move_aim_x = enemy.x
+    ctl.move_aim_y = enemy.y
 
 
 def norm_angle(angle):

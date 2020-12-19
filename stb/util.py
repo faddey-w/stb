@@ -3,7 +3,6 @@ import time
 import sys
 import contextlib
 import signal
-from collections import UserDict
 import configparser
 import importlib
 from math import sin, cos, sqrt
@@ -115,40 +114,13 @@ def replay_descriptor_from_storage(storage, key):
     return {"id": key, "finished": True, **storage.load_metadata(key)}
 
 
-class objedict(UserDict):
-    def __getitem__(self, item):
-        return _objedict_wrap_nested(super(objedict, self).__getitem__(item))
+class SimpleObject:
+    def __init__(self, dictionary=None):
+        if dictionary is not None:
+            self.__dict__ = dictionary
 
-    def __getattr__(self, item):
-        return self[item]
-
-    def __setattr__(self, key, value):
-        try:
-            self.__dict__["data"][key] = value
-        except KeyError:
-            super(objedict, self).__setattr__(key, value)
-
-    @property
-    def __class__(self):
-        return dict
-
-
-DictWithAttrAccess = objedict
-
-
-def _objedict_wrap_nested(value):
-    typ = type(value)
-    if typ is dict:
-        value = objedict(value)
-    elif typ in (list, tuple, set, frozenset):
-        value = typ(map(_objedict_wrap_flat, value))
-    return value
-
-
-def _objedict_wrap_flat(value):
-    if type(value) is dict:
-        value = objedict(value)
-    return value
+    def __getattr__(self, item):  # removes pycharm warning
+        raise AttributeError(item)
 
 
 @contextlib.contextmanager
