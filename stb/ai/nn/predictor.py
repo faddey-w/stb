@@ -1,5 +1,5 @@
 import torch.nn
-from stb.ai import coding
+from stb.ai import datacoding
 from stb.ai.nn.embedder import Embedder
 
 
@@ -7,9 +7,9 @@ class Set2SetPredictor(torch.nn.Module):
     def __init__(self, object_dim):
         super(Set2SetPredictor, self).__init__()
 
-        self.bot_ctl_embedder = Embedder(coding.bot_full_coder.dim + coding.control_coder.dim, object_dim)
-        self.bullet_embedder = Embedder(coding.bullet_coder.dim, object_dim)
-        self.ray_embedder = Embedder(coding.bullet_coder.dim, object_dim)
+        self.bot_ctl_embedder = Embedder(datacoding.bot_full_coder.dim + datacoding.control_coder.dim, object_dim)
+        self.bullet_embedder = Embedder(datacoding.bullet_coder.dim, object_dim)
+        self.ray_embedder = Embedder(datacoding.bullet_coder.dim, object_dim)
 
         self.encoder = torch.nn.TransformerEncoder(
             torch.nn.TransformerEncoderLayer(
@@ -29,11 +29,11 @@ class Set2SetPredictor(torch.nn.Module):
         self.double()
         self._reset_parameters()
 
-    def forward(self, state_batch: coding.WorldStateCodes, mask_batch: coding.WorldStateCodes):
+    def forward(self, state_batch: datacoding.WorldStateCodes, mask_batch: datacoding.WorldStateCodes):
         return self.compute_internal_repr(state_batch, mask_batch)
 
     def compute_internal_repr(
-        self, state_batch: coding.WorldStateCodes, mask_batch: coding.WorldStateCodes
+        self, state_batch: datacoding.WorldStateCodes, mask_batch: datacoding.WorldStateCodes
     ):
         bot_ctl_embeddings = self.bot_ctl_embedder(torch.cat(
             [state_batch.bots,state_batch.controls], dim=2

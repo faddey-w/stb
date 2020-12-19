@@ -1,7 +1,7 @@
 import pytest
 import random
 import numpy as np
-from stb.ai.coding import (
+from stb.ai.datacoding import (
     bot_type_coder,
     bot_full_coder,
     bot_visible_coder,
