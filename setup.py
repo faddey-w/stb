@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
+import os
 from setuptools import setup, find_packages
 from Cython.Build import cythonize
 
-cython_exts = cythonize(
-    "stb/ai/evolution/evo_core.pyx",
-    compiler_directives={"language_level": 3},
-)
-for ext in cython_exts:
-    ext.optional = True
+cython_exts = []
+if not os.getenv("STB_NO_EVOCORE"):
+    cython_exts.extend(
+        cythonize(
+            "stb/ai/evolution/evo_core.pyx",
+            compiler_directives={"language_level": 3},
+        )
+    )
 
 setup(
     name="stb",
