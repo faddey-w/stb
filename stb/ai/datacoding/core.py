@@ -99,7 +99,7 @@ class FieldCoder(Coder[dict]):
             curr_offs += dim
 
     @classmethod
-    def from_dataclass(cls, data_class, *, _exclude=(), **fields):
+    def from_dataclass(cls, data_class, *, _exclude=(), _dict_mode=False, **fields):
         import dataclasses
 
         fields_result = {**fields}
@@ -126,17 +126,23 @@ class FieldCoder(Coder[dict]):
                 read_only.discard(name)
                 fields_result[name] = field
 
-        write_dummies = {
-            dc_field.name
-            for dc_field in dataclasses.fields(data_class)
-            if dc_field.init and dc_field.name in _exclude
-        }
+        if _dict_mode:
+            constructor = dict
+            getter = operator.getitem
+        else:
+            write_dummies = {
+                dc_field.name
+                for dc_field in dataclasses.fields(data_class)
+                if dc_field.init and dc_field.name in _exclude
+            }
 
-        def constructor(dict_):
-            dict_ = {**{name: None for name in write_dummies}, **dict_}
-            return data_class(**dict_)
+            def constructor(dict_):
+                dict_ = {**{name: None for name in write_dummies}, **dict_}
+                return data_class(**dict_)
 
-        return cls(fields_result, getattr, constructor, read_only=read_only)
+            getter = getattr
+
+        return cls(fields_result, getter, constructor, read_only=read_only)
 
     def encode(self, obj):
         get_fn = self.getter

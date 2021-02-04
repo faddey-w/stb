@@ -190,6 +190,14 @@ class BotModel:
         dct["shield"] = dct.pop("shield_ratio")
         return dct
 
+    @classmethod
+    def from_serialized(cls, serialized_dict):
+        kwargs = {field: serialized_dict.get(field) for field in cls.__annotations__}
+        kwargs["type"] = bottype = BotType.by_code(kwargs["type"])
+        kwargs["hp"] = kwargs["hp"] * bottype.max_hp
+        kwargs["shield"] = kwargs["shield"] * bottype.shield_energy
+        return cls(**kwargs)
+
     def __hash__(self):
         return hash(self.id)
 
@@ -244,6 +252,14 @@ class BulletModel:
         dct["type"] = dct["type"].code
         return dct
 
+    @classmethod
+    def from_serialized(cls, serialized_dict):
+        kwargs = {
+            field: serialized_dict.get(field) for field in cls.FIELDS if field not in ("sin", "cos")
+        }
+        kwargs["type"] = BotType.by_code(kwargs["type"])
+        return cls(**kwargs)
+
 
 @dataclasses.dataclass
 class ExplosionModel:
@@ -266,6 +282,11 @@ class ExplosionModel:
 
     def serialize(self):
         return _to_dict(self, ExplosionModel.FIELDS)
+
+    @classmethod
+    def from_serialized(cls, serialized_dict):
+        kwargs = {field: serialized_dict.get(field) for field in cls.FIELDS}
+        return cls(**kwargs)
 
 
 ExplosionModel.FIELDS = tuple(ExplosionModel.__annotations__.keys())
@@ -291,6 +312,15 @@ class BotControl:
     action: Action = Action.IDLE
 
     FIELDS = ()  # defined after class
+
+    def serialize(self):
+        return _to_dict(self, BotControl.FIELDS)
+
+    @classmethod
+    def from_serialized(cls, serialized_dict):
+        kwargs = {field: serialized_dict.get(field) for field in cls.FIELDS}
+        kwargs["action"] = Action(kwargs["action"])
+        return cls(**kwargs)
 
 
 BotControl.FIELDS = tuple(BotControl.__annotations__.keys())

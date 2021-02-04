@@ -2,7 +2,6 @@ import pytest
 import random
 import numpy as np
 from stb.ai.datacoding import (
-    bot_type_coder,
     bot_full_coder,
     bot_visible_coder,
     bullet_coder,
@@ -17,16 +16,11 @@ from stb.util import dist_points
 
 
 def _get_decoded(coder, original):
-    code = coder.encode(original)
+    code = coder.encode(original.serialize())
     assert isinstance(code, np.ndarray)
     assert code.ndim == 1
     assert code.dtype == "float64"
-    return coder.decode(code)
-
-
-@pytest.mark.parametrize("bot_type", BotType.get_list())
-def test_bot_type_coder(bot_type):
-    assert _get_decoded(bot_type_coder, bot_type) is bot_type
+    return original.__class__.from_serialized(coder.decode(code))
 
 
 def test_bot_full_coder():
@@ -105,11 +99,11 @@ def test_control_coder():
 
 
 def test_control_coder_decoding_intermediate_values():
-    vector = control_coder.encode(BotControl())
+    vector = control_coder.encode(BotControl().serialize())
     vector[control_coder.get_slice("move")[0]] = 0.1
     vector[control_coder.get_slice("rotate")[0]] = 0.55
     vector[control_coder.get_slice("tower_rotate")[0]] = -0.75
-    ctl = control_coder.decode(vector)
+    ctl = BotControl.from_serialized(control_coder.decode(vector))
     assert ctl == BotControl(move=0, rotate=+1, tower_rotate=-1)
 
 
@@ -124,18 +118,19 @@ def test_world_state_codes_encodes_controls_in_the_same_order_as_bots():
         ctl.tower_rotate = random.choice([-1, 0, +1])
     wsc = WorldStateCodes.from_engine(engine, with_controls=True)
 
-    decoded = wsc.decode()
-    for bot_dec, ctl_dec in zip(decoded['bots'], decoded['controls']):
-        bot_orig = _find_most_similar_bot(engine, bot_dec)
-        ctl_orig = engine.get_control(bot_orig)
-        assert ctl_dec == ctl_orig
+    decoded = wsc.to_replay_item()
+    for team in decoded["bots"].keys():
+        for bot_dec, ctl_dec in zip(decoded["bots"][team], decoded["controls"][team]):
+            bot_orig = _find_most_similar_bot(engine, bot_dec)
+            ctl_orig = engine.get_control(bot_orig)
+            assert ctl_dec == ctl_orig.serialize()
 
 
 def _find_most_similar_bot(engine, bot_tgt):
     bot_orig = None
-    best_dist = float('inf')
+    best_dist = float("inf")
     for bot in engine.iter_bots():
-        dist = dist_points(bot.x, bot.y, bot_tgt.x, bot_tgt.y)
+        dist = dist_points(bot.x, bot.y, bot_tgt["x"], bot_tgt["y"])
         if dist < best_dist:
             bot_orig = bot
             best_dist = dist

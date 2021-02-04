@@ -32,11 +32,7 @@ class StbEngine:
     TEAMS = 0x00DD00, 0x0000FF
 
     def __init__(
-        self,
-        max_ticks=1000,
-        wait_after_win=1,
-        wait_after_win_ticks=None,
-        teams=None,
+        self, max_ticks=1000, wait_after_win=1, wait_after_win_ticks=None, teams=None,
     ):
         self.teams = self.team1, self.team2 = teams or self.TEAMS
         self._bots = {}
@@ -94,6 +90,9 @@ class StbEngine:
 
     def get_control(self, bot) -> BotControl:
         return self._controls[bot.id]
+
+    def get_bot(self, bot_id):
+        return self._bots[bot_id]
 
     def add_bot(self, bottype, team, x, y, orientation, tower_orientation, hp=None):
         bot = BotModel(
@@ -205,9 +204,9 @@ class StbEngine:
             else:
                 extra_speed = 0
             if ctl.move == 1:
-                v_coeff = max(1., v / (typ.max_ahead_speed + extra_speed))
+                v_coeff = max(1.0, v / (typ.max_ahead_speed + extra_speed))
             else:
-                v_coeff = max(1., v / (typ.max_back_speed + extra_speed))
+                v_coeff = max(1.0, v / (typ.max_back_speed + extra_speed))
             bot.vx /= v_coeff
             bot.vy /= v_coeff
 
@@ -347,10 +346,7 @@ class StbEngine:
                 for t_i in range(int(t - dt), int(t + dt + 1), 2):
                     self._explosions.append(
                         ExplosionModel(
-                            x=ray.x + t_i * ray.cos,
-                            y=ray.y + t_i * ray.sin,
-                            size=8,
-                            duration=2,
+                            x=ray.x + t_i * ray.cos, y=ray.y + t_i * ray.sin, size=8, duration=2,
                         )
                     )
             damaged.sort(key=lambda item: item[0])

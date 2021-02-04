@@ -1,6 +1,7 @@
 import numpy as np
 from dataclasses import dataclass
-from typing import Union, Dict, Tuple, Sequence
+from collections import defaultdict
+from typing import Tuple, Sequence
 from stb.ai import utils
 from stb.ai.datacoding.definitions import (
     bot_full_coder,
@@ -13,36 +14,45 @@ from stb.ai.datacoding.definitions import (
 
 @dataclass
 class WorldStateCodes:
-    bots: "Union[Dict[object, '[ N BotDim ]'], '[ N BotDim ]']" = None
+    bots: "[ N BotDim ]" = None
     bullets: "[ N BulletDim ]" = None
     rays: "[ N RayDim ]" = None
     controls: "[ N ControlDim ]" = None
 
     @classmethod
-    def from_engine(
-        cls, engine, with_controls=False, split_teams=False, bot_full_data=True
+    def from_replay_item(
+        cls, replay_item, with_controls=False, only_teams=None, bot_full_data=True
     ) -> "WorldStateCodes":
         self = cls()
-        if split_teams:
-            if bot_full_data is True:
-                bot_full_data = engine.teams
-            self.bots = {
-                team: (bot_full_coder if team in bot_full_data else bot_visible_coder).batch_encode(
-                    bot for bot in engine.iter_bots() if bot.team == team
-                )
-                for team in engine.teams
-            }
-        else:
-            coder = bot_full_coder if bot_full_data else bot_visible_coder
-            self.bots = coder.batch_encode(engine.iter_bots())
+        if only_teams is None:
+            only_teams = sorted(replay_item["bots"].keys())
+        bot_coder = bot_full_coder if bot_full_data else bot_visible_coder
+        self.bots = bot_coder.batch_encode(
+            bot for team in only_teams for bot in replay_item["bots"][team]
+        )
 
-        self.bullets = bullet_coder.batch_encode(engine.iter_bullets())
-        self.rays = ray_coder.batch_encode(engine.iter_rays())
+        self.bullets = bullet_coder.batch_encode(replay_item["bullets"])
+        self.rays = ray_coder.batch_encode(replay_item["rays"])
         if with_controls:
-            self.controls = control_coder.batch_encode(map(engine.get_control, engine.iter_bots()))
+            self.controls = control_coder.batch_encode(
+                ctl for team in only_teams for ctl in replay_item["controls"][team]
+            )
+
         return self
 
-    def decode(self):
+    @classmethod
+    def from_engine(
+        cls, engine, with_controls=False, only_teams=None, bot_full_data=True
+    ) -> "WorldStateCodes":
+        replay_item = engine.serialize_state()
+        replay_item["controls"] = {
+            team: [engine.get_control(engine.get_bot(bot["id"])).serialize() for bot in bots]
+            for team, bots in replay_item["bots"].items()
+            if only_teams is None or team in only_teams
+        }
+        return cls.from_replay_item(replay_item, with_controls, only_teams, bot_full_data)
+
+    def to_replay_item(self):
         result = {}
 
         coders = {
@@ -52,16 +62,21 @@ class WorldStateCodes:
             "controls": {control_coder.dim: control_coder},
         }
 
-        def _decode_and_set(_, attr, key=None):
-            data = self[attr, key]
+        def _decode_and_set(_, attr):
+            data = getattr(self, attr)
             coder = coders[attr][data.shape[1]]
-            objects = coder.batch_decode(data)
-            if key is None:
-                result[attr] = objects
-            else:
-                result.setdefault(attr, {})[key] = objects
+            result[attr] = coder.batch_decode(data)
 
         self._map(_decode_and_set)
+
+        bots_per_team = defaultdict(list)
+        ctls_per_team = defaultdict(list)
+        for bot, ctl in zip(result["bots"], result["controls"]):
+            team = bot["team"]
+            bots_per_team[team].append(bot)
+            ctls_per_team[team].append(ctl)
+        result["bots"] = dict(bots_per_team)
+        result["controls"] = dict(ctls_per_team)
 
         return result
 
@@ -72,10 +87,12 @@ class WorldStateCodes:
         result = cls()
         pad_masks = cls()
 
-        def _collate_and_set(_, attr, key=None):
-            result[attr, key], pad_masks[attr, key] = utils.collate_sequences_with_padding(
-                [s[attr, key] for s in states], insert_batch_dim=insert_batch_dim
+        def _collate_and_set(_, attr):
+            data, pad_mask = utils.collate_sequences_with_padding(
+                [getattr(s, attr) for s in states], insert_batch_dim=insert_batch_dim
             )
+            setattr(result, attr, data)
+            setattr(pad_masks, attr, pad_mask)
 
         states[0]._map(_collate_and_set)
 
@@ -84,9 +101,9 @@ class WorldStateCodes:
     def get_batch_size(self, batch_axis=0) -> int:
         result = None
 
-        def _get_batch_size(_, attr, key=None):
+        def _get_batch_size(_, attr):
             nonlocal result
-            thing = self[attr, key]
+            thing = getattr(self, attr)
             if result is None and thing.ndim > 2:
                 result = thing.shape[batch_axis]
 
@@ -101,17 +118,17 @@ class WorldStateCodes:
             raise ValueError(f"{self} is not batched")
         result = [self.__class__() for _ in range(batch_size)]
 
-        def mapfunc(_, attr, key=None):
-            data = self[attr, key]
+        def mapfunc(_, attr):
+            data = getattr(self, attr)
             if pad_masks is not None:
-                mask = pad_masks[attr, key]
+                mask = getattr(pad_masks, attr)
             else:
                 mask = None
             for i in range(batch_size):
                 matrix = np.take(data, i, batch_axis)
                 if mask is not None:
                     matrix = matrix[np.take(mask == 0, i, batch_axis)]
-                result[i][attr, key] = matrix
+                setattr(result[i], attr, matrix)
 
         self._map(mapfunc)
 
@@ -120,8 +137,8 @@ class WorldStateCodes:
 
         copy = self.__class__()
 
-        def to_torch(_, attr, key=None):
-            copy[attr, key] = torch.tensor(self[attr, key])
+        def to_torch(_, attr):
+            setattr(copy, attr, torch.tensor(getattr(self, attr)))
 
         self._map(to_torch)
 
@@ -131,18 +148,15 @@ class WorldStateCodes:
 
         copy = self.__class__()
 
-        def to_numpy(_, attr, key=None):
-            copy[attr, key] = self[attr, key].numpy()
+        def to_numpy(_, attr):
+            setattr(copy, attr, getattr(self, attr).numpy())
 
         self._map(to_numpy)
 
         return copy
 
     def _map(self, function):
-        if isinstance(self.bots, dict):
-            for team in self.bots.keys():
-                function(self, "bots", team)
-        elif self.bots is not None:
+        if self.bots is not None:
             function(self, "bots")
         if self.bullets is not None:
             function(self, "bullets")
@@ -150,29 +164,3 @@ class WorldStateCodes:
             function(self, "rays")
         if self.controls is not None:
             function(self, "controls")
-
-    def __getitem__(self, item):
-        if isinstance(item, tuple):
-            attr, key = item
-        else:
-            attr = item
-            key = None
-        value = getattr(self, attr)
-        if key is not None:
-            value = value[key]
-        return value
-
-    def __setitem__(self, item, value):
-        if isinstance(item, tuple):
-            attr, key = item
-        else:
-            attr = item
-            key = None
-        if key is not None:
-            attr_value = getattr(self, attr)
-            if attr_value is None:
-                attr_value = {}
-                setattr(self, attr, attr_value)
-            attr_value[key] = value
-        else:
-            setattr(self, attr, value)
