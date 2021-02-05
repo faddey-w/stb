@@ -1,6 +1,8 @@
 import pytest
+import copy
 import random
 import numpy as np
+from itertools import chain
 from stb.ai.datacoding import (
     bot_full_coder,
     bot_visible_coder,
@@ -12,6 +14,7 @@ from stb.ai.datacoding import (
 from stb.models import BotModel, BulletModel, BotType, BotControl, Action
 from stb.engine import StbEngine
 from stb.bot_initializers import RandomInitializer
+from stb.ai.replay_generator import ReplayGenerator
 from stb.util import dist_points
 
 
@@ -124,6 +127,40 @@ def test_world_state_codes_encodes_controls_in_the_same_order_as_bots():
             bot_orig = _find_most_similar_bot(engine, bot_dec)
             ctl_orig = engine.get_control(bot_orig)
             assert ctl_dec == ctl_orig.serialize()
+
+
+@pytest.mark.parametrize('repeat_arg', range(5))
+def test_world_state_codes_and_replay_item_conversion(repeat_arg):
+    replay = ReplayGenerator(2, 2, 5, max_ticks=500).generate()
+    replay_item = random.choice(replay[100:])
+    state = WorldStateCodes.from_replay_item(replay_item, with_controls=True)
+    restored = state.to_replay_item()
+
+    expected = copy.deepcopy(replay_item)
+    del expected["explosions"]
+    for botlist in expected["bots"].values():
+        for bot in botlist:
+            # IDs are removed from state vectors:
+            del bot["id"]
+            # computed fields are not restored:
+            del bot["shot_ready"]
+            del bot["has_shield"]
+    for bulletlike in chain(expected["bullets"], expected["rays"]):
+        # IDs are removed from state vectors:
+        del bulletlike["origin_id"]
+        # computed fields are not restored:
+        del bulletlike["sin"]
+        del bulletlike["cos"]
+    for ctllist in expected["controls"].values():
+        for ctl in ctllist:
+            # IDs are removed from state vectors:
+            del ctl["id"]
+            # drop all metadata/debugging outputs
+            for field in list(ctl.keys()):
+                if field not in BotControl.FIELDS:
+                    del ctl[field]
+
+    assert restored == expected
 
 
 def _find_most_similar_bot(engine, bot_tgt):
