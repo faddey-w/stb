@@ -1,4 +1,5 @@
 from stb.ai import base
+from .ai_function import AiFunction
 
 
 class AIModule(base.AIModule):
@@ -17,6 +18,5 @@ class AIModule(base.AIModule):
         return []
 
     def construct_ai_function(self, team, builder_fn):
-        from .ai_function import AiFunction
 
         return AiFunction(builder_fn, 5, 25)
