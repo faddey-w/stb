@@ -71,12 +71,17 @@ class WorldStateCodes:
 
         bots_per_team = defaultdict(list)
         ctls_per_team = defaultdict(list)
-        for bot, ctl in zip(result["bots"], result["controls"]):
-            team = bot["team"]
-            bots_per_team[team].append(bot)
-            ctls_per_team[team].append(ctl)
+        if "controls" in result:
+            for bot, ctl in zip(result["bots"], result["controls"]):
+                team = bot["team"]
+                bots_per_team[team].append(bot)
+                ctls_per_team[team].append(ctl)
+            result["controls"] = dict(ctls_per_team)
+        else:
+            for bot in result["bots"]:
+                team = bot["team"]
+                bots_per_team[team].append(bot)
         result["bots"] = dict(bots_per_team)
-        result["controls"] = dict(ctls_per_team)
 
         return result
 

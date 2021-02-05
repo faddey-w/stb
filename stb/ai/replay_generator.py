@@ -26,7 +26,7 @@ class ReplayGenerator:
     def __next__(self):
         return self.generate()
 
-    def generate(self):
+    def generate(self, with_metadata=False):
         game = StbGame(
             StbEngine(self.max_ticks, wait_after_win_ticks=1),
             TeamCoordinatorV1(),
@@ -34,5 +34,7 @@ class ReplayGenerator:
             self.initializer,
         )
         game.play()
+        if with_metadata:
+            return game.replay, game.get_metadata()
         return game.replay
 
