@@ -29,7 +29,7 @@ log = logging.getLogger(__name__)
 
 class StbEngine:
 
-    TEAMS = 0x00DD00, 0x0000FF
+    TEAMS = "1", "2"
 
     def __init__(
         self, max_ticks=1000, wait_after_win=1, wait_after_win_ticks=None, teams=None,

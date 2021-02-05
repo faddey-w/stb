@@ -1,6 +1,7 @@
 
 function Renderer(container) {
     var HEAVY = 1, RAIDER = 2, SNIPER = 3;
+    var COLOR_MAP = {'1': 0x00DD00, '2': 0x0000FF};
 
     var camera, scene, renderer;
     var worldSize = 1000;
@@ -71,7 +72,7 @@ function Renderer(container) {
 
             var botObj;
             if (botCounters[key] > collection.bots.length) {
-                var color = bot.team;
+                var color = COLOR_MAP[bot.team];
                 switch (bot.type) {
                     case HEAVY: botObj = new HeavyTank(color); break;
                     case RAIDER: botObj = new RaiderTank(color); break;
